@@ -266,6 +266,7 @@ assert.ok(libRs.includes('PromptStore::open_at'), 'lib.rs must open prompts.sqli
 // fullscreen-transparency bug and never replaced programmatically), so every
 // code path was dead. Guard against it creeping back half-wired.
 const tauriConf = JSON.parse(read('src-tauri/tauri.conf.json'));
+const defaultCapability = JSON.parse(read('src-tauri/capabilities/default.json'));
 assert.ok(
   !existsSync(join(root, 'overlay.html')),
   'dead agent-overlay entry point must stay removed',
@@ -274,6 +275,10 @@ assert.ok(!libRs.includes('set_agent_overlay'), 'dead set_agent_overlay command 
 assert.ok(
   !(tauriConf.app?.windows ?? []).some((w) => w.label === 'agent-overlay'),
   'agent-overlay window must not be declared statically (macOS fullscreen+transparent bug)',
+);
+assert.ok(
+  defaultCapability.permissions?.includes('core:window:allow-start-dragging'),
+  'the custom overlay titlebar must be allowed to start native window dragging',
 );
 
 // v0.3.0: Grok-themed CSS tokens
