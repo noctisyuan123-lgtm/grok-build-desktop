@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { marked } from 'marked';
+import { renderMarkdown } from '../markdown';
 import { sanitizeHtml } from '../sanitizeHtml';
 
-// Mirrors the pipeline: assistant text → marked (worker) → sanitizeHtml →
-// dangerouslySetInnerHTML in MessageItem. marked passes raw HTML through
+// Mirrors the pipeline: assistant text → markdown-it (worker) → sanitizeHtml →
+// dangerouslySetInnerHTML in MessageItem. markdown-it passes raw HTML through
 // unmodified, so hostile markup in a model/tool response must be stripped
 // here — while normal markdown (code blocks, links, tables) survives.
 const hostileMarkdown = [
@@ -27,13 +27,13 @@ const hostileMarkdown = [
 ].join('\n');
 
 function parse(md: string): string {
-  return marked.parse(md, { async: false, gfm: true }) as string;
+  return renderMarkdown(md);
 }
 
 describe('sanitizeHtml', () => {
   it('strips script tags and inline event handlers from parsed markdown', () => {
     const html = parse(hostileMarkdown);
-    // Sanity: marked really does let the raw HTML through untouched.
+    // Sanity: markdown-it really does let the raw HTML through untouched.
     expect(html).toContain('<script>');
     expect(html).toContain('onerror');
 
@@ -49,7 +49,9 @@ describe('sanitizeHtml', () => {
     expect(safe).toContain('<h1');
     expect(safe).toContain('<pre');
     expect(safe).toContain('<code');
-    expect(safe).toContain('const x: number = 1;');
+    const rendered = document.createElement('div');
+    rendered.innerHTML = safe;
+    expect(rendered.textContent).toContain('const x: number = 1;');
     expect(safe).toContain('<table');
     expect(safe).toContain('<td>a</td>');
     expect(safe).toMatch(/<a[^>]+href="https:\/\/example\.com\/docs"/);
@@ -62,5 +64,17 @@ describe('sanitizeHtml', () => {
     const safe = sanitizeHtml(highlighted);
     expect(safe).toContain('class="hljs language-ts"');
     expect(safe).toContain('<span class="hljs-keyword">const</span>');
+  });
+
+  it('keeps KaTeX MathML semantics without flattening the TeX annotation', () => {
+    const safe = sanitizeHtml(renderMarkdown('$E=mc^2$'));
+    const rendered = document.createElement('div');
+    rendered.innerHTML = safe;
+
+    expect(rendered.querySelector('math msup')).not.toBeNull();
+    expect(rendered.querySelector('math semantics')).not.toBeNull();
+    expect(rendered.querySelector('math annotation')?.getAttribute('encoding')).toBe(
+      'application/x-tex',
+    );
   });
 });

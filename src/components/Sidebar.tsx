@@ -8,6 +8,8 @@ import {
   ArchiveRestore,
   BookmarkPlus,
   ChevronDown,
+  PanelLeftClose,
+  PanelLeftOpen,
   ClipboardCheck,
   Copy,
   CornerUpLeft,
@@ -56,6 +58,8 @@ export interface SidebarProps {
   isGrokReady: boolean;
   activeModel: string;
   statusLabel: string;
+  sidebarCollapsed: boolean;
+  setSidebarCollapsed: (collapsed: boolean) => void;
 }
 
 export function Sidebar({
@@ -79,6 +83,8 @@ export function Sidebar({
   isGrokReady,
   activeModel,
   statusLabel,
+  sidebarCollapsed,
+  setSidebarCollapsed,
 }: SidebarProps) {
   const {
     pinnedPromptIds,
@@ -277,7 +283,8 @@ export function Sidebar({
   }
 
   return (
-    <aside className="app-sidebar">
+    <>
+      <aside className="app-sidebar">
       <div className="brand">
         <div className="brand-mark">
           <BrandGlyph size={18} />
@@ -288,15 +295,29 @@ export function Sidebar({
         </div>
         {/* The chevron previously looked clickable but did nothing. Now it
               opens the ⌘K palette — the natural "what can I do?" affordance. */}
-        <button
-          className="brand-chevron"
-          type="button"
-          aria-label={t('sidebar.openPalette')}
-          title={t('sidebar.openPaletteTitle')}
-          onClick={() => setPaletteOpen(true)}
-        >
-          <ChevronDown size={16} />
-        </button>
+        <div className="brand-actions">
+          <button
+            className="brand-chevron"
+            type="button"
+            aria-label={t('sidebar.openPalette')}
+            title={t('sidebar.openPaletteTitle')}
+            onClick={() => setPaletteOpen(true)}
+          >
+            <ChevronDown size={16} />
+          </button>
+          {!sidebarCollapsed ? (
+            <button
+              className="sidebar-collapse-button"
+              type="button"
+              aria-label={t('palette.action.collapseSidebar')}
+              title={`${t('palette.action.collapseSidebar')} (⌘B)`}
+              aria-pressed="false"
+              onClick={() => setSidebarCollapsed(true)}
+            >
+              <PanelLeftClose size={16} />
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <section className="nav-section primary-nav" aria-label={t('sidebar.primaryNav')}>
@@ -515,6 +536,19 @@ export function Sidebar({
           <Settings size={16} />
         </span>
       </button>
-    </aside>
+      </aside>
+      {sidebarCollapsed ? (
+        <button
+          className="sidebar-expand-fab"
+          type="button"
+          aria-label={t('palette.action.expandSidebar')}
+          title={`${t('palette.action.expandSidebar')} (⌘B)`}
+          aria-pressed="true"
+          onClick={() => setSidebarCollapsed(false)}
+        >
+          <PanelLeftOpen size={13} />
+        </button>
+      ) : null}
+    </>
   );
 }

@@ -1,15 +1,10 @@
-// The minimal Claude-Desktop-style window title bar: project chip (folder
-// picker), draggable spacer, Stop button / connection pill, theme toggle,
-// and the panels menu trigger. Extracted from App.tsx unchanged.
-import { ChevronDown, FolderGit2, Loader2, Moon, PanelRight, Sun, X } from 'lucide-react';
+// The minimal in-app toolbar: a draggable spacer, Stop/connection state,
+// theme toggle, and panels menu. Project selection lives in Settings/sidebar.
+import { ChevronDown, Moon, PanelRight, Sun, X } from 'lucide-react';
 import type { ThemeMode } from '../app/types';
 import { t } from '../i18n';
 
 export interface TitleBarProps {
-  codingCwd: string;
-  repoName: string;
-  folderPickerBusy: boolean;
-  pickFolder: () => void;
   grokIsRunning: boolean;
   activeRunId: string | null;
   stopRun: (runId: string) => void;
@@ -22,10 +17,6 @@ export interface TitleBarProps {
 }
 
 export function TitleBar({
-  codingCwd,
-  repoName,
-  folderPickerBusy,
-  pickFolder,
   grokIsRunning,
   activeRunId,
   stopRun,
@@ -38,16 +29,6 @@ export function TitleBar({
 }: TitleBarProps) {
   return (
     <header className="window-titlebar minimal" data-tauri-drag-region>
-      <button
-        className="repo-chip"
-        onClick={pickFolder}
-        type="button"
-        disabled={folderPickerBusy}
-        title={codingCwd ? codingCwd : t('titleBar.pickFolderTitle')}
-      >
-        {folderPickerBusy ? <Loader2 className="spin" size={14} /> : <FolderGit2 size={14} />}
-        <span>{repoName}</span>
-      </button>
       <div className="titlebar-spacer" data-tauri-drag-region />
       <div className="titlebar-right">
         {grokIsRunning && activeRunId ? (

@@ -42,6 +42,26 @@ describe('MessageItem sanitization', () => {
 });
 
 describe('MessageItem rendering states', () => {
+  it('shows persisted worked time only when duration metadata exists', () => {
+    const { rerender } = render(
+      <MessageItem runId="msg:timed" fallbackText="finished" durationMs={359_000} />,
+    );
+    expect(screen.getByLabelText('Worked for 5m 59s')).toBeInTheDocument();
+
+    rerender(<MessageItem runId="msg:untimed" fallbackText="legacy" />);
+    expect(screen.queryByText(/Worked for/)).toBeNull();
+  });
+
+  it('uses completed snapshot timestamps and hides worked time while running', () => {
+    applyStateChange('r-timed', { state: 'Running', startedAt: 1_000 });
+    const { rerender } = render(<MessageItem runId="r-timed" />);
+    expect(screen.queryByText(/Worked for/)).toBeNull();
+
+    applyStateChange('r-timed', { state: 'Done', endedAt: 360_000 });
+    rerender(<MessageItem runId="r-timed" />);
+    expect(screen.getByLabelText('Worked for 5m 59s')).toBeInTheDocument();
+  });
+
   it('renders plain fallback text for a restored message with no snapshot or HTML', () => {
     const { container } = render(<MessageItem runId="msg:m2" fallbackText="raw restored text" />);
     const pre = container.querySelector('pre.message-body');
@@ -53,19 +73,19 @@ describe('MessageItem rendering states', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('renders the streaming raw text while the run is live', () => {
+  it('renders raw text only until the first streaming markdown result arrives', () => {
     applyRunEvent('r2', { type: 'text', data: 'streaming toke' });
     const { container } = render(<MessageItem runId="r2" />);
     expect(container.querySelector('pre.streaming-raw')).toHaveTextContent('streaming toke');
   });
 
-  it('swaps to the parsed HTML once the run ends', () => {
+  it('renders parsed markdown while the run is still streaming', () => {
     applyRunEvent('r3', { type: 'text', data: '# heading' });
     streamStore.setHtml('r3', '<h1>heading</h1>');
-    applyRunEvent('r3', { type: 'end', stopReason: 'EndTurn', sessionId: 's', requestId: 'q' });
     const { container } = render(<MessageItem runId="r3" />);
     expect(container.querySelector('h1')).toHaveTextContent('heading');
     expect(container.querySelector('pre.streaming-raw')).toBeNull();
+    expect(container.querySelector('.markdown-streaming')).toBeInTheDocument();
   });
 
   it('announces a failed run in the message area', () => {

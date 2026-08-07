@@ -77,10 +77,10 @@ describe('App boot', () => {
   it('renders the shell and bootstraps through the Tauri IPC surface', async () => {
     const { tauri } = await bootApp();
 
-    // Empty state + composer + idle status bar.
+    // Empty state + composer; idle no longer reserves a redundant status row.
     expect(screen.getByText(t('emptyState.title'))).toBeInTheDocument();
     expect(composerTextarea()).toBeInTheDocument();
-    expect(screen.getByText(t('statusBar.idle'))).toBeInTheDocument();
+    expect(document.querySelector('.status-bar-idle')).not.toBeInTheDocument();
 
     // Sidebar brand + connected pill (auth status came from the mock).
     expect(screen.getByText(t('sidebar.brandTitle'))).toBeInTheDocument();
@@ -157,15 +157,17 @@ describe('composer submit → queued run → streamed reply', () => {
         'Hello from mock grok. All systems streaming.',
       );
     });
-    expect(
-      screen.getByText(t('statusBar.doneWithReason', { reason: 'EndTurn' })),
-    ).toBeInTheDocument();
+    // Live activity is attached below the response only while it is running;
+    // completion removes the caption instead of leaving another status bar.
+    expect(document.querySelector('.run-status-line')).not.toBeInTheDocument();
 
-    // Queue empties → status returns to idle.
+    // Queue empties → the transient run row disappears instead of showing idle.
     await act(async () => {
       await tauri.emitQueue(null, []);
     });
-    expect(await screen.findByText(t('statusBar.idle'))).toBeInTheDocument();
+    await waitFor(() => {
+      expect(document.querySelector('.status-bar-idle')).not.toBeInTheDocument();
+    });
 
     // The finalize write-back persisted the streamed text into messages.
     await waitFor(() => {
@@ -205,6 +207,30 @@ describe('composer submit → queued run → streamed reply', () => {
       await tauri.emitQueue(null, []);
     });
     expect(await screen.findByText(t('message.stopped'))).toBeInTheDocument();
+  });
+
+  it('undoes only the latest completed turn and restores its prompt to the composer', async () => {
+    const ctx = await bootApp();
+    const runId = await submitPrompt(ctx, 'Please revise this prompt');
+    await act(async () => {
+      await ctx.tauri.streamReply(runId, ['A completed answer.']);
+    });
+    await waitFor(() => {
+      expect(document.querySelector('.message-assistant')).toHaveTextContent('A completed answer.');
+    });
+    await ctx.user.type(composerTextarea(), 'Keep this newer draft');
+
+    await ctx.user.click(
+      await convo().findByRole('button', { name: t('message.undoResponse') }),
+    );
+
+    expect(await convo().findByText(t('emptyState.title'))).toBeInTheDocument();
+    expect(composerTextarea().value).toBe('Please revise this prompt');
+    expect(convo().queryByText('A completed answer.')).not.toBeInTheDocument();
+
+    await ctx.user.click(screen.getByRole('button', { name: t('common.undo') }));
+    expect(await convo().findByText('Please revise this prompt')).toBeInTheDocument();
+    expect(composerTextarea().value).toBe('Keep this newer draft');
   });
 
   it('surfaces an enqueue failure as a session notice and keeps the draft', async () => {

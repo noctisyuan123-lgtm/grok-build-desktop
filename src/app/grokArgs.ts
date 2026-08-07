@@ -15,8 +15,10 @@ export interface GrokRunConfig {
   subagentsEnabled: boolean;
   selfCheck: boolean;
   codingCwd: string;
-  /** True when the conversation already has messages (follow-up turn). */
-  continueConversation: boolean;
+  /** Exact conversation head to fork. Avoids cwd-global `-c` leaking undone turns. */
+  resumeSessionId?: string | null;
+  /** Queue-time fallback while the parent run has not emitted its id yet. */
+  continueLatestSession?: boolean;
 }
 
 // The user turn is EXACTLY what the user typed. grok-build already ships a
@@ -92,12 +94,14 @@ export function buildGrokArgs(config: GrokRunConfig): string[] {
   if (config.mode === 'coding' && config.codingCwd.trim()) {
     args.push('--cwd', config.codingCwd.trim());
   }
-  // Auto-continue the current cwd's session when the conversation already
-  // has messages (the user is following up, not starting fresh). This is
-  // what Claude Desktop / Codex do — there's only ever one composer, and
-  // the second message in a conversation implicitly continues the first.
-  if (config.continueConversation) {
-    args.push('-c');
+  // Every turn forks from the UI's visible conversation head. Undoing a turn
+  // therefore moves the head back and the next request cannot see the removed
+  // prompt/reply. `-c` is only a queue-time fallback before the parent run has
+  // returned its session id.
+  if (config.resumeSessionId) {
+    args.push('--resume', config.resumeSessionId, '--fork-session');
+  } else if (config.continueLatestSession) {
+    args.push('-c', '--fork-session');
   }
   return args;
 }

@@ -52,4 +52,109 @@ describe('streamStore', () => {
     expect(calls).toBeGreaterThan(0);
     unsub();
   });
+
+  it('upserts official tool start/update events by toolCallId', () => {
+    applyRunEvent(
+      'tools',
+      { type: 'unknown' },
+      {
+        type: 'tool_call',
+        toolCallId: 'call_1',
+        title: 'Read',
+        status: 'in_progress',
+        rawInput: { path: 'src/App.tsx' },
+      },
+    );
+    const startedAt = streamStore.getRunSnapshot('tools')?.traces[0]?.startedAt;
+    applyRunEvent(
+      'tools',
+      { type: 'unknown' },
+      {
+        type: 'tool_call_update',
+        toolCallId: 'call_1',
+        title: 'Read src/App.tsx',
+        status: 'completed',
+        rawOutput: { lines: 40 },
+      },
+    );
+    const traces = streamStore.getRunSnapshot('tools')?.traces;
+    expect(traces).toHaveLength(1);
+    expect(traces?.[0]).toMatchObject({
+      key: 'tool:call_1',
+      label: 'Read src/App.tsx',
+      status: 'done',
+      startedAt,
+      detail: '{"lines":40}',
+    });
+  });
+
+  it('upserts subagent lifecycle events and preserves the spawn label', () => {
+    applyRunEvent(
+      'agents',
+      { type: 'unknown' },
+      {
+        type: 'subagent_spawned',
+        subagent_id: 'sa_1',
+        description: 'Check the frontend',
+      },
+    );
+    applyRunEvent(
+      'agents',
+      { type: 'unknown' },
+      {
+        type: 'subagent_finished',
+        subagent_id: 'sa_1',
+        status: 'completed',
+        tool_calls: 4,
+      },
+    );
+    const traces = streamStore.getRunSnapshot('agents')?.traces;
+    expect(traces).toHaveLength(1);
+    expect(traces?.[0]).toMatchObject({
+      key: 'subagent:sa_1',
+      label: 'Check the frontend',
+      status: 'done',
+      progress: '4 tools',
+    });
+  });
+
+  it('reconciles open activity when a run reaches every terminal state', () => {
+    for (const [runId, state, expected] of [
+      ['done-run', 'Done', 'done'],
+      ['failed-run', 'Failed', 'error'],
+      ['cancelled-run', 'Cancelled', 'cancelled'],
+    ] as const) {
+      applyRunEvent(
+        runId,
+        { type: 'unknown' },
+        {
+          type: 'tool_call',
+          toolCallId: runId,
+          title: 'Bash',
+          status: 'in_progress',
+        },
+      );
+      applyStateChange(runId, { state });
+      expect(streamStore.getRunSnapshot(runId)?.traces[0]?.status).toBe(expected);
+      expect(streamStore.getRunSnapshot(runId)?.traces[0]?.endedAt).not.toBeNull();
+    }
+  });
+
+  it('stores real usage and promotes stdout error lines to run failures', () => {
+    applyRunEvent(
+      'usage',
+      { type: 'unknown' },
+      {
+        type: 'usage',
+        usage: { input_tokens: 100, output_tokens: 25 },
+      },
+    );
+    expect(streamStore.getRunSnapshot('usage')?.usage?.totalTokens).toBe(125);
+
+    applyRunEvent('usage', { type: 'unknown' }, { type: 'error', message: 'quota exhausted' });
+    expect(streamStore.getRunSnapshot('usage')).toMatchObject({
+      state: 'failed',
+      error: 'quota exhausted',
+    });
+  });
 });

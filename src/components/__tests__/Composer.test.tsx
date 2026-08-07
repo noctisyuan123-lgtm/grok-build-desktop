@@ -51,6 +51,7 @@ describe('Composer submit', () => {
       position: 0,
       prompt: 'fix the bug',
       rawText: 'fix the bug',
+      attachments: [],
     });
     const enqueue = calls.find((c) => c.cmd === 'enqueue_run')!;
     expect(enqueue.payload).toMatchObject({
@@ -123,6 +124,47 @@ describe('Composer submit', () => {
     expect(onTextChange).not.toHaveBeenCalled();
     await user.tab(); // blur
     expect(onTextChange).toHaveBeenCalledWith('draft text');
+  });
+
+  it('attaches selected images and sends them as ACP prompt-json content blocks', async () => {
+    const calls: Array<{ cmd: string; payload: unknown }> = [];
+    mockIPC((cmd, payload) => {
+      calls.push({ cmd, payload });
+      if (cmd === 'enqueue_run') return { runId: 'image-run', position: 0 };
+      return undefined;
+    });
+    const user = userEvent.setup();
+    const { container, onEnqueued, textarea } = renderComposer({ cwd: '/repo' });
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const image = new File(['tiny image'], 'reference.png', { type: 'image/png' });
+
+    fireEvent.change(input, { target: { files: [image] } });
+    expect(await screen.findByText('reference.png')).toBeInTheDocument();
+    await user.type(textarea, 'Describe this');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(onEnqueued).toHaveBeenCalledTimes(1));
+    const enqueue = calls.find((call) => call.cmd === 'enqueue_run')!;
+    const payload = enqueue.payload as { args: string[] };
+    const jsonIndex = payload.args.indexOf('--prompt-json');
+    expect(jsonIndex).toBeGreaterThan(-1);
+    const blocks = JSON.parse(payload.args[jsonIndex + 1]!) as Array<Record<string, string>>;
+    expect(blocks[0]).toMatchObject({ type: 'text' });
+    expect(blocks[1]).toMatchObject({ type: 'image', mimeType: 'image/png' });
+    expect(blocks[1]!.data).toMatch(/^[A-Za-z0-9+/]+=*$/);
+    expect(screen.queryByText('reference.png')).not.toBeInTheDocument();
+  });
+
+  it('accepts dropped files and lets the user remove them before sending', async () => {
+    mockIPC(() => undefined);
+    const user = userEvent.setup();
+    const { textarea } = renderComposer();
+    const file = new File(['notes'], 'notes.txt', { type: 'text/plain' });
+
+    fireEvent.drop(textarea.closest('.composer')!, { dataTransfer: { files: [file] } });
+    expect(await screen.findByText('notes.txt')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Remove notes.txt' }));
+    expect(screen.queryByText('notes.txt')).not.toBeInTheDocument();
   });
 });
 

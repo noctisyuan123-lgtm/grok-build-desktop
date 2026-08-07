@@ -169,6 +169,15 @@ impl RunQueue {
                 .await?;
             let _ = self.tx.send(QueueMessage {
                 run_id: run_id.into(),
+                kind: QueueMessageKind::StateChanged {
+                    state: RunState::Cancelled,
+                    started_at: None,
+                    ended_at: Some(chrono::Utc::now().timestamp_millis()),
+                    error: Some("user cancelled".into()),
+                },
+            });
+            let _ = self.tx.send(QueueMessage {
+                run_id: run_id.into(),
                 kind: QueueMessageKind::QueueChanged,
             });
             return Ok(true);
@@ -202,6 +211,18 @@ impl RunQueue {
                     Some("queue cleared".into()),
                 )
                 .await?;
+            // QueueChanged only describes the remaining queue. Emit a terminal
+            // state for every drained run as well, otherwise its optimistic
+            // assistant message stays in `streaming` forever in the UI.
+            let _ = self.tx.send(QueueMessage {
+                run_id: id.clone(),
+                kind: QueueMessageKind::StateChanged {
+                    state: RunState::Cancelled,
+                    started_at: None,
+                    ended_at: Some(now),
+                    error: Some("queue cleared".into()),
+                },
+            });
         }
         if !drained.is_empty() {
             let _ = self.tx.send(QueueMessage {

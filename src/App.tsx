@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { Globe2, PanelRight, TerminalSquare } from 'lucide-react';
 import './App.css';
@@ -7,7 +14,6 @@ import { hasTauriRuntime } from './lib/runtime';
 import { streamStore } from './lib/streamStore';
 import { MessageList, type MessageRef } from './components/MessageList';
 import type { ComposerHandle } from './components/Composer';
-import { StatusBar } from './components/StatusBar';
 import { QueueDock } from './components/QueueDock';
 import { CommandPalette, type PaletteAction } from './components/CommandPalette';
 import { ToolsPage } from './components/ToolsPage';
@@ -18,7 +24,6 @@ import { EmptyState } from './components/EmptyState';
 import { PreviewPanel } from './components/PreviewPanel';
 import { TerminalDock } from './components/TerminalDock';
 import { Toolbelt } from './components/Toolbelt';
-import { WorkspaceStatusBar } from './components/WorkspaceStatusBar';
 import { TitleBar } from './components/TitleBar';
 import { ComposerSection } from './components/ComposerSection';
 import { SettingsHost } from './components/SettingsHost';
@@ -44,6 +49,17 @@ import { codingPresets, defaultDrafts, storageKeys } from './app/constants';
 import { t } from './i18n';
 import { formatOutput, makeId } from './app/format';
 import { buildGrokArgs } from './app/grokArgs';
+import type { ComposerAttachment } from './lib/attachments';
+
+const SIDEBAR_WIDTH_KEY = 'grok-desktop-sidebar-width';
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 440;
+
+function storedSidebarWidth(): number {
+  const parsed = Number.parseInt(window.localStorage.getItem(SIDEBAR_WIDTH_KEY) ?? '', 10);
+  if (!Number.isFinite(parsed)) return 260;
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, parsed));
+}
 
 function App() {
   // The textarea lives inside Composer (uncontrolled ref). We hold a
@@ -53,6 +69,12 @@ function App() {
     composerRef.current?.setValue(value);
   }, []);
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
+  // Full attachment data is intentionally transient: persisting multi-MB data
+  // URLs in localStorage would exceed its quota. It remains available for the
+  // current app lifetime and is keyed by the stable user-message id.
+  const [messageAttachments, setMessageAttachments] = useState<
+    Record<string, ComposerAttachment[]>
+  >({});
   // Session state (mode/drafts/cwd/theme/history/messages) + localStorage and
   // session_state.json persistence live in hooks/useSessionPersistence.ts.
   const {
@@ -140,6 +162,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     return window.localStorage.getItem('grok-desktop-sidebar-collapsed') === '1';
   });
+  const sidebarWidthRef = useRef(storedSidebarWidth());
   const [dockPosition, setDockPosition] = useState<DockPosition>(() => {
     const stored = window.localStorage.getItem(storageKeys.dockPosition);
     return isDockPosition(stored) ? stored : 'right';
@@ -193,7 +216,6 @@ function App() {
     busyRunner,
     terminalLines,
     setTerminalLines,
-    folderPickerBusy,
     refreshStatuses,
     refreshStaticPreview,
     runShell,
@@ -219,7 +241,6 @@ function App() {
     subagentsEnabled,
     selfCheck,
     activeModel,
-    modelIsVerified,
   } = modelConfig;
   // Clear conversation + run history + terminal — destructive, so it offers
   // an undo window instead of firing blind. The snapshot is cheap (immutable
@@ -269,15 +290,39 @@ function App() {
       setMessages((current) => {
         let changed = false;
         const next = current.map((message) => {
-          if (message.role !== 'assistant' || !message.runId || message.status !== 'streaming') {
+          if (message.role !== 'assistant' || !message.runId) {
             return message;
           }
           const snap = streamStore.getRunSnapshot(message.runId);
+          // The backend's terminal state and streaming `end` event travel on
+          // separate channels. If Done wins the race, a later end event must
+          // still be allowed to attach its session id to the already-finalized
+          // message, otherwise the next turn could not resume the right head.
+          if (message.status !== 'streaming') {
+            if (snap?.sessionId && message.meta?.sessionId !== snap.sessionId) {
+              changed = true;
+              return { ...message, meta: { ...message.meta, sessionId: snap.sessionId } };
+            }
+            return message;
+          }
           if (!snap || snap.state === 'queued' || snap.state === 'running') return message;
           changed = true;
           const status: ChatMessageStatus =
             snap.state === 'done' ? 'done' : snap.state === 'cancelled' ? 'stopped' : 'error';
-          return { ...message, content: snap.text || message.content, status };
+          const durationMs =
+            snap.startedAt != null && snap.endedAt != null
+              ? Math.max(0, snap.endedAt - snap.startedAt)
+              : message.meta?.durationMs;
+          return {
+            ...message,
+            content: snap.text || message.content,
+            status,
+            meta: {
+              ...message.meta,
+              ...(durationMs == null ? {} : { durationMs }),
+              ...(snap.sessionId ? { sessionId: snap.sessionId } : {}),
+            },
+          };
         });
         return changed ? next : current;
       });
@@ -338,6 +383,9 @@ function App() {
   // buildGrokArgs/buildGrokRules are pure functions in app/grokArgs.ts; this
   // closure snapshots the current run config for the Composer's submit path.
   function buildRunArgs(): string[] {
+    const resumeSessionId = [...messages]
+      .reverse()
+      .find((message) => message.role === 'assistant' && message.meta?.sessionId)?.meta?.sessionId;
     return buildGrokArgs({
       mode,
       activeModel,
@@ -351,7 +399,12 @@ function App() {
       subagentsEnabled,
       selfCheck,
       codingCwd,
-      continueConversation: messages.length > 0,
+      resumeSessionId,
+      // Never guess with cwd-global `-c`: on legacy conversations (or a
+      // queued turn whose parent has not ended) it could select an undone or
+      // entirely different tab's session. A missing explicit head starts a
+      // clean branch; once this release records a head, follow-ups are exact.
+      continueLatestSession: false,
     });
   }
 
@@ -360,10 +413,17 @@ function App() {
     position: number;
     prompt: string;
     rawText?: string;
+    attachments: ComposerAttachment[];
   }) {
     const now = Date.now();
     const userMessageId = makeId('u');
     const assistantMessageId = makeId('a');
+    if (info.attachments.length > 0) {
+      setMessageAttachments((current) => ({
+        ...current,
+        [userMessageId]: info.attachments,
+      }));
+    }
     appendMessage({
       id: userMessageId,
       role: 'user',
@@ -484,6 +544,40 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem('grok-desktop-sidebar-collapsed', sidebarCollapsed ? '1' : '0');
   }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--sidebar-width', `${sidebarWidthRef.current}px`);
+    return () => {
+      document.documentElement.style.removeProperty('--sidebar-width');
+    };
+  }, []);
+
+  function startSidebarResize(event: ReactPointerEvent<HTMLDivElement>) {
+    if (sidebarCollapsed || event.button !== 0) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sidebarWidthRef.current;
+    document.body.classList.add('sidebar-resizing');
+
+    const move = (moveEvent: PointerEvent) => {
+      const next = Math.min(
+        SIDEBAR_MAX_WIDTH,
+        Math.max(SIDEBAR_MIN_WIDTH, startWidth + moveEvent.clientX - startX),
+      );
+      sidebarWidthRef.current = Math.round(next);
+      document.documentElement.style.setProperty('--sidebar-width', `${Math.round(next)}px`);
+    };
+    const finish = () => {
+      document.body.classList.remove('sidebar-resizing');
+      window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidthRef.current));
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
+  }
   // ⌘K palette catalogue + global keyboard shortcuts live in
   // hooks/useAppShortcuts.ts.
   const { paletteActions } = useAppShortcuts({
@@ -545,14 +639,6 @@ function App() {
     () => [...paletteActions, ...historyPaletteActions],
     [paletteActions, historyPaletteActions],
   );
-  // Project name shown in the minimal top bar (basename of the cwd).
-  const repoName = useMemo(() => {
-    const trimmed = codingCwd.trim().replace(/\/+$/, '');
-    if (!trimmed) return 'Pick a project';
-    const parts = trimmed.split('/');
-    return parts[parts.length - 1] || trimmed;
-  }, [codingCwd]);
-
   const grokToolStatus = statusMap.grok;
   const isGrokReady = Boolean(grokStatus?.authenticated);
   const statusLabel = grokStatus?.authenticated
@@ -583,11 +669,56 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [grokIsRunning]);
 
+  // "Undo response" is deliberately limited to the latest completed turn.
+  // Removing an older pair would leave later answers backed by context that is
+  // no longer visible. The prompt is restored verbatim to the composer, and
+  // the existing undo toast makes this destructive operation recoverable.
+  function undoAssistantResponse(messageId: string) {
+    if (grokIsRunning) return;
+    const assistantIndex = messages.findIndex((message) => message.id === messageId);
+    if (assistantIndex !== messages.length - 1) return;
+    const assistant = messages[assistantIndex];
+    const user = messages[assistantIndex - 1];
+    if (
+      !assistant ||
+      assistant.role !== 'assistant' ||
+      assistant.status === 'streaming' ||
+      !user ||
+      user.role !== 'user'
+    ) {
+      return;
+    }
+
+    const snapshot = messages;
+    const previousDraft = composerRef.current?.getValue() ?? '';
+    setMessages(messages.slice(0, assistantIndex - 1));
+    updatePrompt(user.content);
+    composerRef.current?.focus();
+    showUndoToast({
+      text: t('message.turnUndone'),
+      undo: () => {
+        setMessages(snapshot);
+        updatePrompt(previousDraft);
+      },
+    });
+  }
+
   const messageRefs: MessageRef[] = useMemo(
-    () =>
-      messages.map((m) =>
+    () => {
+      const latestIndex = messages.length - 1;
+      return messages.map((m, index) =>
         m.role === 'user'
-          ? { runId: '', role: 'user' as const, userText: m.content, id: m.id }
+          ? {
+              runId: '',
+              role: 'user' as const,
+              // Older builds embedded `📎 filename` into the bubble. The
+              // original bytes were never persisted, so we cannot recover a
+              // thumbnail after restart, but we can stop exposing that legacy
+              // pseudo-link. New attachments use the preview strip above.
+              userText: m.content.replace(/\n\n📎[^\n]*$/, ''),
+              id: m.id,
+              attachments: messageAttachments[m.id],
+            }
           : {
               // Live runs keep their real id; restored/legacy assistant
               // messages get a STABLE synthetic id (msg:<id>) so MessageItem
@@ -597,10 +728,13 @@ function App() {
               runId: m.runId || `msg:${m.id}`,
               role: 'assistant' as const,
               fallbackText: m.content,
+              durationMs: m.meta?.durationMs,
               id: m.id,
+              canUndo: index === latestIndex && m.status !== 'streaming' && !grokIsRunning,
             },
-      ),
-    [messages],
+      );
+    },
+    [grokIsRunning, messageAttachments, messages],
   );
   return (
     <main className={`app-shell theme-${themeMode}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
@@ -654,6 +788,15 @@ function App() {
         isGrokReady={isGrokReady}
         activeModel={activeModel}
         statusLabel={statusLabel}
+        sidebarCollapsed={sidebarCollapsed}
+        setSidebarCollapsed={setSidebarCollapsed}
+      />
+      <div
+        className="sidebar-resizer"
+        role="separator"
+        aria-label="Resize sidebar"
+        aria-orientation="vertical"
+        onPointerDown={startSidebarResize}
       />
       <section className={`workspace dock-${dockPosition}`}>
         {/* Minimal, Claude-Desktop-style top bar. The old toolbar row (Repo
@@ -663,10 +806,6 @@ function App() {
             project chip (click → folder picker), a draggable spacer, a tiny
             connection dot, and the contextual Stop button while running. */}
         <TitleBar
-          codingCwd={codingCwd}
-          repoName={repoName}
-          folderPickerBusy={folderPickerBusy}
-          pickFolder={pickFolder}
           grokIsRunning={grokIsRunning}
           activeRunId={activeRunId}
           stopRun={stopRun}
@@ -693,7 +832,7 @@ function App() {
                   onPickStarter={(prompt) => updatePrompt(prompt)}
                 />
               ) : (
-                <MessageList messages={messageRefs} />
+                <MessageList messages={messageRefs} onUndoAssistant={undoAssistantResponse} />
               )}
             </div>
 
@@ -709,8 +848,6 @@ function App() {
                 setSessionNotice(t('notices.queueActionFailed', { error: message }))
               }
             />
-            <StatusBar />
-
             <ComposerSection
               composerRef={composerRef}
               codingCwd={codingCwd}
@@ -784,29 +921,6 @@ function App() {
           terminalDisplay={terminalDisplay}
         />
         <Toolbelt open={toolbeltOpen} onToggle={setToolbeltOpen} runners={runners} />
-        <WorkspaceStatusBar
-          workspacePath={workspacePath}
-          folderPickerBusy={folderPickerBusy}
-          pickFolder={pickFolder}
-          activeModel={activeModel}
-          modelIsVerified={modelIsVerified}
-          actionPolicy={actionPolicy}
-          openModelSettings={() => {
-            setSettingsSection('model');
-            setSettingsOpen(true);
-          }}
-          openPermissionSettings={() => {
-            setSettingsSection('permissions');
-            setSettingsOpen(true);
-          }}
-          grokIsRunning={grokIsRunning}
-          lastRun={lastRun}
-          totalRuns={totalRuns}
-          isGrokReady={isGrokReady}
-          messagesCount={messages.length}
-          historyCount={history.length}
-          clearRunHistory={clearRunHistory}
-        />
       </section>
     </main>
   );

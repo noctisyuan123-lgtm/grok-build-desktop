@@ -8,6 +8,12 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react()],
 
+  // Tauri serves the production bundle from a custom protocol. Relative
+  // asset URLs keep CSS-owned resources (notably KaTeX fonts) on that same
+  // origin instead of resolving them against a protocol root WebKit cannot
+  // reliably load.
+  base: './',
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

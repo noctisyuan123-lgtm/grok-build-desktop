@@ -17,9 +17,18 @@
         "width": 1420,
         "height": 900,
         "minWidth": 1120,
-        "minHeight": 720
+        "minHeight": 720,
+        "transparent": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "windowEffects": {
+          "effects": ["sidebar"],
+          "state": "active",
+          "radius": 12
+        }
       }
     ],
+    "macOSPrivateApi": true,
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; frame-src grokpreview: http://grokpreview.localhost; object-src 'none'; base-uri 'self'; form-action 'none'",
       "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 ws:; frame-src grokpreview: http://grokpreview.localhost; object-src 'none'; base-uri 'self'; form-action 'none'"

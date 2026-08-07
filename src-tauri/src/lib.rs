@@ -226,7 +226,7 @@ fn command_line(program: &str, args: &[String]) -> String {
                 return redact_env_pair(arg);
             }
 
-            if arg == "-p" || arg == "--single" {
+            if arg == "-p" || arg == "--single" || arg == "--prompt-json" {
                 redact_next = true;
             }
 
@@ -1095,6 +1095,17 @@ fn preview_content_type(rel: &str) -> &'static str {
         "css" => "text/css; charset=utf-8",
         "js" | "mjs" => "text/javascript; charset=utf-8",
         "json" => "application/json",
+        "pdf" => "application/pdf",
+        "csv" => "text/csv; charset=utf-8",
+        "xml" => "application/xml",
+        "yaml" | "yml" => "application/yaml",
+        "zip" => "application/zip",
+        "doc" => "application/msword",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "ppt" => "application/vnd.ms-powerpoint",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         "svg" => "image/svg+xml",
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
@@ -2291,6 +2302,60 @@ fn read_file_safe_blocking(
     }
 }
 
+#[derive(serde::Serialize)]
+struct AttachmentPayload {
+    name: String,
+    mime_type: String,
+    size_bytes: usize,
+    data_url: String,
+}
+
+/// Read a file explicitly chosen or dropped by the user for a multimodal
+/// prompt. Unlike @mentions, this accepts an absolute path because Finder's
+/// native drop event supplies one; the hard cap prevents oversized IPC/queue
+/// payloads and directories/special files are rejected.
+#[tauri::command]
+async fn read_attachment(path: String, max_bytes: usize) -> Result<AttachmentPayload, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use base64::Engine as _;
+
+        let candidate = std::path::PathBuf::from(&path);
+        let canonical = candidate
+            .canonicalize()
+            .map_err(|error| format!("attachment path is not readable: {error}"))?;
+        let metadata = std::fs::metadata(&canonical)
+            .map_err(|error| format!("attachment metadata failed: {error}"))?;
+        if !metadata.is_file() {
+            return Err("Only files can be attached.".to_string());
+        }
+        let cap = max_bytes.clamp(1, 10 * 1024 * 1024);
+        if metadata.len() as usize > cap {
+            return Err("Attachment is larger than 10 MB.".to_string());
+        }
+        let bytes = std::fs::read(&canonical)
+            .map_err(|error| format!("attachment read failed: {error}"))?;
+        let name = canonical
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("attachment")
+            .to_string();
+        let mime_type = preview_content_type(&name)
+            .split(';')
+            .next()
+            .unwrap_or("application/octet-stream")
+            .to_string();
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        Ok(AttachmentPayload {
+            name,
+            mime_type: mime_type.clone(),
+            size_bytes: bytes.len(),
+            data_url: format!("data:{mime_type};base64,{encoded}"),
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 // ── Event forwarder ─────────────────────────────────────────────────────────
 
 fn forward_queue_message(app: &tauri::AppHandle, msg: &QueueMessage) {
@@ -2533,6 +2598,7 @@ pub fn run() {
             delete_prompt,
             glob_files,
             read_file_safe,
+            read_attachment,
             desktop::desktop_list_apps,
             desktop::desktop_query,
             desktop::desktop_activate
@@ -2563,6 +2629,17 @@ mod tests {
         assert!(line.contains("--env GITHUB_PERSONAL_ACCESS_TOKEN=<redacted>"));
         assert!(line.contains("--env=BRAVE_API_KEY=<redacted>"));
         assert!(line.contains("-p <prompt>"));
+
+        let multimodal = command_line(
+            "grok",
+            &[
+                "--prompt-json".to_string(),
+                r#"[{"type":"input_image","image_url":"data:image/png;base64,secret"}]"#
+                    .to_string(),
+            ],
+        );
+        assert!(!multimodal.contains("base64,secret"));
+        assert_eq!(multimodal, "grok --prompt-json <prompt>");
     }
 
     #[test]

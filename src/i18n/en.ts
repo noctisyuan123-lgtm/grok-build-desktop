@@ -74,6 +74,14 @@ export const en = {
   'composer.sendQueuing': 'Queuing…',
   'composer.sendEnqueue': 'Enqueue',
   'composer.send': 'Send',
+  'composer.chooseFiles': 'Attach images or files',
+  'composer.attachments': 'Attached files',
+  'composer.removeAttachment': 'Remove {name}',
+  'composer.dropFiles': 'Drop images or files here',
+  'composer.attachmentTooLarge': '{name} is larger than 10 MB.',
+  'composer.tooManyAttachments': 'You can attach up to {count} files.',
+  'composer.attachmentsTotalTooLarge': 'Attachments must total less than 25 MB.',
+  'composer.attachmentOnlyPrompt': 'Please review the attached file(s).',
 
   // ── Composer footer / autopilot banner ────────────────────────────────────
   'composerSection.autopilotTitle': 'Autopilot is on — Grok auto-approves every action.',
@@ -89,14 +97,9 @@ export const en = {
   'composerSection.codingWorkflow': 'Coding workflow',
   'composerSection.actionPolicy': 'Action policy',
   'composerSection.agentEffort': 'Agent effort',
-  'composerSection.agentEffortTitle': 'Agent effort — how hard Grok works per turn',
-  'composerSection.effortOption': 'Effort: {label}',
   'composerSection.reasoningEffort': 'Reasoning effort',
-  'composerSection.reasoningEffortTitle': 'Reasoning effort — extra thinking budget on hard paths',
-  'composerSection.reasoningOption': 'Reasoning: {label}',
   'composerSection.bestOfN': 'Best-of-N',
-  'composerSection.bestOfNTitle': 'Best-of-N — run N ways in parallel, keep the best',
-  'composerSection.bestOfOption': 'Best-of-{n}',
+  'composerSection.runSettings': 'Run settings',
   'composerSection.enterHint': '↵ Send · ⇧↵ Newline',
   'composerSection.stopRun': 'Stop run',
 
@@ -238,18 +241,9 @@ export const en = {
   'emptyState.nextBody': 'What is the single most useful next code action right now?',
 
   // ── Status bar (Claude-Code-style) ────────────────────────────────────────
-  'statusBar.done': 'done',
-  'statusBar.doneWithReason': 'done · {reason}',
-  'statusBar.cancelled': 'cancelled',
-  'statusBar.failed': 'failed',
-  'statusBar.failedWithError': 'failed: {error}',
   'statusBar.thinking': 'thinking…',
   'statusBar.writing': 'writing…',
   'statusBar.working': 'working…',
-  'statusBar.preparing': 'preparing run…',
-  'statusBar.preparingMulti': 'preparing run (×{count})…',
-  'statusBar.idle': 'idle',
-  'statusBar.queued': '+{count} queued',
   'statusBar.tokens': '≈{tokens} tokens',
 
   // ── Queue dock ────────────────────────────────────────────────────────────
@@ -269,9 +263,15 @@ export const en = {
   'message.runFailedWithError': 'Run failed: {error}',
   'message.stopped': 'Stopped by you.',
   'message.traceAriaLabel': 'Tool and subagent activity',
+  'message.workedFor': 'Worked for {duration}',
+  'message.actions': 'Response actions',
+  'message.copy': 'Copy response',
+  'message.copied': 'Copied',
+  'message.undoResponse': 'Undo response',
+  'message.undoLatestOnly': 'Only the latest completed response can be undone',
+  'message.turnUndone': 'Response moved back to the composer.',
 
   // ── Title bar ─────────────────────────────────────────────────────────────
-  'titleBar.pickFolderTitle': 'Pick a project folder',
   'titleBar.stopTitle': 'Stop the current run',
   'titleBar.stop': 'Stop',
   'titleBar.connectedTitle': 'Connected to grok.com',

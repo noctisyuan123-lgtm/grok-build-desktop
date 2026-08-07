@@ -15,7 +15,8 @@ function config(overrides: Partial<GrokRunConfig> = {}): GrokRunConfig {
     subagentsEnabled: true,
     selfCheck: false,
     codingCwd: '',
-    continueConversation: false,
+    resumeSessionId: null,
+    continueLatestSession: false,
     ...overrides,
   };
 }
@@ -122,8 +123,14 @@ describe('buildGrokArgs', () => {
     expect(buildGrokArgs(config({ mode: 'standard', codingCwd: '/repo' }))).not.toContain('--cwd');
   });
 
-  it('continues the conversation with -c on follow-up turns only', () => {
-    expect(buildGrokArgs(config({ continueConversation: true }))).toContain('-c');
-    expect(buildGrokArgs(config({ continueConversation: false }))).not.toContain('-c');
+  it('forks an explicit session head so undo can move context backward', () => {
+    const explicit = buildGrokArgs(config({ resumeSessionId: 'session-parent' }));
+    expect(flagValue(explicit, '--resume')).toBe('session-parent');
+    expect(explicit).toContain('--fork-session');
+    expect(explicit).not.toContain('-c');
+
+    const queued = buildGrokArgs(config({ continueLatestSession: true }));
+    expect(queued).toContain('-c');
+    expect(queued).toContain('--fork-session');
   });
 });

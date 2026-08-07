@@ -5,8 +5,10 @@ import ReactDOM from 'react-dom/client';
 // works offline and the CSP can drop remote style/font origins.
 import '@fontsource-variable/geist';
 import '@fontsource-variable/jetbrains-mono';
+import 'katex/dist/katex.min.css';
 import App from './App';
 import { I18nProvider } from './i18n';
+import { ActivityPreview } from './dev/ActivityPreview';
 
 const STORAGE_KEY_PREFIX = 'grok-desktop-';
 
@@ -106,12 +108,13 @@ const container = document.getElementById('root') as HTMLElement;
 const root = rootCache.main ?? ReactDOM.createRoot(container);
 rootCache.main = root;
 
+const showActivityPreview =
+  import.meta.env.DEV && new URLSearchParams(window.location.search).has('activity-preview');
+
 root.render(
   <React.StrictMode>
     <AppErrorBoundary>
-      <I18nProvider>
-        <App />
-      </I18nProvider>
+      <I18nProvider>{showActivityPreview ? <ActivityPreview /> : <App />}</I18nProvider>
     </AppErrorBoundary>
   </React.StrictMode>,
 );

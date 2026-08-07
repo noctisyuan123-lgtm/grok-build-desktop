@@ -1,5 +1,12 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { classifyEvent, type TraceEvent } from './traceParser';
+import {
+  classifyEvent,
+  extractRunError,
+  extractUsage,
+  type RunUsage,
+  type TraceEvent,
+  type TraceStatus,
+} from './traceParser';
 import { hasTauriRuntime } from './runtime';
 
 export type GrokEvent =
@@ -17,11 +24,15 @@ export interface RunSnapshot {
   endedAt: number | null;
   thoughtChars: number;
   textChars: number;
-  lastEventType: 'thought' | 'text' | 'end' | null;
+  lastEventType: 'thought' | 'text' | 'activity' | 'end' | null;
   text: string;
   htmlVersion: number;
   stopReason: string | null;
+  /** Grok conversation head produced by this run. Used to fork follow-ups. */
+  sessionId: string | null;
   error: string | null;
+  /** Authoritative token totals emitted by Grok; null until the first usage line. */
+  usage: RunUsage | null;
   /** Tool / subagent / task trace cards, in order of first appearance. */
   traces: TraceEvent[];
 }
@@ -94,7 +105,9 @@ class StreamStore {
       text: '',
       htmlVersion: 0,
       stopReason: null,
+      sessionId: null,
       error: null,
+      usage: null,
       traces: [],
     };
   }
@@ -112,6 +125,7 @@ export const streamStore = new StreamStore();
 
 export function applyRunEvent(runId: string, event: GrokEvent, raw?: unknown): void {
   const cur = streamStore.getRunSnapshot(runId);
+  const usage = extractUsage(raw);
   if (event.type === 'thought') {
     const { data } = event as Extract<GrokEvent, { type: 'thought' }>;
     streamStore.patchRun(runId, {
@@ -150,29 +164,60 @@ export function applyRunEvent(runId: string, event: GrokEvent, raw?: unknown): v
       state: 'done',
       lastEventType: 'end',
       stopReason: e.stopReason,
+      sessionId: e.sessionId,
       endedAt: Date.now(),
+      usage: usage ?? cur?.usage ?? null,
+      traces: reconcileOpenTraces(cur?.traces ?? [], 'done'),
     });
   } else if (raw) {
-    // Unknown typed event — try to classify as a trace (tool/subagent/task).
+    const runError = extractRunError(raw);
+    if (runError) {
+      streamStore.patchRun(runId, {
+        state: 'failed',
+        endedAt: Date.now(),
+        error: runError,
+        usage: usage ?? cur?.usage ?? null,
+        traces: reconcileOpenTraces(cur?.traces ?? [], 'error'),
+      });
+      return;
+    }
+
+    if (usage) {
+      streamStore.patchRun(runId, { usage });
+    }
+
+    // Unknown typed event — normalise official ACP and legacy activity shapes.
     const result = classifyEvent(raw);
-    if (result.kind === 'create') {
+    if (result.kind === 'upsert') {
       const existing = cur?.traces ?? [];
-      // Avoid duplicates if the same key is emitted twice (e.g. updates).
-      if (!existing.some((t) => t.key === result.event.key)) {
-        streamStore.patchRun(runId, { traces: [...existing, result.event] });
-      }
-    } else if (result.kind === 'finish') {
-      const existing = cur?.traces ?? [];
-      const idx = existing.findIndex((t) => t.key === result.key);
+      const idx = existing.findIndex((trace) => trace.key === result.event.key);
       if (idx >= 0) {
         const updated = [...existing];
         updated[idx] = {
           ...updated[idx]!,
-          status: result.status,
-          endedAt: Date.now(),
-          detail: result.detail ?? updated[idx]!.detail,
+          ...result.event,
+          // Updates should not reset elapsed time, and missing optional fields
+          // must not erase useful data captured by the start event.
+          startedAt: updated[idx]!.startedAt,
+          label:
+            result.event.label === 'Tool' || result.event.label === 'Subagent'
+              ? updated[idx]!.label
+              : result.event.label,
+          detail: result.event.detail ?? updated[idx]!.detail,
+          parentKey: result.event.parentKey ?? updated[idx]!.parentKey,
+          progress: result.event.progress ?? updated[idx]!.progress,
         };
-        streamStore.patchRun(runId, { traces: updated });
+        streamStore.patchRun(runId, {
+          traces: updated,
+          lastEventType: result.event.status === 'running' ? 'activity' : cur?.lastEventType,
+          state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
+        });
+      } else {
+        streamStore.patchRun(runId, {
+          traces: [...existing, result.event],
+          lastEventType: result.event.status === 'running' ? 'activity' : cur?.lastEventType,
+          state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
+        });
       }
     }
   }
@@ -188,12 +233,32 @@ export function applyStateChange(
     error?: string | null;
   },
 ): void {
+  const current = streamStore.getRunSnapshot(runId);
+  const state = payload.state.toLowerCase() as RunState;
+  const terminalStatus: TraceStatus | null =
+    state === 'done'
+      ? 'done'
+      : state === 'failed'
+        ? 'error'
+        : state === 'cancelled'
+          ? 'cancelled'
+          : null;
   streamStore.patchRun(runId, {
-    state: payload.state.toLowerCase() as RunState,
-    startedAt: payload.startedAt ?? streamStore.getRunSnapshot(runId)?.startedAt ?? null,
-    endedAt: payload.endedAt ?? streamStore.getRunSnapshot(runId)?.endedAt ?? null,
-    error: payload.error ?? streamStore.getRunSnapshot(runId)?.error ?? null,
+    state,
+    startedAt: payload.startedAt ?? current?.startedAt ?? null,
+    endedAt: payload.endedAt ?? current?.endedAt ?? (terminalStatus ? Date.now() : null),
+    error: payload.error ?? current?.error ?? null,
+    traces: terminalStatus
+      ? reconcileOpenTraces(current?.traces ?? [], terminalStatus)
+      : (current?.traces ?? []),
   });
+}
+
+function reconcileOpenTraces(traces: TraceEvent[], status: TraceStatus): TraceEvent[] {
+  const endedAt = Date.now();
+  return traces.map((trace) =>
+    trace.status === 'running' ? { ...trace, status, endedAt } : trace,
+  );
 }
 
 export function replaceQueue(q: QueueSnapshot): void {

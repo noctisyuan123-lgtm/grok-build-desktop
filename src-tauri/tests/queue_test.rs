@@ -120,7 +120,7 @@ fn stderr_tail_truncation_leaves_short_strings_untouched() {
 #[tokio::test]
 async fn cancel_queued_marks_cancelled_without_running() {
     let db = Db::open_memory().await.unwrap();
-    let (q, _rx) = RunQueue::new(db.clone(), fake_grok_path()).await;
+    let (q, mut rx) = RunQueue::new(db.clone(), fake_grok_path()).await;
     let q = Arc::new(q);
     // Do NOT spawn worker — we want to inspect waiting queue state directly.
 
@@ -133,4 +133,62 @@ async fn cancel_queued_marks_cancelled_without_running() {
 
     let rec = db.fetch_run(&id).await.unwrap().unwrap();
     assert!(matches!(rec.state, RunState::Cancelled));
+
+    let mut saw_terminal = false;
+    for _ in 0..3 {
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        if matches!(
+            msg.kind,
+            QueueMessageKind::StateChanged {
+                state: RunState::Cancelled,
+                ..
+            }
+        ) {
+            saw_terminal = true;
+            break;
+        }
+    }
+    assert!(saw_terminal, "queued cancellation must reach the frontend");
+}
+
+#[tokio::test]
+async fn clear_waiting_emits_a_terminal_state_for_every_run() {
+    let db = Db::open_memory().await.unwrap();
+    let (q, mut rx) = RunQueue::new(db, fake_grok_path()).await;
+    let q = Arc::new(q);
+    let (first, _) = q
+        .enqueue("first".into(), "/tmp".into(), vec!["--ok".into()])
+        .await
+        .unwrap();
+    let (second, _) = q
+        .enqueue("second".into(), "/tmp".into(), vec!["--ok".into()])
+        .await
+        .unwrap();
+
+    assert_eq!(q.clear_waiting().await.unwrap(), 2);
+
+    let mut terminal_ids = std::collections::HashSet::new();
+    for _ in 0..8 {
+        let Ok(Ok(msg)) =
+            tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await
+        else {
+            break;
+        };
+        if matches!(
+            msg.kind,
+            QueueMessageKind::StateChanged {
+                state: RunState::Cancelled,
+                ..
+            }
+        ) {
+            terminal_ids.insert(msg.run_id);
+        }
+    }
+    assert_eq!(
+        terminal_ids,
+        std::collections::HashSet::from([first, second])
+    );
 }

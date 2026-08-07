@@ -10,7 +10,6 @@ describe('t()', () => {
 
   it('interpolates {name} placeholders', () => {
     expect(t('settings.modelHint', { model: 'grok-build' })).toBe('Active engine: grok-build');
-    expect(t('statusBar.queued', { count: 3 })).toBe('+3 queued');
   });
 
   it('leaves unresolved placeholders intact when a param is missing', () => {

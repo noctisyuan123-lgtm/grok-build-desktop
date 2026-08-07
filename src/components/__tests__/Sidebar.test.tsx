@@ -43,6 +43,7 @@ function seedTabs() {
 }
 
 function Harness() {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([message('m100', 'fix the login flake')]);
   const [codingCwd, setCodingCwd] = useState('/a');
   const [, setDrafts] = useState<Record<Mode, string>>({ standard: '', coding: '' });
@@ -111,6 +112,8 @@ function Harness() {
         isGrokReady
         activeModel="grok-build"
         statusLabel="Connected"
+        sidebarCollapsed={sidebarCollapsed}
+        setSidebarCollapsed={setSidebarCollapsed}
       />
     </>
   );
@@ -120,6 +123,20 @@ beforeEach(() => {
   window.localStorage.clear();
   seedTabs();
   vi.spyOn(window, 'getComputedStyle');
+});
+
+describe('Sidebar collapse control', () => {
+  it('exposes a visible control that toggles between collapse and expand', async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    const collapse = screen.getByRole('button', { name: 'Collapse sidebar' });
+    expect(collapse).toHaveAttribute('aria-pressed', 'false');
+    await user.click(collapse);
+    expect(screen.getByRole('button', { name: 'Expand sidebar' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
 });
 
 function historyRow(title: RegExp | string) {

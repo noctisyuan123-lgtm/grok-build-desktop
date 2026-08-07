@@ -1,10 +1,31 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { FileImage, FileText, Paperclip, X } from 'lucide-react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { enqueueRun } from '../lib/grok';
 import { useHasInflight } from '../hooks/useActiveRun';
 import { notePendingSubmitEnd, notePendingSubmitStart } from '../lib/streamStore';
 import { extractFileMentions, readFileSafe, type FileEntry } from '../lib/files';
 import { FilePicker } from './FilePicker';
 import { t } from '../i18n';
+import { hasTauriRuntime } from '../lib/runtime';
+import {
+  attachmentToAcpBlock,
+  fileToAttachment,
+  formatAttachmentSize,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENT_COUNT,
+  MAX_ATTACHMENTS_TOTAL_BYTES,
+  readNativeAttachment,
+  type ComposerAttachment,
+} from '../lib/attachments';
 
 export interface ComposerHandle {
   /** Imperatively set the textarea value (used by starter cards / history click / drafts). */
@@ -21,7 +42,13 @@ interface Props {
   /** Initial seed value (e.g. restored from session_state drafts). Only applied once on mount. */
   initialValue?: string;
   placeholder?: string;
-  onEnqueued?: (info: { runId: string; position: number; prompt: string; rawText: string }) => void;
+  onEnqueued?: (info: {
+    runId: string;
+    position: number;
+    prompt: string;
+    rawText: string;
+    attachments: ComposerAttachment[];
+  }) => void;
   /** Called when enqueueing the prompt fails, with a human-readable message.
    *  The host surfaces it (session notice) — a silent console.error left the
    *  user staring at a composer that "ate" their prompt. */
@@ -35,6 +62,8 @@ interface Props {
    * "user typed, switched modes" preservation.
    */
   onTextChange?: (text: string) => void;
+  /** Compact mode/model/run controls rendered inside the input card. */
+  controls?: ReactNode;
 }
 
 /**
@@ -66,7 +95,7 @@ function detectActiveMention(text: string, caret: number): { start: number; quer
 }
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { cwd, argsBuilder, initialValue, placeholder, onEnqueued, onError, onTextChange }: Props,
+  { cwd, argsBuilder, initialValue, placeholder, onEnqueued, onError, onTextChange, controls }: Props,
   outerRef,
 ) {
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -80,11 +109,107 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   // Highlighted FilePicker option id, exposed as aria-activedescendant while
   // the picker is open (the textarea keeps DOM focus the whole time).
   const [activeOptionId, setActiveOptionId] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const onTextChangeRef = useRef(onTextChange);
   onTextChangeRef.current = onTextChange;
   // Primitive selector — subscribing to whole run/queue snapshots would
   // re-render the Composer on every streamed token (see useHasInflight).
   const hasInflight = useHasInflight();
+
+  const addAttachments = useCallback(
+    (incoming: ComposerAttachment[]) => {
+      setAttachments((current) => {
+        const deduped = incoming.filter(
+          (item) =>
+            !current.some(
+              (existing) =>
+                existing.name === item.name && existing.sizeBytes === item.sizeBytes,
+            ),
+        );
+        const oversized = deduped.find((item) => item.sizeBytes > MAX_ATTACHMENT_BYTES);
+        if (oversized) {
+          onError?.(t('composer.attachmentTooLarge', { name: oversized.name }));
+          return current;
+        }
+        if (current.length + deduped.length > MAX_ATTACHMENT_COUNT) {
+          onError?.(t('composer.tooManyAttachments', { count: MAX_ATTACHMENT_COUNT }));
+          return current;
+        }
+        const total = [...current, ...deduped].reduce((sum, item) => sum + item.sizeBytes, 0);
+        if (total > MAX_ATTACHMENTS_TOTAL_BYTES) {
+          onError?.(t('composer.attachmentsTotalTooLarge'));
+          return current;
+        }
+        return [...current, ...deduped];
+      });
+    },
+    [onError],
+  );
+
+  const addBrowserFiles = useCallback(
+    async (files: File[]) => {
+      const eligible = files.filter((file) => {
+        if (file.size <= MAX_ATTACHMENT_BYTES) return true;
+        onError?.(t('composer.attachmentTooLarge', { name: file.name }));
+        return false;
+      });
+      try {
+        addAttachments(await Promise.all(eligible.map(fileToAttachment)));
+      } catch (error) {
+        onError?.(error instanceof Error ? error.message : String(error));
+      }
+    },
+    [addAttachments, onError],
+  );
+
+  // Finder drops are delivered by Tauri as native paths rather than DOM File
+  // objects. Keep the normal HTML drop handlers too so browser/dev mode works.
+  useEffect(() => {
+    if (!hasTauriRuntime()) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    let currentWindow: ReturnType<typeof getCurrentWindow>;
+    try {
+      currentWindow = getCurrentWindow();
+    } catch {
+      // Tauri's IPC mock (and some embedded browser harnesses) exposes the
+      // runtime marker without window metadata. HTML drop remains available.
+      return;
+    }
+    void currentWindow
+      .onDragDropEvent((event) => {
+        if (event.payload.type === 'enter' || event.payload.type === 'over') {
+          setDragActive(true);
+          return;
+        }
+        if (event.payload.type === 'leave') {
+          setDragActive(false);
+          return;
+        }
+        setDragActive(false);
+        void Promise.all(
+          event.payload.paths.map(async (path) => {
+            try {
+              return await readNativeAttachment(path);
+            } catch (error) {
+              onError?.(error instanceof Error ? error.message : String(error));
+              return null;
+            }
+          }),
+        ).then((items) => addAttachments(items.filter((item) => item !== null)));
+      })
+      .then((stop) => {
+        if (disposed) stop();
+        else unlisten = stop;
+      })
+      .catch((error) => onError?.(error instanceof Error ? error.message : String(error)));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [addAttachments, onError]);
 
   useImperativeHandle(
     outerRef,
@@ -177,22 +302,39 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     const el = ref.current;
     if (!el) return;
     const rawText = el.value.trim();
-    if (!rawText) return;
+    if (!rawText && attachments.length === 0) return;
     setSubmitting(true);
     setMention(null);
     notePendingSubmitStart();
     try {
-      const prompt = await expandMentionsInPrompt(rawText);
+      const attachmentFallback = t('composer.attachmentOnlyPrompt');
+      const expandedText = await expandMentionsInPrompt(rawText || attachmentFallback);
+      const attachmentList = attachments.map((item) => `- ${item.name}`).join('\n');
+      const prompt = attachments.length
+        ? `${expandedText}\n\nAttached files:\n${attachmentList}`
+        : expandedText;
       const args = argsBuilder();
-      args.push('-p', prompt);
+      if (attachments.length > 0) {
+        const blocks = [
+          { type: 'text', text: prompt },
+          ...attachments.map(attachmentToAcpBlock),
+        ];
+        args.push('--prompt-json', JSON.stringify(blocks));
+      } else {
+        args.push('-p', prompt);
+      }
       const result = await enqueueRun({ prompt, cwd, args });
       el.value = '';
+      setAttachments([]);
       onTextChangeRef.current?.('');
       onEnqueued?.({
         runId: result.runId,
         position: result.position,
         prompt,
+        // Attachments render in their own preview strip above the bubble. Do
+        // not leak filenames, URLs, or base64 into the visible message text.
         rawText,
+        attachments,
       });
     } catch (err) {
       console.error('[grok-desktop] enqueue failed', err);
@@ -212,7 +354,22 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const pickerOpen = Boolean(mention && cwd.trim());
 
   return (
-    <div className={`composer${submitting ? ' composer-submitting' : ''}`}>
+    <div
+      className={`composer${submitting ? ' composer-submitting' : ''}${dragActive ? ' composer-drag-active' : ''}`}
+      onDragEnter={(event) => {
+        event.preventDefault();
+        setDragActive(true);
+      }}
+      onDragOver={(event) => event.preventDefault()}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        setDragActive(false);
+        void addBrowserFiles(Array.from(event.dataTransfer.files));
+      }}
+    >
       {mention && cwd.trim() ? (
         <FilePicker
           cwd={cwd}
@@ -223,7 +380,44 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           onActiveDescendant={setActiveOptionId}
         />
       ) : null}
-      <textarea
+      {dragActive ? <div className="composer-drop-overlay">{t('composer.dropFiles')}</div> : null}
+      {attachments.length > 0 ? (
+        <div className="composer-attachments" aria-label={t('composer.attachments')}>
+          {attachments.map((item) => (
+            <div className="composer-attachment" key={item.id}>
+              {item.mimeType.startsWith('image/') ? (
+                <img src={item.dataUrl} alt="" />
+              ) : (
+                <span className="composer-attachment-icon"><FileText size={14} /></span>
+              )}
+              <span className="composer-attachment-copy">
+                <strong>{item.name}</strong>
+                <small>{formatAttachmentSize(item.sizeBytes)}</small>
+              </span>
+              <button
+                type="button"
+                aria-label={t('composer.removeAttachment', { name: item.name })}
+                onClick={() => setAttachments((current) => current.filter((entry) => entry.id !== item.id))}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <input
+        ref={fileInputRef}
+        className="composer-file-input"
+        type="file"
+        multiple
+        aria-label={t('composer.chooseFiles')}
+        onChange={(event) => {
+          void addBrowserFiles(Array.from(event.currentTarget.files ?? []));
+          event.currentTarget.value = '';
+        }}
+      />
+      <div className="composer-input-shell">
+        <textarea
         ref={ref}
         disabled={submitting}
         // While the @-mention picker is open the textarea drives a listbox
@@ -296,14 +490,35 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           e.preventDefault();
           void submit();
         }}
-      />
-      <button className="composer-send" disabled={submitting} onClick={() => void submit()}>
-        {submitting
-          ? t('composer.sendQueuing')
-          : hasInflight
-            ? t('composer.sendEnqueue')
-            : t('composer.send')}
-      </button>
+        />
+        <div className="composer-inline-bar">
+          <button
+            className="composer-attach"
+            type="button"
+            disabled={submitting}
+            aria-label={t('composer.chooseFiles')}
+            title={t('composer.chooseFiles')}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {attachments.some((item) => item.mimeType.startsWith('image/')) ? (
+              <FileImage size={15} />
+            ) : (
+              <Paperclip size={15} />
+            )}
+          </button>
+          {controls}
+          <span className="composer-inline-hint" aria-hidden="true">
+            {t('composerSection.enterHint')}
+          </span>
+          <button className="composer-send" disabled={submitting} onClick={() => void submit()}>
+            {submitting
+              ? t('composer.sendQueuing')
+              : hasInflight
+                ? t('composer.sendEnqueue')
+                : t('composer.send')}
+          </button>
+        </div>
+      </div>
     </div>
   );
 });

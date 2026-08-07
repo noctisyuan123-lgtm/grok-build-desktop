@@ -85,9 +85,10 @@ describe('keyboard shortcuts', () => {
   });
 });
 
-describe('composer footer', () => {
+describe('compact composer controls', () => {
   it('applies a coding workflow preset to the composer', async () => {
     const { user } = await bootApp();
+    await user.click(screen.getByRole('button', { name: t('composerSection.runSettings') }));
     const workflowSelect = screen.getByLabelText(t('composerSection.codingWorkflow'));
 
     const preset = codingPresets.find((p) => p.id === 'tests')!;
@@ -107,20 +108,9 @@ describe('composer footer', () => {
 });
 
 describe('project folder picker', () => {
-  it('picks a folder from the title-bar chip and updates the workspace', async () => {
-    const { tauri, user } = await bootApp();
-
-    await user.click(screen.getByRole('button', { name: 'Pick a project' }));
-    await waitFor(() => expect(tauri.commands()).toContain('pick_project_folder'));
-
-    // Notice (in the conversation toast — it mirrors into the terminal dock
-    // too) + repo chip now show the picked directory.
-    await waitFor(() => {
-      expect(document.querySelector('.session-toast')).toHaveTextContent(
-        t('notices.repoSet', { path: '/mock/project' }),
-      );
-    });
-    expect(await screen.findByRole('button', { name: 'project' })).toBeInTheDocument();
+  it('does not duplicate project selection in the top toolbar', async () => {
+    await bootApp();
+    expect(screen.queryByRole('button', { name: 'Pick a project' })).not.toBeInTheDocument();
   });
 });
 

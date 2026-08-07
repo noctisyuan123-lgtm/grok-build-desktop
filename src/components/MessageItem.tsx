@@ -1,22 +1,37 @@
 import { memo, useEffect, useMemo } from 'react';
 import { useRunHtml, useRunSnapshot } from '../hooks/useRunSnapshot';
-import { useSmoothText } from '../hooks/useSmoothText';
 import { sanitizeHtml } from '../lib/sanitizeHtml';
 import { TraceTimeline } from './TraceTimeline';
+import { MessageActions } from './MessageActions';
 import { t } from '../i18n';
 
 interface Props {
   runId: string;
   fallbackText?: string;
+  durationMs?: number;
+  canUndo?: boolean;
+  onUndo?: () => void;
 }
 
-function MessageItemImpl({ runId, fallbackText }: Props) {
+function MessageItemImpl({ runId, fallbackText, durationMs, canUndo = false, onUndo }: Props) {
   const snap = useRunSnapshot(runId);
   const html = useRunHtml(runId);
-  const smooth = useSmoothText(runId);
+  const workedMs =
+    snap?.startedAt != null && snap.endedAt != null
+      ? Math.max(0, snap.endedAt - snap.startedAt)
+      : durationMs;
+  const workedLabel = workedMs != null ? formatWorkedDuration(workedMs) : null;
 
-  // marked does not sanitize; strip scripts/handlers before injecting.
+  // markdown-it does not sanitize; strip scripts/handlers before injecting.
   const safeHtml = useMemo(() => (html ? sanitizeHtml(html) : html), [html]);
+  const workedRow = workedLabel ? (
+    <div className="message-worked" aria-label={t('message.workedFor', { duration: workedLabel })}>
+      <span>{t('message.workedFor', { duration: workedLabel })}</span>
+      <span className="message-worked-chevron" aria-hidden>
+        ›
+      </span>
+    </div>
+  ) : null;
 
   // Restored/legacy assistant messages (loaded from storage after a restart)
   // have stored text but no live run snapshot. Render them through the SAME
@@ -38,29 +53,48 @@ function MessageItemImpl({ runId, fallbackText }: Props) {
 
   if (!snap) {
     if (safeHtml) {
-      return <div className="message-body" dangerouslySetInnerHTML={{ __html: safeHtml }} />;
+      return (
+        <>
+          {workedRow}
+          <div
+            className="message-body markdown-body"
+            dangerouslySetInnerHTML={{ __html: safeHtml }}
+          />
+          <MessageActions sourceText={fallbackText || ''} canUndo={canUndo} onUndo={onUndo} />
+        </>
+      );
     }
-    if (fallbackText) return <pre className="message-body">{fallbackText}</pre>;
+    if (fallbackText) {
+      return (
+        <>
+          {workedRow}
+          <pre className="message-body">{fallbackText}</pre>
+          <MessageActions sourceText={fallbackText} canUndo={canUndo} onUndo={onUndo} />
+        </>
+      );
+    }
     return null;
   }
 
-  const ended = snap.state === 'done' || snap.state === 'failed' || snap.state === 'cancelled';
-
-  // While the run is streaming, render the typewriter-paced raw text (smooth,
-  // Claude-like cadence). Once it settles, swap to the fully-parsed markdown
-  // HTML (code blocks, formatting). TraceTimeline (tool/subagent cards) shows
-  // above the body in both phases.
+  // The markdown worker is fed on every text event. Use its latest result as
+  // soon as it arrives instead of holding it until the run finishes, so
+  // headings, lists and fenced code progressively render while streaming.
+  // Before the first worker response, show the current raw text immediately.
   return (
     <>
-      <TraceTimeline runId={runId} />
-      {ended && safeHtml ? (
-        <div className="message-body" dangerouslySetInnerHTML={{ __html: safeHtml }} />
+      {workedRow}
+      {safeHtml ? (
+        <div
+          className="message-body markdown-body markdown-streaming"
+          dangerouslySetInnerHTML={{ __html: safeHtml }}
+        />
       ) : (
         <pre className="message-body streaming-raw">
-          {smooth.text || fallbackText || ''}
-          {smooth.caretVisible ? <span className="stream-caret">▋</span> : null}
+          {snap.text || fallbackText || ''}
+          <span className="stream-caret">▋</span>
         </pre>
       )}
+      <TraceTimeline runId={runId} />
       {/* A failed/cancelled run must say so in the message area — the only
           other surface (StatusBar suffix) resets to "idle" as soon as the
           queue moves on, leaving a silent empty bubble. */}
@@ -74,8 +108,20 @@ function MessageItemImpl({ runId, fallbackText }: Props) {
       {snap.state === 'cancelled' ? (
         <div className="message-error message-cancelled">{t('message.stopped')}</div>
       ) : null}
+      <MessageActions
+        sourceText={snap.text || fallbackText || ''}
+        canUndo={canUndo && snap.state !== 'queued' && snap.state !== 'running'}
+        onUndo={onUndo}
+      />
     </>
   );
 }
 
 export const MessageItem = memo(MessageItemImpl);
+
+function formatWorkedDuration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${seconds % 60}s`;
+}

@@ -16,6 +16,14 @@ export interface MessageRef {
    * before F shipped (no runId, no per-event events).
    */
   fallbackText?: string;
+  durationMs?: number;
+  canUndo?: boolean;
+  attachments?: Array<{
+    id: string;
+    name: string;
+    mimeType: string;
+    dataUrl: string;
+  }>;
 }
 
 interface Props {
@@ -24,9 +32,10 @@ interface Props {
    *  flash it. The nonce lets the same id be re-focused on repeated clicks. */
   focusId?: string | null;
   focusNonce?: number;
+  onUndoAssistant?: (messageId: string) => void;
 }
 
-export function MessageList({ messages, focusId, focusNonce }: Props) {
+export function MessageList({ messages, focusId, focusNonce, onUndoAssistant }: Props) {
   const ref = useRef<VirtuosoHandle>(null);
   // The message currently flashing after a history-click jump.
   const [flashId, setFlashId] = useState<string | null>(null);
@@ -120,13 +129,46 @@ export function MessageList({ messages, focusId, focusNonce }: Props) {
         if (msg.role === 'user') {
           return (
             <div className={`message message-user${flash}`} data-message-id={msg.id}>
-              <pre className="message-body">{msg.userText}</pre>
+              {msg.attachments?.length ? (
+                <div className="message-attachments" aria-label="Attachments">
+                  {msg.attachments.map((attachment) =>
+                    attachment.mimeType.startsWith('image/') ? (
+                      <img
+                        className="message-attachment-image"
+                        key={attachment.id}
+                        src={attachment.dataUrl}
+                        alt={attachment.name}
+                        title={attachment.name}
+                      />
+                    ) : (
+                      <span className="message-attachment-file" key={attachment.id}>
+                        {attachment.name}
+                      </span>
+                    ),
+                  )}
+                </div>
+              ) : null}
+              {msg.userText ? <pre className="message-body">{msg.userText}</pre> : null}
             </div>
           );
         }
+        // Capture the row's current stable id explicitly. Virtuoso reuses row
+        // DOM while scrolling; this keeps the callback bound to the message
+        // represented by this render rather than an index or mutable lookup.
+        const assistantId = msg.id;
         return (
           <div className={`message message-assistant${flash}`} data-message-id={msg.id}>
-            <MessageItem runId={msg.runId} fallbackText={msg.fallbackText} />
+            <MessageItem
+              runId={msg.runId}
+              fallbackText={msg.fallbackText}
+              durationMs={msg.durationMs}
+              canUndo={Boolean(msg.canUndo)}
+              onUndo={
+                assistantId && onUndoAssistant
+                  ? () => onUndoAssistant(assistantId)
+                  : undefined
+              }
+            />
           </div>
         );
       }}

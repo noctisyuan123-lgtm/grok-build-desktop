@@ -96,6 +96,8 @@ export type ChatMessage = {
     durationMs?: number;
     exitCode?: number | null;
     workflow?: string;
+    /** Grok session head after this assistant turn. */
+    sessionId?: string;
   };
 };
 

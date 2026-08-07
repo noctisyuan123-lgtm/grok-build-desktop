@@ -1,7 +1,5 @@
-import { useActiveRun } from '../hooks/useActiveRun';
 import { useElapsed } from '../hooks/useElapsed';
-import { useQueue } from '../hooks/useQueue';
-import { usePendingSubmitCount } from '../hooks/usePendingSubmit';
+import { useRunSnapshot } from '../hooks/useRunSnapshot';
 import type { RunSnapshot } from '../lib/streamStore';
 import { t } from '../i18n';
 
@@ -12,124 +10,37 @@ function formatTokens(chars: number): string {
 }
 
 function formatElapsed(ms: number): string {
-  const s = ms / 1000;
-  if (s < 60) return `${s.toFixed(1)}s`;
-  const m = Math.floor(s / 60);
-  const rem = s - m * 60;
-  return `${m}m ${Math.round(rem)}s`;
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${Math.round(seconds - minutes * 60)}s`;
 }
 
-/**
- * Compact state suffix in the Claude-Code-style status bar.
- * Return null to omit the suffix entirely (matches Claude Code's minimal
- * `* 7m 48s · 2.1k tokens` mode when nothing interesting is happening).
- */
-function stateSuffix(snap: RunSnapshot | undefined): string | null {
-  if (!snap) return null;
-  if (snap.state === 'done') {
-    return snap.stopReason
-      ? t('statusBar.doneWithReason', { reason: snap.stopReason })
-      : t('statusBar.done');
-  }
-  if (snap.state === 'cancelled') return t('statusBar.cancelled');
-  if (snap.state === 'failed') {
-    return snap.error
-      ? t('statusBar.failedWithError', { error: snap.error })
-      : t('statusBar.failed');
-  }
-  // Spell out exactly what Grok is doing right now (the user asked to always
-  // see the live phase, Claude/Codex-style):
-  //   thought event  → reasoning privately       → "thinking…"
-  //   text event     → emitting the answer        → "writing…"
-  //   running, none   → spun up, nothing back yet  → "working…"
+function liveState(snap: RunSnapshot): string {
   if (snap.lastEventType === 'thought') return t('statusBar.thinking');
   if (snap.lastEventType === 'text') return t('statusBar.writing');
-  if (snap.state === 'running' || snap.state === 'queued') return t('statusBar.working');
-  return null;
+  return t('statusBar.working');
 }
 
 /**
- * The Grok activity mark — a small angular star that pulses while a run is
- * in progress. Mirrors Claude Code's animated leading `*` but with Grok-style
- * branding (✦ ≈ angular six-point asterisk in the brand orange).
+ * A live, layout-neutral run caption attached to the assistant message that
+ * owns the run. It replaces the old full-width bar above the composer, so
+ * status reads as part of the response instead of a new application panel.
  */
-function GrokMark({ pulsing }: { pulsing: boolean }) {
+export function RunStatusLine({ runId }: { runId: string }) {
+  const snap = useRunSnapshot(runId);
+  const elapsed = useElapsed(snap?.startedAt ?? null, snap?.endedAt ?? null);
+  if (!snap || (snap.state !== 'queued' && snap.state !== 'running')) return null;
+
+  const chars = snap.thoughtChars + snap.textChars;
   return (
-    <span aria-hidden className={`status-mark${pulsing ? ' status-mark-pulse' : ''}`}>
-      ✦
-    </span>
-  );
-}
-
-export function StatusBar() {
-  const active = useActiveRun();
-  const queue = useQueue();
-  const pending = usePendingSubmitCount();
-  const elapsed = useElapsed(active?.startedAt ?? null, active?.endedAt ?? null);
-  const chars = (active?.thoughtChars ?? 0) + (active?.textChars ?? 0);
-  const queuedExtra = queue.items.length;
-
-  // --- No active run ---
-  if (!active) {
-    if (pending > 0) {
-      return (
-        <div className="status-bar">
-          <GrokMark pulsing />
-          <span className="status-state">
-            {pending > 1
-              ? t('statusBar.preparingMulti', { count: pending })
-              : t('statusBar.preparing')}
-          </span>
-          {queuedExtra > 0 ? (
-            <>
-              <span className="status-sep">·</span>
-              <span className="status-queue">{t('statusBar.queued', { count: queuedExtra })}</span>
-            </>
-          ) : null}
-        </div>
-      );
-    }
-    if (queuedExtra > 0) {
-      return (
-        <div className="status-bar">
-          <GrokMark pulsing={false} />
-          <span className="status-state">{t('statusBar.idle')}</span>
-          <span className="status-sep">·</span>
-          <span className="status-queue">{t('statusBar.queued', { count: queuedExtra })}</span>
-        </div>
-      );
-    }
-    return (
-      <div className="status-bar status-bar-idle">
-        <GrokMark pulsing={false} />
-        <span className="status-state">{t('statusBar.idle')}</span>
-      </div>
-    );
-  }
-
-  // --- Active run: Claude-Code-style `✦ {elapsed} · ≈{tokens} tokens [· state]` ---
-  const isLive = active.state === 'running' || active.state === 'queued';
-  const suffix = stateSuffix(active);
-  return (
-    <div className="status-bar">
-      <GrokMark pulsing={isLive} />
-      <span className="status-elapsed">{elapsed != null ? formatElapsed(elapsed) : '0.0s'}</span>
-      <span className="status-sep">·</span>
-      <span className="status-tokens">
-        {t('statusBar.tokens', { tokens: formatTokens(chars) })}
-      </span>
-      {suffix ? (
-        <>
-          <span className="status-sep">·</span>
-          <span className="status-state">{suffix}</span>
-        </>
-      ) : null}
-      {queuedExtra > 0 ? (
-        <>
-          <span className="status-sep">·</span>
-          <span className="status-queue">{t('statusBar.queued', { count: queuedExtra })}</span>
-        </>
-      ) : null}
+    <div className="run-status-line" role="status" aria-live="polite">
+      <span className="run-status-mark" aria-hidden>✦</span>
+      <span>{elapsed != null ? formatElapsed(elapsed) : '0.0s'}</span>
+      <span aria-hidden>·</span>
+      <span>{t('statusBar.tokens', { tokens: formatTokens(chars) })}</span>
+      <span aria-hidden>·</span>
+      <span className="run-status-state">{liveState(snap)}</span>
     </div>
   );
 }

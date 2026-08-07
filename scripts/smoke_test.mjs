@@ -162,13 +162,16 @@ assert.ok(
   'Recovery action button missing in error boundary',
 );
 
-// F: new streaming pipeline (MessageItem + MessageList + StatusBar + QueueDock + Composer + markdown worker)
+// F: streaming pipeline (message-attached run status + queue + composer + worker)
 assert.ok(
   read('src/components/MessageItem.tsx').includes('memo('),
   'MessageItem must be memoized for streaming perf',
 );
 assert.ok(app.includes('<MessageList'), 'App must render MessageList for the virtualized chat');
-assert.ok(app.includes('<StatusBar'), 'App must render StatusBar (replaces activity strip)');
+assert.ok(
+  read('src/components/MessageItem.tsx').includes('<TraceTimeline'),
+  'MessageItem must render the compact activity rail below the response body',
+);
 assert.ok(app.includes('<QueueDock'), 'App must render QueueDock for the FIFO run queue');
 
 const streamStoreSrc = read('src/lib/streamStore.ts');
@@ -189,10 +192,12 @@ assert.ok(
   'streamStore must expose subscribe API for useSyncExternalStore',
 );
 
-// markdown worker (off-thread CommonMark + highlight.js)
+// markdown worker (off-thread markdown-it + highlight.js)
 const workerSrc = read('src/lib/markdown.worker.ts');
-assert.ok(workerSrc.includes('marked'), 'Markdown worker missing marked');
-assert.ok(workerSrc.includes('highlight'), 'Markdown worker missing syntax highlighting');
+assert.ok(workerSrc.includes('renderMarkdown'), 'Markdown worker missing shared renderer');
+const markdownSrc = read('src/lib/markdown.ts');
+assert.ok(markdownSrc.includes('MarkdownIt'), 'Markdown renderer missing markdown-it');
+assert.ok(markdownSrc.includes('highlight'), 'Markdown renderer missing syntax highlighting');
 
 // Hooks
 for (const hookFile of ['useActiveRun', 'useQueue', 'useRunSnapshot', 'useElapsed']) {
@@ -231,8 +236,8 @@ assert.ok(app.includes('grok-desktop-run-count-total'), 'Lifetime run counter ke
 
 const packageJsonText = read('package.json');
 assert.ok(
-  packageJsonText.includes('"marked"'),
-  'marked dependency missing — markdown worker uses marked',
+  packageJsonText.includes('"markdown-it"'),
+  'markdown-it dependency missing — markdown worker uses it',
 );
 assert.ok(
   packageJsonText.includes('"highlight.js"'),
@@ -411,11 +416,14 @@ assert.ok(
   read('src/lib/mcp.ts').includes('--args=${a}'),
   'MCP command preview must mirror the --args= form the backend runs',
 );
-// 9) Run config (effort/reasoning/permission/best-of-n) lives in the composer
-//    footer, one glance below the chat box.
+// 9) Low-frequency run config (workflow/policy/effort/reasoning/best-of-n)
+//    lives in the compact composer's popover rather than stealing a permanent
+//    full-width row from the prompt input.
 assert.ok(
-  app.includes('composerSection.agentEffort') && app.includes('className="run-select"'),
-  'run-config selects must be in the composer footer (below the chat box)',
+  app.includes('composerSection.agentEffort') &&
+    app.includes('className="composer-advanced-popover"') &&
+    app.includes('composerSection.runSettings'),
+  'run-config selects must be available from the compact composer popover',
 );
 // 10) Top bar: day/night theme toggle + a panels menu (Preview/Context/Terminal/Tools).
 assert.ok(
@@ -479,7 +487,7 @@ assert.ok(
 );
 
 // 16) Security hardening guards.
-// marked does not sanitize its HTML — every dangerouslySetInnerHTML value in
+// markdown-it does not sanitize its HTML — every dangerouslySetInnerHTML value in
 // MessageItem must go through the DOMPurify wrapper.
 const messageItem = read('src/components/MessageItem.tsx');
 assert.ok(
