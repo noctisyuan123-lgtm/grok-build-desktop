@@ -21,6 +21,7 @@ function MessageItemImpl({ runId, fallbackText, durationMs, canUndo = false, onU
       ? Math.max(0, snap.endedAt - snap.startedAt)
       : durationMs;
   const workedLabel = workedMs != null ? formatWorkedDuration(workedMs) : null;
+  const runIsLive = snap?.state === 'queued' || snap?.state === 'running';
 
   // markdown-it does not sanitize; strip scripts/handlers before injecting.
   const safeHtml = useMemo(() => (html ? sanitizeHtml(html) : html), [html]);
@@ -83,18 +84,21 @@ function MessageItemImpl({ runId, fallbackText, durationMs, canUndo = false, onU
   return (
     <>
       {workedRow}
+      {/* While a run is live, keep its changing action at the top of the
+          response so waiting/tool/subagent progress has one stable home. Once
+          complete, the same rail moves below the answer as a quiet, durable
+          "Finished" disclosure — matching the reading order of Cursor's
+          agent transcript without hiding the real-time workflow. */}
+      {runIsLive ? <TraceTimeline runId={runId} /> : null}
       {safeHtml ? (
         <div
           className="message-body markdown-body markdown-streaming"
           dangerouslySetInnerHTML={{ __html: safeHtml }}
         />
-      ) : (
-        <pre className="message-body streaming-raw">
-          {snap.text || fallbackText || ''}
-          <span className="stream-caret">▋</span>
-        </pre>
-      )}
-      <TraceTimeline runId={runId} />
+      ) : snap.text || fallbackText ? (
+        <pre className="message-body streaming-raw">{snap.text || fallbackText || ''}</pre>
+      ) : null}
+      {!runIsLive ? <TraceTimeline runId={runId} /> : null}
       {/* A failed/cancelled run must say so in the message area — the only
           other surface (StatusBar suffix) resets to "idle" as soon as the
           queue moves on, leaving a silent empty bubble. */}

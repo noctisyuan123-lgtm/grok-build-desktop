@@ -46,13 +46,14 @@ describe('TraceTimeline activity rail', () => {
     expect(screen.getByText('{"path":"src/App.tsx"}')).toBeInTheDocument();
   });
 
-  it('summarises concurrent subagents instead of duplicating working pills', () => {
+  it('keeps the current subagent action primary and moves concurrency into metadata', () => {
     seed([
       makeTrace({ key: 'subagent:a', kind: 'subagent', label: 'Review backend' }),
       makeTrace({ key: 'subagent:b', kind: 'subagent', label: 'Review frontend' }),
     ]);
     render(<TraceTimeline runId="r1" />);
-    expect(screen.getByText('2 subagents working')).toBeInTheDocument();
+    expect(screen.getByText('Review frontend')).toBeInTheDocument();
+    expect(screen.getByText(/2 subagents/)).toBeInTheDocument();
   });
 
   it('uses authoritative usage and turn counts in the compact metadata', () => {
@@ -90,7 +91,7 @@ describe('TraceTimeline activity rail', () => {
     expect(screen.getByText('×')).toBeInTheDocument();
   });
 
-  it('shows a completed summary without an extra full-width panel', () => {
+  it('shows a compact completed summary without an extra full-width panel', () => {
     seed(
       [
         makeTrace({ status: 'done', endedAt: 2_000 }),
@@ -99,8 +100,20 @@ describe('TraceTimeline activity rail', () => {
       'done',
     );
     const { container } = render(<TraceTimeline runId="r1" />);
-    expect(screen.getByText('2 steps completed')).toBeInTheDocument();
+    expect(screen.getByText('Finished')).toBeInTheDocument();
+    expect(screen.getByText(/2 tools/)).toBeInTheDocument();
     expect(container.querySelector('.trace-card')).toBeNull();
+  });
+
+  it('does not label an active tool as live or color completed steps as success badges', async () => {
+    seed([makeTrace({ detail: 'src/App.tsx' })]);
+    const user = userEvent.setup();
+    const { container } = render(<TraceTimeline runId="r1" />);
+    expect(screen.queryByText('live')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: /Read src\/App.tsx/ }));
+    expect(container.querySelector('.activity-row-mark.status-running')).toBeInTheDocument();
+    expect(container.querySelector('.activity-row-time')).toBeNull();
   });
 
   it('reveals raw diagnostics only after clicking an individual row', async () => {

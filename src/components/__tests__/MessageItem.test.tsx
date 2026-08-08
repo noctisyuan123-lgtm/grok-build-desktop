@@ -77,6 +77,15 @@ describe('MessageItem rendering states', () => {
     applyRunEvent('r2', { type: 'text', data: 'streaming toke' });
     const { container } = render(<MessageItem runId="r2" />);
     expect(container.querySelector('pre.streaming-raw')).toHaveTextContent('streaming toke');
+    expect(container.querySelector('.stream-caret')).toBeNull();
+  });
+
+  it('uses the live activity line as the empty waiting state without a blank text block', () => {
+    applyStateChange('r-waiting', { state: 'Running', startedAt: Date.now() });
+    const { container } = render(<MessageItem runId="r-waiting" />);
+    expect(screen.getByText('working…')).toBeInTheDocument();
+    expect(container.querySelector('pre.streaming-raw')).toBeNull();
+    expect(container.querySelector('.stream-caret')).toBeNull();
   });
 
   it('renders parsed markdown while the run is still streaming', () => {

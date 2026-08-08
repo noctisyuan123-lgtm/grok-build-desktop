@@ -63,7 +63,9 @@ function ActivitySummary({
   const content = (
     <>
       <span className={`activity-mark${isLive(snapshot) ? ' is-live' : ''}`} aria-hidden />
-      <span className="activity-label">{label}</span>
+      <span className="activity-label" aria-live={isLive(snapshot) ? 'polite' : undefined}>
+        {label}
+      </span>
       {meta ? <span className="activity-meta">{meta}</span> : null}
       {expandable ? (
         <ChevronDown className="activity-chevron" size={13} strokeWidth={1.7} aria-hidden />
@@ -86,7 +88,7 @@ function ActivityRow({ trace }: { trace: TraceEvent }) {
   const [open, setOpen] = useState(false);
   const canOpen = Boolean(trace.raw);
   const duration =
-    trace.endedAt != null ? formatDuration(Math.max(0, trace.endedAt - trace.startedAt)) : 'live';
+    trace.endedAt != null ? formatDuration(Math.max(0, trace.endedAt - trace.startedAt)) : null;
   const row = (
     <>
       <span className={`activity-row-mark status-${trace.status}`} aria-hidden>
@@ -95,13 +97,13 @@ function ActivityRow({ trace }: { trace: TraceEvent }) {
       <span className="activity-row-label">{trace.label}</span>
       {trace.detail ? <span className="activity-row-detail">{trace.detail}</span> : null}
       {trace.progress ? <span className="activity-row-progress">{trace.progress}</span> : null}
-      <span className="activity-row-time">{duration}</span>
+      {duration ? <span className="activity-row-time">{duration}</span> : null}
     </>
   );
 
   return (
     <div
-      className={`activity-item activity-kind-${trace.kind} activity-status-${trace.status}`}
+      className={`activity-item activity-kind-${trace.kind} activity-status-${trace.status}${open ? ' row-open' : ''}`}
       data-parent={trace.parentKey || undefined}
     >
       {canOpen ? (
@@ -129,15 +131,12 @@ function isLive(snapshot: RunSnapshot): boolean {
 
 function liveLabel(snapshot: RunSnapshot): string {
   const active = snapshot.traces.filter((trace) => trace.status === 'running');
-  const activeAgents = active.filter((trace) => trace.kind === 'subagent');
   const latest = active.at(-1);
-  if (activeAgents.length > 1) return `${activeAgents.length} subagents working`;
   if (latest) return latest.label;
   if (!isLive(snapshot)) {
     const failed = snapshot.traces.filter((trace) => trace.status === 'error').length;
-    if (failed > 0) return `${failed} ${failed === 1 ? 'step' : 'steps'} failed`;
-    const count = snapshot.traces.length;
-    return `${count} ${count === 1 ? 'step' : 'steps'} completed`;
+    if (failed > 0) return 'Finished with errors';
+    return 'Finished';
   }
   if (snapshot.lastEventType === 'thought') return t('statusBar.thinking');
   if (snapshot.lastEventType === 'text') return t('statusBar.writing');
@@ -146,6 +145,19 @@ function liveLabel(snapshot: RunSnapshot): string {
 
 function summaryMeta(snapshot: RunSnapshot, elapsed: number | null): string {
   const parts: string[] = [];
+  if (isLive(snapshot)) {
+    const activeAgents = snapshot.traces.filter(
+      (trace) => trace.kind === 'subagent' && trace.status === 'running',
+    ).length;
+    if (activeAgents > 0) {
+      parts.push(`${activeAgents} ${activeAgents === 1 ? 'subagent' : 'subagents'}`);
+    }
+  } else {
+    const tools = snapshot.traces.filter((trace) => trace.kind === 'tool').length;
+    const agents = snapshot.traces.filter((trace) => trace.kind === 'subagent').length;
+    if (tools > 0) parts.push(`${tools} ${tools === 1 ? 'tool' : 'tools'}`);
+    if (agents > 0) parts.push(`${agents} ${agents === 1 ? 'subagent' : 'subagents'}`);
+  }
   if (elapsed != null) parts.push(formatDuration(elapsed));
   if (snapshot.usage?.totalTokens) parts.push(formatTokens(snapshot.usage.totalTokens));
   if (snapshot.usage?.turns) {
