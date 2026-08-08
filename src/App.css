@@ -6668,7 +6668,7 @@ body,
 
 .workspace.terminal-open > .terminal-dock {
   align-self: stretch;
-  background: #151515;
+  background: #181818;
   border: 0;
   border-radius: 0;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
@@ -6770,7 +6770,7 @@ body,
 }
 
 .terminal-xterm {
-  background: #151515;
+  background: #181818;
   height: 100%;
   min-height: 0;
   overflow: hidden;

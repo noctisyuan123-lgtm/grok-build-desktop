@@ -6,6 +6,7 @@ import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { TerminalSquare, X } from 'lucide-react';
 import { t } from '../i18n';
+import { VS_CODE_TERMINAL_OPTIONS } from '../lib/vscodeTerminal';
 
 const TERMINAL_HEIGHT_KEY = 'grok-desktop-terminal-height';
 const MIN_TERMINAL_HEIGHT = 150;
@@ -51,42 +52,11 @@ export function TerminalDock({ open, onClose, cwd, workingDirectory }: TerminalD
 
     const id = sessionId();
     const terminal = new Terminal({
+      ...VS_CODE_TERMINAL_OPTIONS,
       allowProposedApi: false,
       convertEol: false,
-      cursorBlink: true,
-      cursorStyle: 'bar',
-      fontFamily: "'JetBrains Mono Variable', 'SFMono-Regular', Consolas, monospace",
-      fontSize: 12,
-      letterSpacing: 0,
-      lineHeight: 1.25,
       macOptionIsMeta: true,
-      // Match VS Code's contrast protection so dim OMZ autosuggestion colors
-      // (commonly ANSI 8/240) stay visible without overriding user themes.
-      minimumContrastRatio: 3,
       scrollback: 5000,
-      theme: {
-        background: '#151515',
-        black: '#1e1e1e',
-        blue: '#569cd6',
-        brightBlack: '#808080',
-        brightBlue: '#9cdcfe',
-        brightCyan: '#4ec9b0',
-        brightGreen: '#b5cea8',
-        brightMagenta: '#c586c0',
-        brightRed: '#f48771',
-        brightWhite: '#ffffff',
-        brightYellow: '#dcdcaa',
-        cursor: '#d4d4d4',
-        cursorAccent: '#151515',
-        cyan: '#4ec9b0',
-        foreground: '#d4d4d4',
-        green: '#6a9955',
-        magenta: '#c586c0',
-        red: '#f44747',
-        selectionBackground: '#264f78',
-        white: '#d4d4d4',
-        yellow: '#dcdcaa',
-      },
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
