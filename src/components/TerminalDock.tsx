@@ -32,6 +32,19 @@ function decodeTerminalBytes(encoded: string): Uint8Array {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
+// Shared stream decoder: PTY bytes arrive in arbitrary chunks, so a multi-byte
+// UTF-8 char (or an ANSI color sequence) can be split across two events. A
+// streaming TextDecoder reassembles them; passing a decoded *string* to
+// terminal.write() avoids xterm.js re-decoding a Uint8Array and mangling
+// escape sequences / non-ASCII bytes on chunk boundaries (which drops colors).
+function createTerminalWriter(terminal: Terminal) {
+  const decoder = new TextDecoder('utf-8');
+  return (encoded: string) => {
+    const bytes = decodeTerminalBytes(encoded);
+    terminal.write(decoder.decode(bytes, { stream: true }));
+  };
+}
+
 export interface TerminalDockProps {
   open: boolean;
   onClose: () => void;
@@ -62,6 +75,21 @@ export function TerminalDock({ open, onClose, cwd, workingDirectory }: TerminalD
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(host);
+    // Prefer the WebGL renderer: the DOM renderer can drop colors in Tauri's
+    // WebKit webview. Fall back to DOM if WebGL is unavailable.
+    import('@xterm/addon-webgl')
+      .then(({ WebglAddon }) => {
+        if (disposed) return;
+        try {
+          terminal.loadAddon(new WebglAddon());
+        } catch {
+          /* keep DOM renderer */
+        }
+      })
+      .catch(() => {
+        /* addon unavailable — keep DOM renderer */
+      });
+    const writeOutput = createTerminalWriter(terminal);
 
     let disposed = false;
     let started = false;
@@ -118,7 +146,7 @@ export function TerminalDock({ open, onClose, cwd, workingDirectory }: TerminalD
         'grok-desktop://terminal-output',
         (event) => {
           if (event.payload.sessionId === id && !disposed) {
-            terminal.write(decodeTerminalBytes(event.payload.data));
+            writeOutput(event.payload.data);
           }
         },
       );

@@ -1824,12 +1824,11 @@ fn start_terminal_session(
         .map_err(|error| format!("Couldn't create terminal: {error}"))?;
 
     let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    let mut command = CommandBuilder::new(shell);
-    // Be explicit: ZLE, Oh My Zsh plugins, autosuggestions and syntax
-    // highlighting are interactive-shell features. A PTY normally implies
-    // this, but -i keeps the contract stable across shells and platforms.
-    command.arg("-i");
-    command.arg("-l");
+    let mut command = CommandBuilder::new(&shell);
+    // Be explicit: ZLE, autosuggestions and syntax highlighting are
+    // interactive-shell features. Force them on via a single combined arg
+    // (some PTY layers are picky about separate short flags).
+    command.arg("-il");
     command.cwd(&cwd);
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
