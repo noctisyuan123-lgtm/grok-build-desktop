@@ -47,7 +47,7 @@ import {
 } from './app/types';
 import { codingPresets, defaultDrafts, storageKeys } from './app/constants';
 import { t } from './i18n';
-import { formatOutput, makeId } from './app/format';
+import { makeId } from './app/format';
 import { buildGrokArgs } from './app/grokArgs';
 import type { ComposerAttachment } from './lib/attachments';
 
@@ -647,13 +647,7 @@ function App() {
       ? 'Login needed'
       : 'Connect needed';
   const workspacePath = codingCwd.trim() || 'No project selected';
-  const terminalDisplay =
-    terminalLines.length > 0
-      ? terminalLines
-      : formatOutput(lastRun)
-          .split('\n')
-          .slice(0, 80)
-          .map((line) => `[out] ${line}`);
+  const terminalDisplay = terminalLines.slice(0, 160);
   const activeRun = useActiveRun();
   const grokIsRunning = Boolean(activeRun && activeRun.state === 'running');
   const activeRunId = activeRun?.id ?? null;
@@ -703,39 +697,36 @@ function App() {
     });
   }
 
-  const messageRefs: MessageRef[] = useMemo(
-    () => {
-      const latestIndex = messages.length - 1;
-      return messages.map((m, index) =>
-        m.role === 'user'
-          ? {
-              runId: '',
-              role: 'user' as const,
-              // Older builds embedded `📎 filename` into the bubble. The
-              // original bytes were never persisted, so we cannot recover a
-              // thumbnail after restart, but we can stop exposing that legacy
-              // pseudo-link. New attachments use the preview strip above.
-              userText: m.content.replace(/\n\n📎[^\n]*$/, ''),
-              id: m.id,
-              attachments: messageAttachments[m.id],
-            }
-          : {
-              // Live runs keep their real id; restored/legacy assistant
-              // messages get a STABLE synthetic id (msg:<id>) so MessageItem
-              // can key their worker-rendered markdown HTML and they don't all
-              // collide on "". fallbackText still feeds the worker + the
-              // plain-text fallback while parsing.
-              runId: m.runId || `msg:${m.id}`,
-              role: 'assistant' as const,
-              fallbackText: m.content,
-              durationMs: m.meta?.durationMs,
-              id: m.id,
-              canUndo: index === latestIndex && m.status !== 'streaming' && !grokIsRunning,
-            },
-      );
-    },
-    [grokIsRunning, messageAttachments, messages],
-  );
+  const messageRefs: MessageRef[] = useMemo(() => {
+    const latestIndex = messages.length - 1;
+    return messages.map((m, index) =>
+      m.role === 'user'
+        ? {
+            runId: '',
+            role: 'user' as const,
+            // Older builds embedded `📎 filename` into the bubble. The
+            // original bytes were never persisted, so we cannot recover a
+            // thumbnail after restart, but we can stop exposing that legacy
+            // pseudo-link. New attachments use the preview strip above.
+            userText: m.content.replace(/\n\n📎[^\n]*$/, ''),
+            id: m.id,
+            attachments: messageAttachments[m.id],
+          }
+        : {
+            // Live runs keep their real id; restored/legacy assistant
+            // messages get a STABLE synthetic id (msg:<id>) so MessageItem
+            // can key their worker-rendered markdown HTML and they don't all
+            // collide on "". fallbackText still feeds the worker + the
+            // plain-text fallback while parsing.
+            runId: m.runId || `msg:${m.id}`,
+            role: 'assistant' as const,
+            fallbackText: m.content,
+            durationMs: m.meta?.durationMs,
+            id: m.id,
+            canUndo: index === latestIndex && m.status !== 'streaming' && !grokIsRunning,
+          },
+    );
+  }, [grokIsRunning, messageAttachments, messages]);
   return (
     <main className={`app-shell theme-${themeMode}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
       <CommandPalette
@@ -798,7 +789,7 @@ function App() {
         aria-orientation="vertical"
         onPointerDown={startSidebarResize}
       />
-      <section className={`workspace dock-${dockPosition}`}>
+      <section className={`workspace dock-${dockPosition}${terminalOpen ? ' terminal-open' : ''}`}>
         {/* Minimal, Claude-Desktop-style top bar. The old toolbar row (Repo
             input, model chip, Preview/Context/Terminal/Tools/Settings, status
             pill) is gone — those all live in the sidebar, ⌘K palette, the
@@ -909,15 +900,12 @@ function App() {
 
         <TerminalDock
           open={terminalOpen}
-          onOpenPanel={() => togglePanel('terminal')}
           onClose={() => setTerminalOpen(false)}
-          dockPosition={dockPosition}
-          setDockPosition={setDockPosition}
           busyRunner={busyRunner}
           shellCommand={shellCommand}
           setShellCommand={setShellCommand}
           runShell={runShell}
-          sessionNotice={sessionNotice}
+          workingDirectory={codingCwd.trim() || '~'}
           terminalDisplay={terminalDisplay}
         />
         <Toolbelt open={toolbeltOpen} onToggle={setToolbeltOpen} runners={runners} />

@@ -122,13 +122,16 @@ describe('terminal dock and sidebar health', () => {
     await user.click(await screen.findByRole('menuitem', { name: /Terminal/ }));
 
     // Scope to the dock — the Toolbelt's browser card has a "Run" button too.
-    const dock = within(document.querySelector('details.terminal-dock') as HTMLElement);
-    await user.click(dock.getByRole('button', { name: t('common.run') }));
+    const dock = within(document.querySelector('section.terminal-dock') as HTMLElement);
+    const command = dock.getByRole('textbox', { name: t('terminal.shellCommand') });
+    await user.click(command);
+    await user.keyboard('{Enter}');
     await waitFor(() => {
       expect(tauri.calls.find((c) => c.cmd === 'run_shell_command')).toBeDefined();
     });
     const shellCall = tauri.calls.find((c) => c.cmd === 'run_shell_command')!;
     expect(String(shellCall.args.command)).toContain('git status');
+    expect(shellCall.args.cwd).toBeNull();
     // The ToolRun output lands in the terminal log view.
     expect(await screen.findByText(/ran: pwd/)).toBeInTheDocument();
   });

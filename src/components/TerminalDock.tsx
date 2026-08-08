@@ -1,116 +1,134 @@
-// The collapsible terminal dock: shell-command input, run button, dock
-// position dots, and the log view. Extracted from App.tsx unchanged.
-import { Loader2, Play, SquareTerminal, TerminalSquare } from 'lucide-react';
-import type { DockPosition } from '../app/types';
+import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react';
+import { Loader2, Play, TerminalSquare, X } from 'lucide-react';
 import { terminalClass, terminalPrefix, terminalText } from '../app/format';
 import { t } from '../i18n';
 
+const TERMINAL_HEIGHT_KEY = 'grok-desktop-terminal-height';
+const MIN_TERMINAL_HEIGHT = 150;
+const MAX_TERMINAL_HEIGHT = 520;
+
+function storedTerminalHeight(): number {
+  const parsed = Number.parseInt(window.localStorage.getItem(TERMINAL_HEIGHT_KEY) ?? '', 10);
+  if (!Number.isFinite(parsed)) return 260;
+  return Math.min(MAX_TERMINAL_HEIGHT, Math.max(MIN_TERMINAL_HEIGHT, parsed));
+}
+
 export interface TerminalDockProps {
   open: boolean;
-  onOpenPanel: () => void;
   onClose: () => void;
-  dockPosition: DockPosition;
-  setDockPosition: (position: DockPosition) => void;
   busyRunner: string | null;
   shellCommand: string;
   setShellCommand: (command: string) => void;
-  runShell: () => void;
-  sessionNotice: string | null;
+  runShell: () => void | Promise<void>;
+  workingDirectory: string;
   terminalDisplay: string[];
 }
 
 export function TerminalDock({
   open,
-  onOpenPanel,
   onClose,
-  dockPosition,
-  setDockPosition,
   busyRunner,
   shellCommand,
   setShellCommand,
   runShell,
-  sessionNotice,
+  workingDirectory,
   terminalDisplay,
 }: TerminalDockProps) {
+  const heightRef = useRef(storedTerminalHeight());
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--terminal-height', `${heightRef.current}px`);
+  }, []);
+
+  if (!open) return null;
+
+  function startResize(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = heightRef.current;
+    const maximum = Math.min(MAX_TERMINAL_HEIGHT, Math.round(window.innerHeight * 0.58));
+
+    const move = (moveEvent: PointerEvent) => {
+      const next = Math.min(
+        maximum,
+        Math.max(MIN_TERMINAL_HEIGHT, startHeight + startY - moveEvent.clientY),
+      );
+      heightRef.current = next;
+      document.documentElement.style.setProperty('--terminal-height', `${next}px`);
+    };
+    const stop = () => {
+      window.localStorage.setItem(TERMINAL_HEIGHT_KEY, String(heightRef.current));
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', stop);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop, { once: true });
+  }
+
+  const canRun = busyRunner === null && shellCommand.trim().length > 0;
+
   return (
-    <details
-      className="terminal-dock"
-      onToggle={(event) => {
-        if (event.currentTarget.open && !open) onOpenPanel();
-        else if (!event.currentTarget.open && open) onClose();
-      }}
-      open={open}
-    >
-      <summary className="terminal-summary">
-        <span>
-          <SquareTerminal size={16} />
-          <strong>{t('terminal.title')}</strong>
-          <small className={busyRunner ? 'running' : ''}>
-            {busyRunner ? t('common.running') : t('common.idle')}
-          </small>
-        </span>
-        <span>
-          <button
-            aria-label={t('terminal.dockRight')}
-            className={dockPosition === 'right' ? 'dock-dot active' : 'dock-dot'}
-            onClick={(event) => {
-              event.preventDefault();
-              setDockPosition('right');
+    <section className="terminal-dock" aria-label={t('terminal.title')}>
+      <div
+        aria-label="Resize terminal"
+        aria-orientation="horizontal"
+        className="terminal-resizer"
+        onPointerDown={startResize}
+        role="separator"
+      />
+      <div className="terminal-commandbar">
+        <label className="terminal-command-input">
+          <TerminalSquare aria-hidden="true" size={14} />
+          <span className="terminal-cwd">{workingDirectory}</span>
+          <span className="terminal-chevron">›</span>
+          <input
+            aria-label={t('terminal.shellCommand')}
+            autoCapitalize="off"
+            autoComplete="off"
+            onChange={(event) => setShellCommand(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey && canRun) {
+                event.preventDefault();
+                void runShell();
+              }
             }}
-            type="button"
-          >
-            {t('common.right')}
-          </button>
-          <button
-            aria-label={t('terminal.dockBottom')}
-            className={dockPosition === 'bottom' ? 'dock-dot active' : 'dock-dot'}
-            onClick={(event) => {
-              event.preventDefault();
-              setDockPosition('bottom');
-            }}
-            type="button"
-          >
-            {t('common.bottom')}
-          </button>
-          <small>{t('terminal.linesCount', { count: terminalDisplay.length })}</small>
-        </span>
-      </summary>
-      <div className="terminal-head">
-        <div>
-          <SquareTerminal size={17} />
-          <strong>{t('terminal.title')}</strong>
-          <span className={busyRunner ? 'running' : ''}>
-            {busyRunner ? t('common.running') : t('common.idle')}
-          </span>
-        </div>
-        <div className="terminal-actions">
-          <label>
-            <TerminalSquare size={15} />
-            <input
-              aria-label={t('terminal.shellCommand')}
-              onChange={(event) => setShellCommand(event.currentTarget.value)}
-              value={shellCommand}
-            />
-          </label>
-          <button
-            disabled={busyRunner !== null || shellCommand.trim().length === 0}
-            onClick={runShell}
-            type="button"
-          >
-            {busyRunner === 'shell' ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
-            {t('common.run')}
-          </button>
-        </div>
+            spellCheck={false}
+            value={shellCommand}
+          />
+        </label>
+        <button
+          aria-label={t('common.run')}
+          className="terminal-icon-button terminal-run"
+          disabled={!canRun}
+          onClick={() => void runShell()}
+          type="button"
+        >
+          {busyRunner === 'shell' ? <Loader2 className="spin" size={15} /> : <Play size={15} />}
+        </button>
+        <button
+          aria-label={t('common.close')}
+          className="terminal-icon-button"
+          onClick={onClose}
+          type="button"
+        >
+          <X size={16} />
+        </button>
       </div>
-      {sessionNotice ? <p className="session-note">{sessionNotice}</p> : null}
       <div className="terminal-view" role="log" aria-live="polite">
-        {terminalDisplay.map((line, index) => (
-          <div className={terminalClass(line)} key={`${line}-${index}`}>
-            <span className="terminal-prefix">{terminalPrefix(line)}</span>
-            <span>{terminalText(line)}</span>
+        {terminalDisplay.length === 0 ? (
+          <div className="terminal-line terminal-system">
+            <span className="terminal-prefix">cwd</span>
+            <span>{workingDirectory}</span>
           </div>
-        ))}
+        ) : (
+          terminalDisplay.map((line, index) => (
+            <div className={terminalClass(line)} key={`${line}-${index}`}>
+              <span className="terminal-prefix">{terminalPrefix(line)}</span>
+              <span>{terminalText(line)}</span>
+            </div>
+          ))
+        )}
       </div>
-    </details>
+    </section>
   );
 }

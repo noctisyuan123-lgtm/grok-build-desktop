@@ -220,9 +220,7 @@ describe('composer submit → queued run → streamed reply', () => {
     });
     await ctx.user.type(composerTextarea(), 'Keep this newer draft');
 
-    await ctx.user.click(
-      await convo().findByRole('button', { name: t('message.undoResponse') }),
-    );
+    await ctx.user.click(await convo().findByRole('button', { name: t('message.undoResponse') }));
 
     expect(await convo().findByText(t('emptyState.title'))).toBeInTheDocument();
     expect(composerTextarea().value).toBe('Please revise this prompt');
@@ -333,17 +331,15 @@ describe('command palette, settings, panels, shortcuts', () => {
   it('opens the Terminal panel from the panels menu and closes it with Escape', async () => {
     const { user } = await bootApp();
 
-    // The dock is a <details>; its children stay in the jsdom DOM either way,
-    // so the open/closed state is the `open` attribute.
-    const dock = () => document.querySelector('details.terminal-dock');
-    expect(dock()).not.toHaveAttribute('open');
+    const dock = () => document.querySelector('section.terminal-dock');
+    expect(dock()).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: t('titleBar.panelsAria') }));
     await user.click(await screen.findByRole('menuitem', { name: /Terminal/ }));
-    await waitFor(() => expect(dock()).toHaveAttribute('open'));
+    await waitFor(() => expect(dock()).toBeInTheDocument());
 
     await user.keyboard('{Escape}');
-    await waitFor(() => expect(dock()).not.toHaveAttribute('open'));
+    await waitFor(() => expect(dock()).not.toBeInTheDocument());
   });
 
   it('toggles the sidebar with ⌘B and the theme with ⌘⇧L', async () => {

@@ -10,6 +10,7 @@ import { storageKeys } from '../app/constants';
 import { loadIdMap, loadIdSet } from '../app/storage';
 import { timeLabel } from '../app/format';
 import { t } from '../i18n';
+import { deriveConversationTitle } from '../lib/conversationTitle';
 
 export interface HistoryOrganizationDeps {
   tabs: Tab[];
@@ -168,7 +169,7 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
   const historySearchInputRef = useRef<HTMLInputElement | null>(null);
   // HISTORY is a list of CONVERSATIONS (sessions/tabs), newest first — the way
   // Claude / ChatGPT show chats. Each row is one whole conversation, titled by
-  // its first prompt; clicking it loads that conversation. (It used to list
+  // a compact intent summary of its first prompt; clicking it loads that conversation. (It used to list
   // every individual prompt, which read as "messages", not tasks.)
   const recentPrompts = useMemo(() => {
     const firstUserLine = (msgs: TabMessage[]): string => {
@@ -189,7 +190,7 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
         const lastTs = msgs.length
           ? Math.max(...msgs.map((m) => (m as { ts?: number }).ts ?? 0))
           : t.createdAt;
-        const fallback = fp ? (fp.length > 56 ? `${fp.slice(0, 56)}…` : fp) : 'New conversation';
+        const fallback = deriveConversationTitle(fp);
         return {
           id: t.id,
           title: promptLabels[t.id] ?? fallback,

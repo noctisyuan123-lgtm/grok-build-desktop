@@ -1512,6 +1512,13 @@ fn normalized_cwd(cwd: Option<String>) -> PathBuf {
     .unwrap_or_else(project_root)
 }
 
+fn default_shell_cwd() -> PathBuf {
+    env::var_os("HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(project_root)
+}
+
 fn collect_grok_auth_status() -> GrokAuthStatus {
     let program = env::var("GROK_DESKTOP_GROK_CMD").unwrap_or_else(|_| "grok".to_string());
     let version_result = Command::new(&program)
@@ -1706,7 +1713,14 @@ async fn run_grok_task(prompt: String, mode: String, cwd: Option<String>) -> Too
 /// must never silently execute somewhere other than the directory shown in
 /// the UI — a stale or mistyped path is an error, not a redirect.
 fn shell_cwd(cwd: Option<String>) -> Result<PathBuf, String> {
-    let requested = normalized_cwd(cwd);
+    // With no selected project, a user-facing terminal belongs in $HOME —
+    // never in the source path baked into the packaged binary.
+    let requested = cwd
+        .and_then(|value| {
+            let trimmed = value.trim();
+            (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
+        })
+        .unwrap_or_else(default_shell_cwd);
     let canonical = requested.canonicalize().map_err(|_| {
         format!(
             "Working directory {} does not exist. Pick a project folder first.",
@@ -1730,7 +1744,10 @@ async fn run_shell_command(command: String, cwd: Option<String>) -> ToolRun {
             return ToolRun {
                 ok: false,
                 command: "zsh -lc".to_string(),
-                cwd: normalized_cwd(cwd).to_string_lossy().to_string(),
+                cwd: shell_cwd(cwd)
+                    .unwrap_or_else(|_| default_shell_cwd())
+                    .to_string_lossy()
+                    .to_string(),
                 exit_code: None,
                 duration_ms: 0,
                 timed_out: false,
@@ -2859,6 +2876,13 @@ mod tests {
         let resolved = shell_cwd(Some(dir.to_string_lossy().to_string())).expect("real dir ok");
         assert!(resolved.is_dir());
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn shell_cwd_defaults_to_home_instead_of_the_source_tree() {
+        let home = env::var_os("HOME").map(PathBuf::from).expect("HOME is set");
+        let resolved = shell_cwd(None).expect("home directory is valid");
+        assert_eq!(resolved, home.canonicalize().expect("canonical home"));
     }
 
     #[test]

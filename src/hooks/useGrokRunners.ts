@@ -197,29 +197,41 @@ export function useGrokRunners(deps: GrokRunnerDeps) {
   }
 
   async function runShell() {
+    const command = shellCommand.trim();
+    if (!command) return;
     setBusyRunner('shell');
-    setTerminalLines([]);
+    setTerminalLines([`[sys] $ ${command}`]);
     try {
       if (!hasTauriRuntime()) {
-        recordRun(nativeUnavailable('zsh -lc'));
+        const run = nativeUnavailable('zsh -lc');
+        setTerminalLines([`[sys] $ ${command}`, `[err] ${run.stderr}`]);
+        recordRun(run);
         return;
       }
-      recordRun(
-        await invoke<ToolRun>('run_shell_command', {
-          command: shellCommand,
-          cwd: codingCwd,
-        }),
-      );
+      const run = await invoke<ToolRun>('run_shell_command', {
+        command,
+        cwd: codingCwd.trim() || null,
+      });
+      const lines = [`[sys] ${run.cwd || '~'} $ ${command}`];
+      if (run.output.trim()) lines.push(...run.output.split('\n').map((line) => `[out] ${line}`));
+      if (run.stderr.trim()) lines.push(...run.stderr.split('\n').map((line) => `[err] ${line}`));
+      if (!run.output.trim() && !run.stderr.trim()) {
+        lines.push('[sys] Command finished without output.');
+      }
+      setTerminalLines(lines);
+      recordRun(run);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setTerminalLines([`[sys] $ ${command}`, `[err] ${message}`]);
       recordRun({
         ok: false,
         command: 'zsh -lc',
-        cwd: codingCwd,
+        cwd: codingCwd.trim(),
         exit_code: null,
         duration_ms: 0,
         timed_out: false,
         output: '',
-        stderr: error instanceof Error ? error.message : String(error),
+        stderr: message,
       });
     } finally {
       setBusyRunner(null);

@@ -14,7 +14,6 @@ export const en = {
   'common.remove': 'Remove',
   'common.run': 'Run',
   'common.running': 'Running',
-  'common.idle': 'Idle',
   'common.right': 'Right',
   'common.bottom': 'Bottom',
   'common.dark': 'Dark',
@@ -304,9 +303,6 @@ export const en = {
 
   // ── Terminal dock ─────────────────────────────────────────────────────────
   'terminal.title': 'Terminal',
-  'terminal.dockRight': 'Dock terminal right',
-  'terminal.dockBottom': 'Dock terminal bottom',
-  'terminal.linesCount': '{count} lines',
   'terminal.shellCommand': 'Shell command',
 
   // ── Toolbelt (developer utilities) ────────────────────────────────────────

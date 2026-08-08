@@ -53,7 +53,7 @@ function render(activeMessages: ChatMessage[] = tabs[0].messages as ChatMessage[
 }
 
 describe('recentPrompts derivation', () => {
-  it('lists one row per conversation, newest activity first, titled by the first user line', () => {
+  it('lists one row per conversation, newest activity first, titled by a compact intent summary', () => {
     const { result } = render();
     const rows = result.current.recentPrompts;
     // t2 has the newest activity (ts 400); the empty t3 falls back to its
