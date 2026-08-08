@@ -31,6 +31,7 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 ignore = "0.4"
 base64 = "0.22"
+portable-pty = "0.9"
 
 # nix is Unix-only (signals, process groups); skipped on Windows where we use
 # taskkill /T for process-tree termination instead. See src/runs/process.rs.

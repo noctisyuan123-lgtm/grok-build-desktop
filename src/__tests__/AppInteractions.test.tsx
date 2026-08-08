@@ -115,25 +115,30 @@ describe('project folder picker', () => {
 });
 
 describe('terminal dock and sidebar health', () => {
-  it('runs the shell command from the terminal dock and shows its output', async () => {
+  it('starts an interactive PTY and forwards terminal keystrokes directly to it', async () => {
     const { tauri, user } = await bootApp();
 
     await user.click(screen.getByRole('button', { name: t('titleBar.panelsAria') }));
     await user.click(await screen.findByRole('menuitem', { name: /Terminal/ }));
 
-    // Scope to the dock — the Toolbelt's browser card has a "Run" button too.
     const dock = within(document.querySelector('section.terminal-dock') as HTMLElement);
-    const command = dock.getByRole('textbox', { name: t('terminal.shellCommand') });
-    await user.click(command);
-    await user.keyboard('{Enter}');
     await waitFor(() => {
-      expect(tauri.calls.find((c) => c.cmd === 'run_shell_command')).toBeDefined();
+      expect(tauri.calls.find((c) => c.cmd === 'start_terminal_session')).toBeDefined();
     });
-    const shellCall = tauri.calls.find((c) => c.cmd === 'run_shell_command')!;
-    expect(String(shellCall.args.command)).toContain('git status');
-    expect(shellCall.args.cwd).toBeNull();
-    // The ToolRun output lands in the terminal log view.
-    expect(await screen.findByText(/ran: pwd/)).toBeInTheDocument();
+    const startCall = tauri.calls.find((c) => c.cmd === 'start_terminal_session')!;
+    expect(startCall.args.cwd).toBeNull();
+
+    const terminalInput = dock.getByRole('textbox', { name: 'Terminal input' });
+    await user.click(terminalInput);
+    await user.keyboard('echo hello{Enter}');
+    await waitFor(() => {
+      const writes = tauri.calls
+        .filter((call) => call.cmd === 'write_terminal_session')
+        .map((call) => String(call.args.data))
+        .join('');
+      expect(writes).toContain('echo hello');
+      expect(writes).toContain('\r');
+    });
   });
 
   it('re-probes tool statuses and runs the doctor from the sidebar', async () => {

@@ -1,11 +1,20 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react';
-import { Loader2, Play, TerminalSquare, X } from 'lucide-react';
-import { terminalClass, terminalPrefix, terminalText } from '../app/format';
+import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { FitAddon } from '@xterm/addon-fit';
+import { Terminal } from '@xterm/xterm';
+import '@xterm/xterm/css/xterm.css';
+import { TerminalSquare, X } from 'lucide-react';
 import { t } from '../i18n';
 
 const TERMINAL_HEIGHT_KEY = 'grok-desktop-terminal-height';
 const MIN_TERMINAL_HEIGHT = 150;
 const MAX_TERMINAL_HEIGHT = 520;
+
+interface TerminalOutputPayload {
+  sessionId: string;
+  data: string;
+}
 
 function storedTerminalHeight(): number {
   const parsed = Number.parseInt(window.localStorage.getItem(TERMINAL_HEIGHT_KEY) ?? '', 10);
@@ -13,32 +22,148 @@ function storedTerminalHeight(): number {
   return Math.min(MAX_TERMINAL_HEIGHT, Math.max(MIN_TERMINAL_HEIGHT, parsed));
 }
 
+function sessionId(): string {
+  return `terminal-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 9)}`;
+}
+
+function decodeTerminalBytes(encoded: string): Uint8Array {
+  const binary = window.atob(encoded);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
 export interface TerminalDockProps {
   open: boolean;
   onClose: () => void;
-  busyRunner: string | null;
-  shellCommand: string;
-  setShellCommand: (command: string) => void;
-  runShell: () => void | Promise<void>;
+  cwd: string;
   workingDirectory: string;
-  terminalDisplay: string[];
 }
 
-export function TerminalDock({
-  open,
-  onClose,
-  busyRunner,
-  shellCommand,
-  setShellCommand,
-  runShell,
-  workingDirectory,
-  terminalDisplay,
-}: TerminalDockProps) {
+export function TerminalDock({ open, onClose, cwd, workingDirectory }: TerminalDockProps) {
   const heightRef = useRef(storedTerminalHeight());
+  const hostRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     document.documentElement.style.setProperty('--terminal-height', `${heightRef.current}px`);
   }, []);
+
+  useEffect(() => {
+    if (!open || !hostRef.current) return;
+
+    const id = sessionId();
+    const terminal = new Terminal({
+      allowProposedApi: false,
+      convertEol: false,
+      cursorBlink: true,
+      cursorStyle: 'bar',
+      fontFamily: "'JetBrains Mono Variable', 'SFMono-Regular', Consolas, monospace",
+      fontSize: 12,
+      letterSpacing: 0,
+      lineHeight: 1.25,
+      macOptionIsMeta: true,
+      scrollback: 5000,
+      theme: {
+        background: '#151515',
+        black: '#1e1e1e',
+        blue: '#569cd6',
+        brightBlack: '#808080',
+        brightBlue: '#9cdcfe',
+        brightCyan: '#4ec9b0',
+        brightGreen: '#b5cea8',
+        brightMagenta: '#c586c0',
+        brightRed: '#f48771',
+        brightWhite: '#ffffff',
+        brightYellow: '#dcdcaa',
+        cursor: '#d4d4d4',
+        cursorAccent: '#151515',
+        cyan: '#4ec9b0',
+        foreground: '#d4d4d4',
+        green: '#6a9955',
+        magenta: '#c586c0',
+        red: '#f44747',
+        selectionBackground: '#264f78',
+        white: '#d4d4d4',
+        yellow: '#dcdcaa',
+      },
+    });
+    const fit = new FitAddon();
+    terminal.loadAddon(fit);
+    terminal.open(hostRef.current);
+
+    let disposed = false;
+    let started = false;
+    let resizeObserver: ResizeObserver | null = null;
+    const unlisteners: UnlistenFn[] = [];
+    const disposables = [
+      terminal.onData((data) => {
+        if (!started || disposed) return;
+        void invoke('write_terminal_session', { sessionId: id, data });
+      }),
+      terminal.onResize(({ cols, rows }) => {
+        if (!started || disposed) return;
+        void invoke('resize_terminal_session', { sessionId: id, cols, rows });
+      }),
+    ];
+
+    const fitTerminal = () => {
+      if (disposed) return;
+      try {
+        fit.fit();
+      } catch {
+        // The host may be between grid layouts for one animation frame.
+      }
+    };
+
+    void (async () => {
+      const stopOutput = await listen<TerminalOutputPayload>(
+        'grok-desktop://terminal-output',
+        (event) => {
+          if (event.payload.sessionId === id && !disposed) {
+            terminal.write(decodeTerminalBytes(event.payload.data));
+          }
+        },
+      );
+      const stopExit = await listen<string>('grok-desktop://terminal-exit', (event) => {
+        if (event.payload === id && !disposed) terminal.options.disableStdin = true;
+      });
+      if (disposed) {
+        stopOutput();
+        stopExit();
+        return;
+      }
+      unlisteners.push(stopOutput, stopExit);
+      fitTerminal();
+      try {
+        await invoke('start_terminal_session', {
+          sessionId: id,
+          cwd: cwd.trim() || null,
+          cols: terminal.cols,
+          rows: terminal.rows,
+        });
+        started = true;
+        terminal.focus();
+      } catch (error) {
+        terminal.writeln(`\r\n\x1b[31m${String(error)}\x1b[0m`);
+        terminal.options.disableStdin = true;
+      }
+    })();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(fitTerminal);
+      resizeObserver.observe(hostRef.current);
+    } else {
+      window.addEventListener('resize', fitTerminal);
+    }
+
+    return () => {
+      disposed = true;
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', fitTerminal);
+      unlisteners.forEach((unlisten) => unlisten());
+      disposables.forEach((disposable) => disposable.dispose());
+      if (started) void invoke('close_terminal_session', { sessionId: id });
+      terminal.dispose();
+    };
+  }, [cwd, open]);
 
   if (!open) return null;
 
@@ -65,8 +190,6 @@ export function TerminalDock({
     window.addEventListener('pointerup', stop, { once: true });
   }
 
-  const canRun = busyRunner === null && shellCommand.trim().length > 0;
-
   return (
     <section className="terminal-dock" aria-label={t('terminal.title')}>
       <div
@@ -76,35 +199,12 @@ export function TerminalDock({
         onPointerDown={startResize}
         role="separator"
       />
-      <div className="terminal-commandbar">
-        <label className="terminal-command-input">
+      <div className="terminal-toolbar">
+        <div className="terminal-tab" aria-current="page">
           <TerminalSquare aria-hidden="true" size={14} />
-          <span className="terminal-cwd">{workingDirectory}</span>
-          <span className="terminal-chevron">›</span>
-          <input
-            aria-label={t('terminal.shellCommand')}
-            autoCapitalize="off"
-            autoComplete="off"
-            onChange={(event) => setShellCommand(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey && canRun) {
-                event.preventDefault();
-                void runShell();
-              }
-            }}
-            spellCheck={false}
-            value={shellCommand}
-          />
-        </label>
-        <button
-          aria-label={t('common.run')}
-          className="terminal-icon-button terminal-run"
-          disabled={!canRun}
-          onClick={() => void runShell()}
-          type="button"
-        >
-          {busyRunner === 'shell' ? <Loader2 className="spin" size={15} /> : <Play size={15} />}
-        </button>
+          <span>zsh</span>
+          <small>{workingDirectory}</small>
+        </div>
         <button
           aria-label={t('common.close')}
           className="terminal-icon-button"
@@ -114,21 +214,7 @@ export function TerminalDock({
           <X size={16} />
         </button>
       </div>
-      <div className="terminal-view" role="log" aria-live="polite">
-        {terminalDisplay.length === 0 ? (
-          <div className="terminal-line terminal-system">
-            <span className="terminal-prefix">cwd</span>
-            <span>{workingDirectory}</span>
-          </div>
-        ) : (
-          terminalDisplay.map((line, index) => (
-            <div className={terminalClass(line)} key={`${line}-${index}`}>
-              <span className="terminal-prefix">{terminalPrefix(line)}</span>
-              <span>{terminalText(line)}</span>
-            </div>
-          ))
-        )}
-      </div>
+      <div className="terminal-xterm" ref={hostRef} />
     </section>
   );
 }

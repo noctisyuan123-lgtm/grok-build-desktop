@@ -85,7 +85,6 @@ function App() {
     codingCwd,
     setCodingCwd,
     shellCommand,
-    setShellCommand,
     actionPolicy,
     setActionPolicy,
     codingWorkflow,
@@ -218,7 +217,6 @@ function App() {
     setTerminalLines,
     refreshStatuses,
     refreshStaticPreview,
-    runShell,
     runDoctor,
     pickFolder,
   } = runners;
@@ -647,7 +645,6 @@ function App() {
       ? 'Login needed'
       : 'Connect needed';
   const workspacePath = codingCwd.trim() || 'No project selected';
-  const terminalDisplay = terminalLines.slice(0, 160);
   const activeRun = useActiveRun();
   const grokIsRunning = Boolean(activeRun && activeRun.state === 'running');
   const activeRunId = activeRun?.id ?? null;
@@ -901,12 +898,8 @@ function App() {
         <TerminalDock
           open={terminalOpen}
           onClose={() => setTerminalOpen(false)}
-          busyRunner={busyRunner}
-          shellCommand={shellCommand}
-          setShellCommand={setShellCommand}
-          runShell={runShell}
+          cwd={codingCwd}
           workingDirectory={codingCwd.trim() || '~'}
-          terminalDisplay={terminalDisplay}
         />
         <Toolbelt open={toolbeltOpen} onToggle={setToolbeltOpen} runners={runners} />
       </section>

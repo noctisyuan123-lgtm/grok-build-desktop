@@ -303,7 +303,6 @@ export const en = {
 
   // ── Terminal dock ─────────────────────────────────────────────────────────
   'terminal.title': 'Terminal',
-  'terminal.shellCommand': 'Shell command',
 
   // ── Toolbelt (developer utilities) ────────────────────────────────────────
   'toolbelt.ariaLabel': 'Developer tools',

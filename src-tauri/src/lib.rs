@@ -35,9 +35,9 @@ use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     env, fs,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
@@ -45,6 +45,24 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::Manager;
+
+struct TerminalProcess {
+    master: Box<dyn portable_pty::MasterPty + Send>,
+    writer: Box<dyn Write + Send>,
+    child: Box<dyn portable_pty::Child + Send + Sync>,
+}
+
+#[derive(Default)]
+struct TerminalState {
+    sessions: Mutex<HashMap<String, TerminalProcess>>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalOutputPayload {
+    session_id: String,
+    data: String,
+}
 
 #[derive(Serialize)]
 struct ToolStatus {
@@ -1783,6 +1801,158 @@ async fn run_shell_command(command: String, cwd: Option<String>) -> ToolRun {
 }
 
 #[tauri::command]
+fn start_terminal_session(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, TerminalState>,
+    session_id: String,
+    cwd: Option<String>,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    use base64::Engine as _;
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+    use tauri::Emitter as _;
+
+    let cwd = shell_cwd(cwd)?;
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: rows.max(2),
+            cols: cols.max(2),
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|error| format!("Couldn't create terminal: {error}"))?;
+
+    let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let mut command = CommandBuilder::new(shell);
+    command.arg("-l");
+    command.cwd(&cwd);
+    command.env("TERM", "xterm-256color");
+    command.env("COLORTERM", "truecolor");
+
+    let child = pair
+        .slave
+        .spawn_command(command)
+        .map_err(|error| format!("Couldn't start shell: {error}"))?;
+    drop(pair.slave);
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|error| format!("Couldn't read terminal: {error}"))?;
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|error| format!("Couldn't write to terminal: {error}"))?;
+
+    {
+        let mut sessions = state
+            .sessions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if sessions.contains_key(&session_id) {
+            return Err("Terminal session already exists.".to_string());
+        }
+        sessions.insert(
+            session_id.clone(),
+            TerminalProcess {
+                master: pair.master,
+                writer,
+                child,
+            },
+        );
+    }
+
+    let app_for_output = app.clone();
+    thread::spawn(move || {
+        let mut buffer = [0_u8; 8192];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) | Err(_) => break,
+                Ok(count) => {
+                    let payload = TerminalOutputPayload {
+                        session_id: session_id.clone(),
+                        data: base64::engine::general_purpose::STANDARD.encode(&buffer[..count]),
+                    };
+                    let _ = app_for_output.emit("grok-desktop://terminal-output", payload);
+                }
+            }
+        }
+
+        let terminal_state = app_for_output.state::<TerminalState>();
+        let mut sessions = terminal_state
+            .sessions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        sessions.remove(&session_id);
+        let _ = app_for_output.emit("grok-desktop://terminal-exit", session_id);
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn write_terminal_session(
+    state: tauri::State<'_, TerminalState>,
+    session_id: String,
+    data: String,
+) -> Result<(), String> {
+    let mut sessions = state
+        .sessions
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let session = sessions
+        .get_mut(&session_id)
+        .ok_or_else(|| "Terminal session is no longer running.".to_string())?;
+    session
+        .writer
+        .write_all(data.as_bytes())
+        .and_then(|_| session.writer.flush())
+        .map_err(|error| format!("Couldn't write to terminal: {error}"))
+}
+
+#[tauri::command]
+fn resize_terminal_session(
+    state: tauri::State<'_, TerminalState>,
+    session_id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let sessions = state
+        .sessions
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let session = sessions
+        .get(&session_id)
+        .ok_or_else(|| "Terminal session is no longer running.".to_string())?;
+    session
+        .master
+        .resize(portable_pty::PtySize {
+            rows: rows.max(2),
+            cols: cols.max(2),
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|error| format!("Couldn't resize terminal: {error}"))
+}
+
+#[tauri::command]
+fn close_terminal_session(
+    state: tauri::State<'_, TerminalState>,
+    session_id: String,
+) -> Result<(), String> {
+    let mut sessions = state
+        .sessions
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(mut session) = sessions.remove(&session_id) {
+        session
+            .child
+            .kill()
+            .map_err(|error| format!("Couldn't close terminal: {error}"))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn inspect_grok_environment(cwd: Option<String>) -> ToolRun {
     let program = env::var("GROK_DESKTOP_GROK_CMD").unwrap_or_else(|_| "grok".to_string());
     let cwd = normalized_cwd(cwd);
@@ -2430,6 +2600,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(PreviewState::default())
+        .manage(TerminalState::default())
         // The static-site preview iframe loads from this scheme instead of
         // srcdoc: the served document carries its own (permissive) CSP, so
         // the app CSP can stay strict (script-src 'self') without breaking
@@ -2588,6 +2759,10 @@ pub fn run() {
             start_grok_login,
             run_grok_task,
             run_shell_command,
+            start_terminal_session,
+            write_terminal_session,
+            resize_terminal_session,
+            close_terminal_session,
             get_static_preview,
             inspect_grok_environment,
             list_grok_models,
