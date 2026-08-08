@@ -115,6 +115,35 @@ describe('project folder picker', () => {
 });
 
 describe('terminal dock and sidebar health', () => {
+  it('queues keystrokes typed while the PTY is still starting', async () => {
+    let finishStart: (() => void) | undefined;
+    const startPending = new Promise<void>((resolve) => {
+      finishStart = resolve;
+    });
+    const { tauri, user } = await bootApp({
+      start_terminal_session: () => startPending,
+    });
+
+    await user.click(screen.getByRole('button', { name: t('titleBar.panelsAria') }));
+    await user.click(await screen.findByRole('menuitem', { name: /Terminal/ }));
+    await waitFor(() => expect(tauri.commands()).toContain('start_terminal_session'));
+
+    const dock = within(document.querySelector('section.terminal-dock') as HTMLElement);
+    const terminalInput = dock.getByRole('textbox', { name: 'Terminal input' });
+    await user.click(terminalInput);
+    await user.keyboard('hi');
+    expect(tauri.commands()).not.toContain('write_terminal_session');
+
+    finishStart?.();
+    await waitFor(() => {
+      const writes = tauri.calls
+        .filter((call) => call.cmd === 'write_terminal_session')
+        .map((call) => String(call.args.data))
+        .join('');
+      expect(writes).toBe('hi');
+    });
+  });
+
   it('starts an interactive PTY and forwards terminal keystrokes directly to it', async () => {
     const { tauri, user } = await bootApp();
 

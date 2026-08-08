@@ -50,6 +50,7 @@ export function TerminalDock({ open, onClose, cwd, workingDirectory }: TerminalD
   useEffect(() => {
     if (!open || !hostRef.current) return;
 
+    const host = hostRef.current;
     const id = sessionId();
     const terminal = new Terminal({
       ...VS_CODE_TERMINAL_OPTIONS,
@@ -60,16 +61,42 @@ export function TerminalDock({ open, onClose, cwd, workingDirectory }: TerminalD
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
-    terminal.open(hostRef.current);
+    terminal.open(host);
 
     let disposed = false;
     let started = false;
+    let pendingInput = '';
+    let writeChain = Promise.resolve();
     let resizeObserver: ResizeObserver | null = null;
     const unlisteners: UnlistenFn[] = [];
+
+    const reportTerminalError = (error: unknown) => {
+      if (disposed) return;
+      terminal.writeln(`\r\n\x1b[31m${String(error)}\x1b[0m`);
+      terminal.options.disableStdin = true;
+    };
+
+    const writeToPty = (data: string) => {
+      writeChain = writeChain
+        .then(async () => {
+          if (disposed) return;
+          await invoke('write_terminal_session', { sessionId: id, data });
+        })
+        .catch(reportTerminalError);
+    };
+
+    const focusTerminal = () => terminal.focus();
+    host.addEventListener('pointerdown', focusTerminal);
+    terminal.focus();
+
     const disposables = [
       terminal.onData((data) => {
-        if (!started || disposed) return;
-        void invoke('write_terminal_session', { sessionId: id, data });
+        if (disposed) return;
+        if (!started) {
+          pendingInput += data;
+          return;
+        }
+        writeToPty(data);
       }),
       terminal.onResize(({ cols, rows }) => {
         if (!started || disposed) return;
@@ -112,17 +139,30 @@ export function TerminalDock({ open, onClose, cwd, workingDirectory }: TerminalD
           cols: terminal.cols,
           rows: terminal.rows,
         });
+        if (disposed) {
+          await invoke('close_terminal_session', { sessionId: id });
+          return;
+        }
         started = true;
+        if (pendingInput) {
+          const input = pendingInput;
+          pendingInput = '';
+          writeToPty(input);
+        }
+        await invoke('resize_terminal_session', {
+          sessionId: id,
+          cols: terminal.cols,
+          rows: terminal.rows,
+        });
         terminal.focus();
       } catch (error) {
-        terminal.writeln(`\r\n\x1b[31m${String(error)}\x1b[0m`);
-        terminal.options.disableStdin = true;
+        reportTerminalError(error);
       }
     })();
 
     if (typeof ResizeObserver !== 'undefined') {
       resizeObserver = new ResizeObserver(fitTerminal);
-      resizeObserver.observe(hostRef.current);
+      resizeObserver.observe(host);
     } else {
       window.addEventListener('resize', fitTerminal);
     }
@@ -131,6 +171,7 @@ export function TerminalDock({ open, onClose, cwd, workingDirectory }: TerminalD
       disposed = true;
       resizeObserver?.disconnect();
       window.removeEventListener('resize', fitTerminal);
+      host.removeEventListener('pointerdown', focusTerminal);
       unlisteners.forEach((unlisten) => unlisten());
       disposables.forEach((disposable) => disposable.dispose());
       if (started) void invoke('close_terminal_session', { sessionId: id });

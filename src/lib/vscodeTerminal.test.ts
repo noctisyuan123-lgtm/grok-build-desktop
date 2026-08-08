@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { VS_CODE_DARK_MODERN_TERMINAL_THEME, VS_CODE_TERMINAL_OPTIONS } from './vscodeTerminal';
 
 describe('VS Code terminal parity', () => {
-  it('uses the VS Code cursor and contrast defaults', () => {
+  it('keeps the cursor obvious and preserves shell-provided ANSI contrast', () => {
     expect(VS_CODE_TERMINAL_OPTIONS).toMatchObject({
-      cursorBlink: false,
+      cursorBlink: true,
       cursorStyle: 'block',
-      cursorInactiveStyle: 'outline',
-      minimumContrastRatio: 4.5,
+      cursorInactiveStyle: 'block',
+      minimumContrastRatio: 1,
     });
   });
 

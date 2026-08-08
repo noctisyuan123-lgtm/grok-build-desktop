@@ -28,14 +28,14 @@ export const VS_CODE_DARK_MODERN_TERMINAL_THEME: ITheme = {
 };
 
 export const VS_CODE_TERMINAL_OPTIONS = {
-  cursorBlink: false,
+  cursorBlink: true,
   cursorStyle: 'block',
-  cursorInactiveStyle: 'outline',
+  cursorInactiveStyle: 'block',
   drawBoldTextInBrightColors: true,
   fontFamily: "Menlo, Monaco, 'Courier New', monospace",
   fontSize: 12,
   letterSpacing: 0,
   lineHeight: 1,
-  minimumContrastRatio: 4.5,
+  minimumContrastRatio: 1,
   theme: VS_CODE_DARK_MODERN_TERMINAL_THEME,
 } satisfies Partial<ITerminalOptions>;
