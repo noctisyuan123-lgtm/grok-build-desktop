@@ -60,6 +60,9 @@ export function TerminalDock({ open, onClose, cwd, workingDirectory }: TerminalD
       letterSpacing: 0,
       lineHeight: 1.25,
       macOptionIsMeta: true,
+      // Match VS Code's contrast protection so dim OMZ autosuggestion colors
+      // (commonly ANSI 8/240) stay visible without overriding user themes.
+      minimumContrastRatio: 3,
       scrollback: 5000,
       theme: {
         background: '#151515',

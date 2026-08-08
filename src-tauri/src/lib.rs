@@ -1825,6 +1825,10 @@ fn start_terminal_session(
 
     let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let mut command = CommandBuilder::new(shell);
+    // Be explicit: ZLE, Oh My Zsh plugins, autosuggestions and syntax
+    // highlighting are interactive-shell features. A PTY normally implies
+    // this, but -i keeps the contract stable across shells and platforms.
+    command.arg("-i");
     command.arg("-l");
     command.cwd(&cwd);
     command.env("TERM", "xterm-256color");
