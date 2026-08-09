@@ -26,6 +26,7 @@ pub mod desktop {
         Err("desktop bridge is macOS-only".into())
     }
 }
+pub mod customize;
 pub mod prompts;
 pub mod runs;
 
@@ -1987,17 +1988,15 @@ async fn list_grok_models() -> ToolRun {
 }
 
 #[tauri::command]
-async fn list_grok_mcp(cwd: Option<String>) -> ToolRun {
+async fn list_grok_mcp(cwd: Option<String>, json: Option<bool>) -> ToolRun {
     let program = env::var("GROK_DESKTOP_GROK_CMD").unwrap_or_else(|_| "grok".to_string());
     let cwd = normalized_cwd(cwd);
+    let mut args = vec!["mcp".to_string(), "list".to_string()];
+    if json.unwrap_or(false) {
+        args.push("--json".to_string());
+    }
     run_blocking_tool("grok mcp list", move || {
-        run_external_command(
-            &program,
-            vec!["mcp".to_string(), "list".to_string()],
-            Some(cwd),
-            command_timeout_secs(10),
-            true,
-        )
+        run_external_command(&program, args, Some(cwd), command_timeout_secs(10), true)
     })
     .await
 }
@@ -2018,9 +2017,7 @@ async fn doctor_grok_mcp(cwd: Option<String>) -> ToolRun {
     .await
 }
 
-/// Add (or update) an MCP server: `grok mcp add <name> --command <cmd> --args …`
-/// for stdio transport, or `--url <url> --type <type>` for HTTP/SSE. Env vars
-/// pass through as repeated `--env KEY=VALUE`.
+/// Add (or update) an MCP server using Grok 1.0's native positional syntax.
 #[tauri::command]
 async fn grok_mcp_add(
     name: String,
@@ -2029,62 +2026,66 @@ async fn grok_mcp_add(
     env_pairs: Option<Vec<String>>,
     url: Option<String>,
     transport_type: Option<String>,
+    scope: Option<String>,
+    cwd: Option<String>,
 ) -> ToolRun {
     let program = env::var("GROK_DESKTOP_GROK_CMD").unwrap_or_else(|_| "grok".to_string());
-    let mut argv: Vec<String> = vec!["mcp".into(), "add".into(), name];
-    if let Some(cmd) = command.filter(|c| !c.trim().is_empty()) {
-        argv.push("--command".into());
-        argv.push(cmd);
+    let scope = scope.filter(|scope| matches!(scope.as_str(), "user" | "project"));
+    let cwd = normalized_cwd(cwd);
+    let mut argv: Vec<String> = vec!["mcp".into(), "add".into()];
+    if let Some(scope) = scope {
+        argv.extend(["--scope".into(), scope]);
     }
-    if let Some(a) = args {
-        // Emit each arg as its own `--args=VALUE`. `grok mcp add` uses clap's
-        // multi-value `--args <ARGS>...`, which rejects a bare value starting
-        // with '-' (e.g. npx's `-y`) as "unexpected argument '-y'". The `=`
-        // form binds the value to the flag so leading-dash args are accepted.
-        // Also expand a literal `$HOME` so filesystem/git servers get a real
-        // path instead of the unexpanded placeholder.
-        let home = env::var("HOME").unwrap_or_default();
-        for arg in a {
-            let expanded = if home.is_empty() {
-                arg
+    let transport = transport_type
+        .filter(|kind| matches!(kind.as_str(), "stdio" | "http" | "sse"))
+        .unwrap_or_else(|| {
+            if url.is_some() {
+                "http".into()
             } else {
-                arg.replace("$HOME", &home)
-            };
-            argv.push(format!("--args={}", expanded));
-        }
+                "stdio".into()
+            }
+        });
+    if transport != "stdio" {
+        argv.extend(["--transport".into(), transport]);
     }
     if let Some(envs) = env_pairs {
         for e in envs.into_iter().filter(|e| !e.trim().is_empty()) {
-            argv.push("--env".into());
-            argv.push(e);
+            argv.extend(["--env".into(), e]);
         }
     }
+    argv.push(name);
     if let Some(u) = url.filter(|u| !u.trim().is_empty()) {
-        argv.push("--url".into());
         argv.push(u);
-    }
-    if let Some(t) = transport_type.filter(|t| !t.trim().is_empty()) {
-        argv.push("--type".into());
-        argv.push(t);
+    } else if let Some(cmd) = command.filter(|value| !value.trim().is_empty()) {
+        argv.push("--".into());
+        argv.push(cmd);
+        let home = env::var("HOME").unwrap_or_default();
+        for arg in args.unwrap_or_default() {
+            argv.push(if home.is_empty() {
+                arg
+            } else {
+                arg.replace("$HOME", &home)
+            });
+        }
     }
     run_blocking_tool("grok mcp add", move || {
-        run_external_command(&program, argv, None, command_timeout_secs(30), true)
+        run_external_command(&program, argv, Some(cwd), command_timeout_secs(30), true)
     })
     .await
 }
 
 /// Remove a configured MCP server: `grok mcp remove <name>`.
 #[tauri::command]
-async fn grok_mcp_remove(name: String) -> ToolRun {
+async fn grok_mcp_remove(name: String, scope: Option<String>, cwd: Option<String>) -> ToolRun {
     let program = env::var("GROK_DESKTOP_GROK_CMD").unwrap_or_else(|_| "grok".to_string());
+    let cwd = normalized_cwd(cwd);
+    let mut args = vec!["mcp".to_string(), "remove".to_string()];
+    if let Some(scope) = scope.filter(|scope| matches!(scope.as_str(), "user" | "project")) {
+        args.extend(["--scope".to_string(), scope]);
+    }
+    args.push(name);
     run_blocking_tool("grok mcp remove", move || {
-        run_external_command(
-            &program,
-            vec!["mcp".to_string(), "remove".to_string(), name],
-            None,
-            command_timeout_secs(15),
-            true,
-        )
+        run_external_command(&program, args, Some(cwd), command_timeout_secs(15), true)
     })
     .await
 }
@@ -2099,6 +2100,91 @@ async fn list_grok_plugins(cwd: Option<String>) -> ToolRun {
             vec!["plugin".to_string(), "list".to_string()],
             Some(cwd),
             command_timeout_secs(10),
+            true,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn list_customize_plugins(cwd: Option<String>) -> ToolRun {
+    let program = env::var("GROK_DESKTOP_GROK_CMD").unwrap_or_else(|_| "grok".to_string());
+    let cwd = normalized_cwd(cwd);
+    run_blocking_tool("grok plugin list --json", move || {
+        run_external_command(
+            &program,
+            vec![
+                "plugin".to_string(),
+                "list".to_string(),
+                "--json".to_string(),
+            ],
+            Some(cwd),
+            command_timeout_secs(20),
+            true,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn grok_plugin_action(action: String, value: Option<String>, cwd: Option<String>) -> ToolRun {
+    let program = env::var("GROK_DESKTOP_GROK_CMD").unwrap_or_else(|_| "grok".to_string());
+    let cwd = normalized_cwd(cwd);
+    let value = value.unwrap_or_default().trim().to_string();
+    let args = match action.as_str() {
+        "install" if !value.is_empty() => vec![
+            "plugin".to_string(),
+            "install".to_string(),
+            "--trust".to_string(),
+            value,
+        ],
+        "uninstall" if !value.is_empty() => vec![
+            "plugin".to_string(),
+            "uninstall".to_string(),
+            "--confirm".to_string(),
+            value,
+        ],
+        "enable" | "disable" | "details" if !value.is_empty() => {
+            vec!["plugin".to_string(), action.clone(), value]
+        }
+        "update" => {
+            let mut args = vec!["plugin".to_string(), "update".to_string()];
+            if !value.is_empty() {
+                args.push(value);
+            }
+            args
+        }
+        _ => {
+            return ToolRun {
+                ok: false,
+                command: "grok plugin".to_string(),
+                cwd: cwd.to_string_lossy().to_string(),
+                exit_code: None,
+                duration_ms: 0,
+                timed_out: false,
+                output: String::new(),
+                stderr: "Unsupported plugin action or missing plugin/source name".to_string(),
+            }
+        }
+    };
+    let label = format!("grok {}", args.join(" "));
+    run_blocking_tool(&label, move || {
+        run_external_command(&program, args, Some(cwd), command_timeout_secs(120), true)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn grok_mcp_set_enabled(name: String, enabled: bool, cwd: Option<String>) -> ToolRun {
+    let program = env::var("GROK_DESKTOP_GROK_CMD").unwrap_or_else(|_| "grok".to_string());
+    let cwd = normalized_cwd(cwd);
+    let action = if enabled { "enable" } else { "disable" };
+    run_blocking_tool(&format!("grok mcp {action}"), move || {
+        run_external_command(
+            &program,
+            vec!["mcp".to_string(), action.to_string(), name],
+            Some(cwd),
+            command_timeout_secs(20),
             true,
         )
     })
@@ -2774,10 +2860,17 @@ pub fn run() {
             grok_mcp_add,
             grok_mcp_remove,
             list_grok_plugins,
+            list_customize_plugins,
+            grok_plugin_action,
+            grok_mcp_set_enabled,
             list_grok_sessions,
             list_grok_skills,
             install_grok_skill,
             remove_grok_skill,
+            customize::list_customizations,
+            customize::save_customization,
+            customize::set_customization_enabled,
+            customize::delete_customization,
             run_browser_task,
             run_absorb_repo,
             run_doctor,

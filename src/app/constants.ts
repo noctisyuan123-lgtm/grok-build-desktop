@@ -236,8 +236,7 @@ export const defaultStatuses: ToolStatus[] = [
 export const primaryNavItems = [
   { id: 'new-session', label: t('nav.newSession'), meta: t('nav.newSessionMeta') },
   { id: 'search', label: t('nav.search'), meta: t('nav.searchMeta') },
-  { id: 'tools', label: t('nav.tools'), meta: t('nav.toolsMeta') },
-  { id: 'settings', label: t('nav.settings'), meta: t('nav.settingsMeta') },
+  { id: 'customize', label: 'Customize', meta: 'Rules, skills, agents, tools' },
 ] as const;
 
 export const contextFiles = [

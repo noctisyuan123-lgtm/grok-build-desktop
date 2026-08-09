@@ -9,9 +9,9 @@ import { hasTauriRuntime as hasTauri } from './runtime';
 
 export type { ToolRun };
 
-export async function listMcpServers(cwd?: string): Promise<ToolRun | null> {
+export async function listMcpServers(cwd?: string, json = false): Promise<ToolRun | null> {
   if (!hasTauri()) return null;
-  return invoke<ToolRun>('list_grok_mcp', { cwd: cwd ?? null });
+  return invoke<ToolRun>('list_grok_mcp', { cwd: cwd ?? null, json });
 }
 
 export async function doctorMcp(cwd?: string): Promise<ToolRun | null> {
@@ -26,6 +26,8 @@ export async function addMcpServer(opts: {
   envPairs?: string[];
   url?: string;
   transportType?: string;
+  scope?: 'user' | 'project';
+  cwd?: string;
 }): Promise<ToolRun | null> {
   if (!hasTauri()) return null;
   return invoke<ToolRun>('grok_mcp_add', {
@@ -35,12 +37,18 @@ export async function addMcpServer(opts: {
     envPairs: opts.envPairs ?? null,
     url: opts.url ?? null,
     transportType: opts.transportType ?? null,
+    scope: opts.scope ?? 'user',
+    cwd: opts.cwd ?? null,
   });
 }
 
-export async function removeMcpServer(name: string): Promise<ToolRun | null> {
+export async function removeMcpServer(
+  name: string,
+  scope?: 'user' | 'project',
+  cwd?: string,
+): Promise<ToolRun | null> {
   if (!hasTauri()) return null;
-  return invoke<ToolRun>('grok_mcp_remove', { name });
+  return invoke<ToolRun>('grok_mcp_remove', { name, scope: scope ?? null, cwd: cwd ?? null });
 }
 
 /**
@@ -182,18 +190,16 @@ export const MCP_CATALOG: McpCatalogEntry[] = [
 
 /** Build the human-readable `grok mcp add …` command for copy/preview. */
 export function previewAddCommand(entry: McpCatalogEntry): string {
-  // Mirror exactly what the backend runs: each arg as its own `--args=VALUE`
-  // (clap rejects a bare `-y`; the `=` form binds it). Keep in sync with
-  // grok_mcp_add in src-tauri/src/lib.rs.
-  const parts = [
+  // Mirror the Grok 1.0 positional syntax used by the backend.
+  const env = (entry.requiredEnv ?? []).flatMap((e) => ['--env', `${e.key}=…`]);
+  return [
     'grok',
     'mcp',
     'add',
+    ...env,
     entry.id,
-    '--command',
+    '--',
     entry.command,
-    ...entry.args.map((a) => `--args=${a}`),
-  ];
-  const env = (entry.requiredEnv ?? []).flatMap((e) => ['--env', `${e.key}=…`]);
-  return [...parts, ...env].join(' ');
+    ...entry.args,
+  ].join(' ');
 }

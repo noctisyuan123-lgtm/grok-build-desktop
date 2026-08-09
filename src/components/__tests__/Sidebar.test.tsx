@@ -95,10 +95,9 @@ function Harness() {
         setContextMenu={setContextMenu}
         paletteOpen={false}
         setPaletteOpen={() => {}}
-        toolsPageOpen={false}
-        setToolsPageOpen={() => {}}
-        settingsOpen={false}
         setSettingsOpen={() => {}}
+        customizeOpen={false}
+        setCustomizeOpen={() => {}}
         busyRunner={null}
         refreshStatuses={() => {}}
         runDoctor={() => {}}
@@ -158,22 +157,17 @@ describe('Sidebar conversations list', () => {
     expect(historyRow('write release notes')).toHaveAttribute('aria-current', 'true');
   });
 
-  it('filters conversations from the search box', async () => {
-    const user = userEvent.setup();
+  it('does not render the redundant history search field', () => {
     render(<Harness />);
-    await user.type(screen.getByLabelText('Search history'), 'release');
-    expect(screen.queryByText('fix the login flake')).not.toBeInTheDocument();
-    expect(screen.getByText('write release notes')).toBeInTheDocument();
-    await user.clear(screen.getByLabelText('Search history'));
+    expect(screen.queryByLabelText('Search history')).not.toBeInTheDocument();
+    expect(document.querySelector('.search-box')).not.toBeInTheDocument();
     expect(screen.getByText('fix the login flake')).toBeInTheDocument();
+    expect(screen.getByText('write release notes')).toBeInTheDocument();
   });
 
-  it('shows an honest empty state for a no-match filter', async () => {
-    const user = userEvent.setup();
+  it('keeps one global Search action in primary navigation', () => {
     render(<Harness />);
-    await user.type(screen.getByLabelText('Search history'), 'zzz-nothing');
-    expect(screen.getByText('No matches for')).toBeInTheDocument();
-    expect(screen.getByText('zzz-nothing')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^Search/ })).toHaveLength(1);
   });
 });
 

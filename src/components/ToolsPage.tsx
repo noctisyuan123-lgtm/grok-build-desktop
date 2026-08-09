@@ -156,6 +156,8 @@ export function ToolsPage({ open, onClose, cwd }: Props) {
         command: entry.command,
         args,
         envPairs: entry.requiredEnv?.map((e) => `${e.key}=`),
+        scope: 'user',
+        cwd,
       });
       if (run?.ok) {
         setNotice({
@@ -180,7 +182,7 @@ export function ToolsPage({ open, onClose, cwd }: Props) {
     setBusy(entry.id);
     setNotice(null);
     try {
-      const run = await removeMcpServer(entry.id);
+      const run = await removeMcpServer(entry.id, 'user', cwd);
       if (run?.ok) setNotice({ kind: 'ok', text: t('tools.removedEntry', { name: entry.name }) });
       else setNotice({ kind: 'err', text: run?.stderr || t('tools.removeFailed') });
       await refresh();

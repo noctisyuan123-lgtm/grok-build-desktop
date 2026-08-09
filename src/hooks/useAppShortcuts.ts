@@ -1,5 +1,5 @@
 // The command-palette catalogue and global keyboard shortcuts (⌘K palette,
-// ⌘B sidebar, ⌘, settings, ⌘⇧L theme, ⌘N new session, ⌘F history search,
+// ⌘B sidebar, ⌘, settings, ⌘⇧L theme, ⌘N new session, ⌘F search,
 // "/" composer focus, Esc panel dismissal, ⌘1/⌘2 mode switch). Extracted
 // from App.tsx unchanged; DOM focus targets arrive as callbacks.
 import { useEffect, useMemo, useRef } from 'react';
@@ -30,7 +30,6 @@ export interface AppShortcutsDeps {
   handleTabCreate: () => void;
   clearRunHistory: () => void;
   focusComposer: () => void;
-  focusHistorySearch: () => void;
   stopRun: (runId: string) => void;
   switchMode: (mode: Mode) => void;
   busyRunner: string | null;
@@ -61,7 +60,6 @@ export function useAppShortcuts(deps: AppShortcutsDeps) {
     handleTabCreate,
     clearRunHistory,
     focusComposer,
-    focusHistorySearch,
     stopRun,
     switchMode,
     busyRunner,
@@ -105,13 +103,6 @@ export function useAppShortcuts(deps: AppShortcutsDeps) {
         shortcut: '/',
         group: t('palette.group.navigation'),
         run: () => focusComposer(),
-      },
-      {
-        id: 'search-history',
-        label: t('palette.action.searchHistory'),
-        shortcut: '⌘F',
-        group: t('palette.group.navigation'),
-        run: () => focusHistorySearch(),
       },
       {
         id: 'toggle-sidebar',
@@ -218,9 +209,10 @@ export function useAppShortcuts(deps: AppShortcutsDeps) {
           handleTabCreate();
         }
       } else if (meta && e.key.toLowerCase() === 'f' && !e.shiftKey) {
-        // ⌘F — search recent conversations (advertised in the ⌘K palette).
+        // The sidebar's single Search control and ⌘F share the same global
+        // palette instead of maintaining a second history-only input.
         e.preventDefault();
-        focusHistorySearch();
+        setPaletteOpen(true);
       } else if (e.key === '/' && !meta && !e.altKey) {
         // "/" — focus the composer (advertised in the ⌘K palette), but never
         // while the user is typing in another field.

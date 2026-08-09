@@ -17,6 +17,7 @@ import type { ComposerHandle } from './components/Composer';
 import { QueueDock } from './components/QueueDock';
 import { CommandPalette, type PaletteAction } from './components/CommandPalette';
 import { ToolsPage } from './components/ToolsPage';
+import { CustomizePage } from './components/CustomizePage';
 import { ContextMenu, type ContextMenuState, type ContextMenuItem } from './components/ContextMenu';
 import { InspectorDrawer } from './components/InspectorDrawer';
 import { Sidebar } from './components/Sidebar';
@@ -144,6 +145,7 @@ function App() {
   >('general');
   // Dedicated Tools / MCP hub (community-tool integration).
   const [toolsPageOpen, setToolsPageOpen] = useState(false);
+  const [customizeOpen, setCustomizeOpen] = useState(false);
   // App-owned right-click menu (replaces the suppressed WebView menu).
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   // History organization (pin/rename/group/archive metadata, filter, derived
@@ -156,7 +158,7 @@ function App() {
     sessionFirstPrompt,
     closeContextMenu: () => setContextMenu(null),
   });
-  const { recentPrompts, historySearchInputRef, removeConversationMeta } = historyApi;
+  const { recentPrompts, removeConversationMeta } = historyApi;
   // Sidebar collapse for ⌘B — defaults to expanded.
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     return window.localStorage.getItem('grok-desktop-sidebar-collapsed') === '1';
@@ -602,10 +604,6 @@ function App() {
     handleTabCreate,
     clearRunHistory,
     focusComposer: () => composerRef.current?.focus(),
-    focusHistorySearch: () => {
-      historySearchInputRef.current?.focus();
-      historySearchInputRef.current?.select();
-    },
     stopRun,
     switchMode,
     busyRunner,
@@ -752,6 +750,15 @@ function App() {
         grokVersionLine={`Grok CLI ${grokStatus?.version ?? 'unknown'}`}
       />
       <ToolsPage open={toolsPageOpen} onClose={() => setToolsPageOpen(false)} cwd={codingCwd} />
+      <CustomizePage
+        open={customizeOpen}
+        onClose={() => setCustomizeOpen(false)}
+        cwd={codingCwd}
+        onOpenCatalog={() => {
+          setCustomizeOpen(false);
+          setToolsPageOpen(true);
+        }}
+      />
       <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
       <Sidebar
         history={historyApi}
@@ -763,10 +770,9 @@ function App() {
         setContextMenu={setContextMenu}
         paletteOpen={paletteOpen}
         setPaletteOpen={setPaletteOpen}
-        toolsPageOpen={toolsPageOpen}
-        setToolsPageOpen={setToolsPageOpen}
-        settingsOpen={settingsOpen}
         setSettingsOpen={setSettingsOpen}
+        customizeOpen={customizeOpen}
+        setCustomizeOpen={setCustomizeOpen}
         busyRunner={busyRunner}
         refreshStatuses={refreshStatuses}
         runDoctor={runDoctor}

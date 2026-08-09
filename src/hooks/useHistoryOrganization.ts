@@ -2,7 +2,7 @@
 // group / archive / delete metadata (persisted per conversation id), the
 // filter box, the transient action toast, and the derived recent/partitioned
 // row views. Extracted from App.tsx unchanged.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { upsertPrompt } from '../lib/prompts';
 import type { Tab, TabMessage } from '../lib/tabs';
 import type { ChatMessage, HistoryRow } from '../app/types';
@@ -166,7 +166,6 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
   }
 
   const [historyFilter, setHistoryFilter] = useState('');
-  const historySearchInputRef = useRef<HTMLInputElement | null>(null);
   // HISTORY is a list of CONVERSATIONS (sessions/tabs), newest first — the way
   // Claude / ChatGPT show chats. Each row is one whole conversation, titled by
   // a compact intent summary of its first prompt; clicking it loads that conversation. (It used to list
@@ -261,7 +260,6 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
     setHistoryNote,
     historyFilter,
     setHistoryFilter,
-    historySearchInputRef,
     recentPrompts,
     historyView,
     togglePinPrompt,

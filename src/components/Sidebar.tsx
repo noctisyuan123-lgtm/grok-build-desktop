@@ -7,6 +7,7 @@ import {
   Archive,
   ArchiveRestore,
   BookmarkPlus,
+  Blocks,
   ChevronDown,
   PanelLeftClose,
   PanelLeftOpen,
@@ -25,7 +26,6 @@ import {
   Search,
   Settings,
   Trash2,
-  Wrench,
   X,
   Zap,
 } from 'lucide-react';
@@ -47,10 +47,9 @@ export interface SidebarProps {
   setContextMenu: (menu: ContextMenuState | null) => void;
   paletteOpen: boolean;
   setPaletteOpen: (open: boolean) => void;
-  toolsPageOpen: boolean;
-  setToolsPageOpen: (open: boolean) => void;
-  settingsOpen: boolean;
   setSettingsOpen: (open: boolean) => void;
+  customizeOpen: boolean;
+  setCustomizeOpen: (open: boolean) => void;
   busyRunner: string | null;
   refreshStatuses: () => void;
   runDoctor: () => void;
@@ -70,10 +69,9 @@ export function Sidebar({
   setContextMenu,
   paletteOpen,
   setPaletteOpen,
-  toolsPageOpen,
-  setToolsPageOpen,
-  settingsOpen,
   setSettingsOpen,
+  customizeOpen,
+  setCustomizeOpen,
   busyRunner,
   refreshStatuses,
   runDoctor,
@@ -92,9 +90,6 @@ export function Sidebar({
     setRowEdit,
     historyNote,
     setHistoryNote,
-    historyFilter,
-    setHistoryFilter,
-    historySearchInputRef,
     recentPrompts,
     historyView,
     togglePinPrompt,
@@ -289,18 +284,7 @@ export function Sidebar({
           <h1>{t('sidebar.brandTitle')}</h1>
           <span>{t('sidebar.brandSubtitle')}</span>
         </div>
-        {/* The chevron previously looked clickable but did nothing. Now it
-              opens the ⌘K palette — the natural "what can I do?" affordance. */}
         <div className="brand-actions">
-          <button
-            className="brand-chevron"
-            type="button"
-            aria-label={t('sidebar.openPalette')}
-            title={t('sidebar.openPaletteTitle')}
-            onClick={() => setPaletteOpen(true)}
-          >
-            <ChevronDown size={16} />
-          </button>
           {!sidebarCollapsed ? (
             <button
               className="sidebar-collapse-button"
@@ -335,20 +319,15 @@ export function Sidebar({
                 // visible "search-y" things (recent prompts, palette,
                 // files) is unified here.
                 setPaletteOpen(true);
-              } else if (item.id === 'tools') {
-                // Dedicated Tools / MCP hub (community-tool integration).
-                setToolsPageOpen(true);
-              } else if (item.id === 'settings') {
-                // Dedicated Settings page (Claude-Desktop-style modal).
-                setSettingsOpen(true);
+              } else if (item.id === 'customize') {
+                setCustomizeOpen(true);
               }
             };
             // The active highlight should follow what's *actually* open,
             // not hardcoded to "New Session". Otherwise every button looks
             // selected and the user can't tell which panel is current.
             const isActive =
-              (item.id === 'tools' && toolsPageOpen) ||
-              (item.id === 'settings' && settingsOpen) ||
+              (item.id === 'customize' && customizeOpen) ||
               (item.id === 'search' && paletteOpen);
             return (
               <button
@@ -361,10 +340,8 @@ export function Sidebar({
                   <Plus size={16} />
                 ) : item.id === 'search' ? (
                   <Search size={16} />
-                ) : item.id === 'tools' ? (
-                  <Wrench size={16} />
                 ) : (
-                  <Settings size={16} />
+                  <Blocks size={16} />
                 )}
                 <span>{item.label}</span>
                 <small>{item.meta}</small>
@@ -377,44 +354,13 @@ export function Sidebar({
       <section className="nav-section history-nav">
         <div className="nav-head">
           <span>{t('sidebar.conversations')}</span>
-          {/* Refresh icon — clears the filter input so the user sees the
-                full recent-prompts list again. Was a decorative icon before. */}
-          <button
-            className="history-refresh"
-            type="button"
-            aria-label={t('sidebar.clearFilter')}
-            title={t('sidebar.clearFilterTitle')}
-            onClick={() => {
-              setHistoryFilter('');
-              historySearchInputRef.current?.focus();
-            }}
-          >
-            <History size={15} />
-          </button>
         </div>
-        <label className="search-box">
-          <Search size={15} />
-          <input
-            ref={historySearchInputRef}
-            aria-label={t('sidebar.searchHistory')}
-            placeholder={t('sidebar.searchPlaceholder')}
-            onChange={(event) => setHistoryFilter(event.currentTarget.value)}
-            value={historyFilter}
-          />
-        </label>
         <div className="history-list">
           {recentPrompts.length === 0 ? (
             // No fake "Try: …" placeholders. An empty state is honest and
             // less misleading than disabled-looking rows that look real.
             <div className="history-empty">
-              {historyFilter.trim() ? (
-                <>
-                  <span>{t('sidebar.noMatches')}</span>
-                  <code>{historyFilter.trim()}</code>
-                </>
-              ) : (
-                <span>{t('sidebar.emptyHistory')}</span>
-              )}
+              <span>{t('sidebar.emptyHistory')}</span>
             </div>
           ) : (
             <>
@@ -458,12 +404,10 @@ export function Sidebar({
                     {t('sidebar.archivedCount', { count: historyView.archived.length })}
                     <ChevronDown
                       size={13}
-                      className={`chev${showArchived || historyFilter.trim() ? ' open' : ''}`}
+                      className={`chev${showArchived ? ' open' : ''}`}
                     />
                   </button>
-                  {showArchived || historyFilter.trim()
-                    ? historyView.archived.map(renderHistoryRow)
-                    : null}
+                  {showArchived ? historyView.archived.map(renderHistoryRow) : null}
                 </div>
               ) : null}
             </>

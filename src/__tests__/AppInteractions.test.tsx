@@ -50,7 +50,7 @@ async function bootApp(overrides: Record<string, CommandHandler> = {}): Promise<
 }
 
 describe('keyboard shortcuts', () => {
-  it('focuses the composer with "/" and the history search with ⌘F', async () => {
+  it('focuses the composer with "/" and opens global search with ⌘F', async () => {
     const { user } = await bootApp();
 
     await user.keyboard('/');
@@ -62,7 +62,7 @@ describe('keyboard shortcuts', () => {
 
     (document.activeElement as HTMLElement).blur();
     await user.keyboard('{Meta>}f{/Meta}');
-    expect(screen.getByPlaceholderText(t('sidebar.searchPlaceholder'))).toHaveFocus();
+    expect(screen.getByRole('dialog', { name: t('palette.ariaLabel') })).toBeInTheDocument();
   });
 
   it('opens Settings with ⌘, and switches modes with ⌘1/⌘2', async () => {
@@ -111,6 +111,26 @@ describe('project folder picker', () => {
   it('does not duplicate project selection in the top toolbar', async () => {
     await bootApp();
     expect(screen.queryByRole('button', { name: 'Pick a project' })).not.toBeInTheDocument();
+  });
+});
+
+describe('Customize control plane', () => {
+  it('opens the real Grok customization sections from the sidebar', async () => {
+    const { tauri, user } = await bootApp();
+
+    await user.click(screen.getByRole('button', { name: /Customize/i }));
+    const dialog = await screen.findByRole('dialog', { name: 'Customize Grok' });
+    const customize = within(dialog);
+
+    for (const section of ['Rules', 'Commands', 'Skills', 'Subagents', 'MCP', 'Hooks', 'Plugins']) {
+      expect(customize.getByRole('button', { name: section })).toBeInTheDocument();
+    }
+    await waitFor(() => expect(tauri.commands()).toContain('list_customizations'));
+
+    await user.click(customize.getByRole('button', { name: 'MCP' }));
+    await waitFor(() => expect(tauri.commands()).toContain('list_grok_mcp'));
+    await user.click(customize.getByRole('button', { name: 'Plugins' }));
+    await waitFor(() => expect(tauri.commands()).toContain('list_customize_plugins'));
   });
 });
 
