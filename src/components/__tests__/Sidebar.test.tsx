@@ -48,6 +48,7 @@ function Harness() {
   const [codingCwd, setCodingCwd] = useState('/a');
   const [, setDrafts] = useState<Record<Mode, string>>({ standard: '', coding: '' });
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const { undoToast, showUndoToast, undoNow } = useUndoToast();
   const tabsApi = useSessionTabs({
     messages,
@@ -83,6 +84,7 @@ function Harness() {
   return (
     <>
       <div data-testid="active-conversation">{messages.map((m) => m.id).join('|')}</div>
+      <div data-testid="settings-state">{settingsOpen ? 'open' : 'closed'}</div>
       <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
       <UndoToast toast={undoToast} onUndo={undoNow} />
       <Sidebar
@@ -95,7 +97,7 @@ function Harness() {
         setContextMenu={setContextMenu}
         paletteOpen={false}
         setPaletteOpen={() => {}}
-        setSettingsOpen={() => {}}
+        setSettingsOpen={setSettingsOpen}
         customizeOpen={false}
         setCustomizeOpen={() => {}}
         busyRunner={null}
@@ -168,6 +170,14 @@ describe('Sidebar conversations list', () => {
   it('keeps one global Search action in primary navigation', () => {
     render(<Harness />);
     expect(screen.getAllByRole('button', { name: /^Search/ })).toHaveLength(1);
+  });
+
+  it('opens Settings from the Grok icon without rendering a separate gear', async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    expect(document.querySelector('.account-settings')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Open settings' }));
+    expect(screen.getByTestId('settings-state')).toHaveTextContent('open');
   });
 });
 

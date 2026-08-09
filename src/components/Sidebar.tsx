@@ -24,7 +24,6 @@ import {
   Plus,
   RefreshCcw,
   Search,
-  Settings,
   Trash2,
   X,
   Zap,
@@ -454,11 +453,8 @@ export function Sidebar({
         </button>
       </section>
 
-      {/* Whole strip is the Settings affordance now — clicking anywhere
-            (avatar, name, or gear) opens Settings. Previously only the tiny
-            gear was clickable, which read as "broken". */}
       <button
-        className="account-strip"
+        className="account-strip account-icon-button"
         type="button"
         aria-label={t('sidebar.openSettings')}
         title={t('sidebar.settingsTitle')}
@@ -467,9 +463,6 @@ export function Sidebar({
         <div className={`avatar${isGrokReady ? ' ready' : ''}`}>
           <BrandGlyph size={17} />
         </div>
-        <span className="account-settings" aria-hidden="true">
-          <Settings size={16} />
-        </span>
       </button>
       </aside>
       {sidebarCollapsed ? (

@@ -127,6 +127,10 @@ describe('Customize control plane', () => {
     }
     await waitFor(() => expect(tauri.commands()).toContain('list_customizations'));
 
+    await user.click(customize.getByRole('button', { name: 'Commands' }));
+    expect(await customize.findByText('Nothing to preview yet. Click Edit to add Markdown.')).toBeInTheDocument();
+    expect(customize.queryByText('Rendering preview…')).not.toBeInTheDocument();
+
     await user.click(customize.getByRole('button', { name: 'MCP' }));
     await waitFor(() => expect(tauri.commands()).toContain('list_grok_mcp'));
     await user.click(customize.getByRole('button', { name: 'Plugins' }));
@@ -162,6 +166,38 @@ describe('Customize control plane', () => {
       '# Preview rule\n\n- Keep changes readable.',
     );
     expect(customize.getByRole('button', { name: 'Preview' })).toBeInTheDocument();
+  });
+
+  it('uses a left directory and right detail pane for MCP and Plugins', async () => {
+    const { user } = await bootApp({
+      list_grok_mcp: () => ({
+        ok: true,
+        output: JSON.stringify([
+          { name: 'filesystem', scope: 'user', transport: 'stdio', enabled: true, command: 'npx' },
+        ]),
+        stderr: '',
+      }),
+      list_customize_plugins: () => ({
+        ok: true,
+        output: JSON.stringify([
+          { name: 'review-tools', version: '1.2.0', enabled: true, source: 'owner/review-tools' },
+        ]),
+        stderr: '',
+      }),
+    });
+
+    await user.click(screen.getByRole('button', { name: /Customize/i }));
+    const customize = within(await screen.findByRole('dialog', { name: 'Customize Grok' }));
+
+    await user.click(customize.getByRole('button', { name: 'MCP' }));
+    expect(await customize.findByRole('button', { name: /filesystem/i })).toBeInTheDocument();
+    expect(customize.getByText('Configuration')).toBeInTheDocument();
+    expect(customize.getByText(/"command": "npx"/)).toBeInTheDocument();
+
+    await user.click(customize.getByRole('button', { name: 'Plugins' }));
+    expect(await customize.findByRole('button', { name: /review-tools/i })).toBeInTheDocument();
+    expect(customize.getByText('Plugin details')).toBeInTheDocument();
+    expect(customize.getByText(/"source": "owner\/review-tools"/)).toBeInTheDocument();
   });
 });
 

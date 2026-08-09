@@ -126,20 +126,45 @@ function recordScope(record: Record<string, unknown>): 'user' | 'project' | null
   return record.scope === 'user' || record.scope === 'project' ? record.scope : null;
 }
 
+function recordKey(record: Record<string, unknown>): string {
+  return `${recordScope(record) ?? 'effective'}:${recordName(record)}`;
+}
+
+function recordSummary(record: Record<string, unknown>): string {
+  for (const key of ['transport', 'version', 'source', 'status']) {
+    if (typeof record[key] === 'string' && record[key]) return String(record[key]);
+  }
+  return recordEnabled(record) ? 'Enabled' : 'Disabled';
+}
+
 function MarkdownPreview({ source }: { source: string }) {
   const [html, setHtml] = useState('');
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setHtml('');
-    void import('../lib/markdown').then(({ renderMarkdown }) => {
-      if (!cancelled) setHtml(sanitizeHtml(renderMarkdown(source)));
-    });
+    setFailed(false);
+    if (source.trim()) {
+      void import('../lib/markdown')
+        .then(({ renderMarkdown }) => {
+          if (!cancelled) setHtml(sanitizeHtml(renderMarkdown(source)));
+        })
+        .catch(() => {
+          if (!cancelled) setFailed(true);
+        });
+    }
     return () => {
       cancelled = true;
     };
   }, [source]);
 
+  if (!source.trim()) {
+    return <div className="customize-empty-preview">Nothing to preview yet. Click Edit to add Markdown.</div>;
+  }
+  if (failed) {
+    return <div className="customize-empty-preview">Preview could not be rendered. The source is still safe to edit.</div>;
+  }
   return html ? (
     <div
       className="customize-markdown-preview markdown-body"
@@ -385,6 +410,9 @@ function McpCustomizePanel({ cwd, onOpenCatalog }: { cwd?: string; onOpenCatalog
   const [args, setArgs] = useState('');
   const [envPairs, setEnvPairs] = useState('');
   const [raw, setRaw] = useState('');
+  const [query, setQuery] = useState('');
+  const [selected, setSelected] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -405,6 +433,19 @@ function McpCustomizePanel({ cwd, onOpenCatalog }: { cwd?: string; onOpenCatalog
   }, [cwd]);
 
   const records = parseRecords(raw);
+  const filtered = records.filter((record) =>
+    recordName(record).toLowerCase().includes(query.trim().toLowerCase()),
+  );
+  const selectedRecord = records.find((record) => recordKey(record) === selected) ?? null;
+
+  useEffect(() => {
+    if (creating) return;
+    if (!records.some((record) => recordKey(record) === selected)) {
+      setSelected(records[0] ? recordKey(records[0]) : null);
+    }
+    // The parsed records intentionally follow the latest raw CLI payload.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [raw, creating, selected]);
 
   const add = async () => {
     setBusy(true);
@@ -425,10 +466,13 @@ function McpCustomizePanel({ cwd, onOpenCatalog }: { cwd?: string; onOpenCatalog
       });
       setNotice({ ok: Boolean(run?.ok), text: run?.ok ? `Added ${name}` : run?.stderr || 'Failed' });
       if (run?.ok) {
+        const addedKey = `${scope}:${name}`;
         setName('');
         setTarget('');
         setArgs('');
         setEnvPairs('');
+        setCreating(false);
+        setSelected(addedKey);
       }
       await refresh();
     } catch (error) {
@@ -453,96 +497,122 @@ function McpCustomizePanel({ cwd, onOpenCatalog }: { cwd?: string; onOpenCatalog
         ok: Boolean(run?.ok),
         text: run?.ok ? `${action}d ${server}` : run?.stderr || run?.output || 'Failed',
       });
+      if (action === 'remove') setSelected(null);
       await refresh();
     } finally {
       setBusy(false);
     }
   };
 
-  return (
-    <div className="customize-integrations">
-      <section className="customize-add-card">
-        <div className="customize-card-title">
-          <div>
-            <strong>Add custom MCP server</strong>
-            <span>Writes through <code>grok mcp add</code>, not app-local storage.</span>
-          </div>
-          <button type="button" onClick={onOpenCatalog}>
-            <Boxes size={14} /> Browse catalog
-          </button>
-        </div>
-        <div className="customize-form-row">
+  const renderAddForm = () => (
+    <div className="customize-detail-content">
+      <div className="customize-detail-intro">
+        <strong>Add custom MCP server</strong>
+        <span>Saved through Grok itself, never app-local storage.</span>
+      </div>
+      <div className="customize-form-stack">
+        <label>
+          Scope
           <select value={scope} onChange={(event) => setScope(event.currentTarget.value as typeof scope)}>
             <option value="user">User</option>
             <option value="project" disabled={!cwd}>Workspace</option>
           </select>
-          <input placeholder="Server name" value={name} onChange={(e) => setName(e.currentTarget.value)} />
-          <select
-            value={transport}
-            onChange={(event) => setTransport(event.currentTarget.value as typeof transport)}
-          >
+        </label>
+        <label>
+          Server name
+          <input value={name} onChange={(event) => setName(event.currentTarget.value)} />
+        </label>
+        <label>
+          Transport
+          <select value={transport} onChange={(event) => setTransport(event.currentTarget.value as typeof transport)}>
             <option value="stdio">stdio</option>
             <option value="http">HTTP</option>
             <option value="sse">SSE</option>
           </select>
+        </label>
+        <label className="wide">
+          {transport === 'stdio' ? 'Command' : 'URL'}
           <input
-            className="grow"
-            placeholder={transport === 'stdio' ? 'Command, e.g. npx' : 'https://…'}
+            placeholder={transport === 'stdio' ? 'e.g. npx' : 'https://…'}
             value={target}
-            onChange={(e) => setTarget(e.currentTarget.value)}
+            onChange={(event) => setTarget(event.currentTarget.value)}
           />
-        </div>
-        <div className="customize-form-row">
-          <input
-            className="grow"
-            placeholder="Arguments (space separated)"
-            value={args}
-            onChange={(e) => setArgs(e.currentTarget.value)}
-          />
-          <input
-            className="grow"
-            placeholder="Environment: KEY=value (one per line)"
-            value={envPairs}
-            onChange={(e) => setEnvPairs(e.currentTarget.value)}
-          />
-          <button type="button" disabled={busy || !name.trim() || !target.trim()} onClick={() => void add()}>
-            {busy ? <Loader2 className="spin" size={14} /> : <Plus size={14} />} Add
-          </button>
-        </div>
-      </section>
+        </label>
+        <label className="wide">
+          Arguments
+          <input value={args} onChange={(event) => setArgs(event.currentTarget.value)} />
+        </label>
+        <label className="wide">
+          Environment (one KEY=value per line)
+          <textarea value={envPairs} onChange={(event) => setEnvPairs(event.currentTarget.value)} />
+        </label>
+      </div>
+    </div>
+  );
 
-      <section className="customize-records">
-        <div className="customize-card-title">
-          <strong>Configured servers</strong>
-          <button type="button" disabled={busy} onClick={() => void refresh()}>
-            <RefreshCcw size={14} /> Refresh
+  return (
+    <div className="customize-editor-grid customize-integration-grid">
+      <aside className="customize-entry-list">
+        <div className="customize-list-actions">
+          <label>
+            <Search size={14} />
+            <input aria-label="Search MCP servers" placeholder="Search servers" value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
+          </label>
+          <button type="button" aria-label="Add MCP server" title="Add MCP server" onClick={() => { setCreating(true); setSelected(null); }}>
+            <Plus size={15} />
+          </button>
+          <button type="button" aria-label="Refresh MCP servers" title="Refresh" disabled={busy} onClick={() => void refresh()}>
+            <RefreshCcw size={14} />
           </button>
         </div>
-        {records.length ? (
-          records.map((record) => {
-            const server = recordName(record);
-            const enabled = recordEnabled(record);
-            const serverScope = recordScope(record);
-            return (
-              <div className="customize-record" key={`${serverScope ?? 'effective'}:${server}`}>
-                <div>
-                  <strong>{server}</strong>
-                  <small>{serverScope ? `${serverScope} · ` : ''}{enabled ? 'Enabled' : 'Disabled'}</small>
-                </div>
-                <button type="button" disabled={busy} onClick={() => void manage(enabled ? 'disable' : 'enable', server, serverScope)}>
-                  <Power size={14} /> {enabled ? 'Disable' : 'Enable'}
-                </button>
-                <button className="danger" type="button" disabled={busy} onClick={() => void manage('remove', server, serverScope)}>
-                  <Trash2 size={14} /> Remove
-                </button>
-              </div>
-            );
-          })
-        ) : (
-          <pre className="customize-raw">{raw || 'No MCP servers configured.'}</pre>
-        )}
+        <div className="customize-entry-scroll">
+          {filtered.length ? filtered.map((record) => (
+            <button
+              type="button"
+              key={recordKey(record)}
+              className={!creating && selected === recordKey(record) ? 'active' : ''}
+              onClick={() => { setCreating(false); setSelected(recordKey(record)); setNotice(null); }}
+            >
+              <span>{recordName(record)}</span>
+              <small>{recordSummary(record)}</small>
+            </button>
+          )) : <p className="customize-empty">No MCP servers configured.</p>}
+        </div>
+      </aside>
+
+      <section className="customize-integration-detail">
+        <div className="customize-detail-toolbar">
+          <div>
+            <strong>{creating || !selectedRecord ? 'New MCP server' : recordName(selectedRecord)}</strong>
+            <span>{creating || !selectedRecord ? 'Connect a tool or data source' : `${recordScope(selectedRecord) ?? 'effective'} scope`}</span>
+          </div>
+          <button type="button" onClick={onOpenCatalog}><Boxes size={14} /> Catalog</button>
+          {selectedRecord ? (
+            <>
+              <button type="button" disabled={busy} onClick={() => void manage(recordEnabled(selectedRecord) ? 'disable' : 'enable', recordName(selectedRecord), recordScope(selectedRecord))}>
+                <Power size={14} /> {recordEnabled(selectedRecord) ? 'Disable' : 'Enable'}
+              </button>
+              <button className="danger" type="button" disabled={busy} onClick={() => void manage('remove', recordName(selectedRecord), recordScope(selectedRecord))}>
+                <Trash2 size={14} /> Remove
+              </button>
+            </>
+          ) : (
+            <button type="button" disabled={busy || !name.trim() || !target.trim()} onClick={() => void add()}>
+              {busy ? <Loader2 className="spin" size={14} /> : <Plus size={14} />} Add server
+            </button>
+          )}
+        </div>
+        {selectedRecord && !creating ? (
+          <div className="customize-detail-content">
+            <div className="customize-detail-intro">
+              <strong>Configuration</strong>
+              <span>Effective values reported by <code>grok mcp list --json</code>.</span>
+            </div>
+            <pre className="customize-detail-json">{JSON.stringify(selectedRecord, null, 2)}</pre>
+          </div>
+        ) : renderAddForm()}
+        {notice ? <div className={`customize-notice ${notice.ok ? 'ok' : 'err'}`}>{notice.text}</div> : null}
       </section>
-      {notice ? <div className={`customize-notice ${notice.ok ? 'ok' : 'err'}`}>{notice.text}</div> : null}
     </div>
   );
 }
@@ -550,6 +620,9 @@ function McpCustomizePanel({ cwd, onOpenCatalog }: { cwd?: string; onOpenCatalog
 function PluginCustomizePanel({ cwd }: { cwd?: string }) {
   const [raw, setRaw] = useState('');
   const [source, setSource] = useState('');
+  const [query, setQuery] = useState('');
+  const [selected, setSelected] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -570,6 +643,18 @@ function PluginCustomizePanel({ cwd }: { cwd?: string }) {
   }, [cwd]);
 
   const records = parseRecords(raw);
+  const filtered = records.filter((record) =>
+    recordName(record).toLowerCase().includes(query.trim().toLowerCase()),
+  );
+  const selectedRecord = records.find((record) => recordKey(record) === selected) ?? null;
+
+  useEffect(() => {
+    if (creating) return;
+    if (!records.some((record) => recordKey(record) === selected)) {
+      setSelected(records[0] ? recordKey(records[0]) : null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [raw, creating, selected]);
 
   const action = async (
     operation: 'install' | 'uninstall' | 'enable' | 'disable' | 'update' | 'details',
@@ -584,6 +669,8 @@ function PluginCustomizePanel({ cwd }: { cwd?: string }) {
         text: run?.ok ? run.output || `${operation} complete` : run?.stderr || 'Plugin action failed',
       });
       if (run?.ok && operation === 'install') setSource('');
+      if (run?.ok && operation === 'install') setCreating(false);
+      if (run?.ok && operation === 'uninstall') setSelected(null);
       if (operation !== 'details') await refresh();
     } catch (error) {
       setNotice({ ok: false, text: errorText(error) });
@@ -593,64 +680,84 @@ function PluginCustomizePanel({ cwd }: { cwd?: string }) {
   };
 
   return (
-    <div className="customize-integrations">
-      <section className="customize-add-card">
-        <div className="customize-card-title">
-          <div>
-            <strong>Install plugin</strong>
-            <span>Git URL, GitHub shorthand, or local path. Installation explicitly trusts the source.</span>
-          </div>
-          <button type="button" disabled={busy} onClick={() => void action('update', null)}>
-            <RefreshCcw size={14} /> Update all
+    <div className="customize-editor-grid customize-integration-grid">
+      <aside className="customize-entry-list">
+        <div className="customize-list-actions">
+          <label>
+            <Search size={14} />
+            <input aria-label="Search plugins" placeholder="Search plugins" value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
+          </label>
+          <button type="button" aria-label="Install plugin" title="Install plugin" onClick={() => { setCreating(true); setSelected(null); }}>
+            <Plus size={15} />
+          </button>
+          <button type="button" aria-label="Refresh plugins" title="Refresh" disabled={busy} onClick={() => void refresh()}>
+            <RefreshCcw size={14} />
           </button>
         </div>
-        <div className="customize-form-row">
-          <input
-            className="grow"
-            placeholder="owner/repo, git URL, or local path"
-            value={source}
-            onChange={(event) => setSource(event.currentTarget.value)}
-          />
-          <button type="button" disabled={busy || !source.trim()} onClick={() => void action('install', source)}>
-            {busy ? <Loader2 className="spin" size={14} /> : <Plus size={14} />} Install & trust
-          </button>
+        <div className="customize-entry-scroll">
+          {filtered.length ? filtered.map((record) => (
+            <button
+              type="button"
+              key={recordKey(record)}
+              className={!creating && selected === recordKey(record) ? 'active' : ''}
+              onClick={() => { setCreating(false); setSelected(recordKey(record)); setNotice(null); }}
+            >
+              <span>{recordName(record)}</span>
+              <small>{recordSummary(record)}</small>
+            </button>
+          )) : <p className="customize-empty">No plugins installed.</p>}
         </div>
-      </section>
+      </aside>
 
-      <section className="customize-records">
-        <div className="customize-card-title">
-          <strong>Installed plugins</strong>
-          <button type="button" disabled={busy} onClick={() => void refresh()}>
-            <RefreshCcw size={14} /> Refresh
+      <section className="customize-integration-detail">
+        <div className="customize-detail-toolbar">
+          <div>
+            <strong>{creating || !selectedRecord ? 'Install plugin' : recordName(selectedRecord)}</strong>
+            <span>{creating || !selectedRecord ? 'Git URL, GitHub shorthand, or local path' : recordSummary(selectedRecord)}</span>
+          </div>
+          <button type="button" disabled={busy} onClick={() => void action('update', selectedRecord ? recordName(selectedRecord) : null)}>
+            <RefreshCcw size={14} /> {selectedRecord ? 'Update' : 'Update all'}
           </button>
+          {selectedRecord ? (
+            <>
+              <button type="button" disabled={busy} onClick={() => void action('details', recordName(selectedRecord))}>Details</button>
+              <button type="button" disabled={busy} onClick={() => void action(recordEnabled(selectedRecord) ? 'disable' : 'enable', recordName(selectedRecord))}>
+                <Power size={14} /> {recordEnabled(selectedRecord) ? 'Disable' : 'Enable'}
+              </button>
+              <button className="danger" type="button" disabled={busy} onClick={() => void action('uninstall', recordName(selectedRecord))}>
+                <Trash2 size={14} /> Uninstall
+              </button>
+            </>
+          ) : (
+            <button type="button" disabled={busy || !source.trim()} onClick={() => void action('install', source)}>
+              {busy ? <Loader2 className="spin" size={14} /> : <Plus size={14} />} Install & trust
+            </button>
+          )}
         </div>
-        {records.length ? (
-          records.map((record) => {
-            const plugin = recordName(record);
-            const enabled = recordEnabled(record);
-            return (
-              <div className="customize-record" key={plugin}>
-                <div>
-                  <strong>{plugin}</strong>
-                  <small>{enabled ? 'Enabled' : 'Disabled'}</small>
-                </div>
-                <button type="button" disabled={busy} onClick={() => void action('details', plugin)}>
-                  Details
-                </button>
-                <button type="button" disabled={busy} onClick={() => void action(enabled ? 'disable' : 'enable', plugin)}>
-                  <Power size={14} /> {enabled ? 'Disable' : 'Enable'}
-                </button>
-                <button className="danger" type="button" disabled={busy} onClick={() => void action('uninstall', plugin)}>
-                  <Trash2 size={14} /> Uninstall
-                </button>
-              </div>
-            );
-          })
+        {selectedRecord && !creating ? (
+          <div className="customize-detail-content">
+            <div className="customize-detail-intro">
+              <strong>Plugin details</strong>
+              <span>Installed capability metadata reported by Grok.</span>
+            </div>
+            <pre className="customize-detail-json">{JSON.stringify(selectedRecord, null, 2)}</pre>
+          </div>
         ) : (
-          <pre className="customize-raw">{raw || 'No plugins installed.'}</pre>
+          <div className="customize-detail-content">
+            <div className="customize-detail-intro">
+              <strong>Source</strong>
+              <span>Installation explicitly trusts the selected plugin source.</span>
+            </div>
+            <div className="customize-form-stack single-column">
+              <label>
+                Plugin source
+                <input placeholder="owner/repo, git URL, or local path" value={source} onChange={(event) => setSource(event.currentTarget.value)} />
+              </label>
+            </div>
+          </div>
         )}
+        {notice ? <div className={`customize-notice ${notice.ok ? 'ok' : 'err'}`}>{notice.text}</div> : null}
       </section>
-      {notice ? <div className={`customize-notice ${notice.ok ? 'ok' : 'err'}`}>{notice.text}</div> : null}
     </div>
   );
 }
