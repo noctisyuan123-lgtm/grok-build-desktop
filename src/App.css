@@ -7803,6 +7803,8 @@ body,
 .message-worked {
   border-bottom: 0;
   margin-bottom: 12px;
+  padding-left: 0;
+  padding-right: 0;
   padding-bottom: 0;
   width: fit-content;
 }
@@ -7900,6 +7902,49 @@ body,
   border-radius: 50%;
   height: 5px;
   width: 5px;
+}
+
+/* Cursor/Codex-style live shimmer: a restrained highlight crosses only the
+   currently active label. Completed transcript rows remain static. */
+.transcript-work.is-live .message-worked-summary,
+.transcript-thought.is-running > button > span,
+.activity-list .activity-item.activity-status-running .activity-row-label,
+.agent-starting > span:last-child {
+  animation: activity-text-shimmer 2.2s linear infinite;
+  background: linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--conversation-text) 48%, transparent) 20%,
+    color-mix(in srgb, var(--conversation-text) 48%, transparent) 39%,
+    var(--conversation-text) 50%,
+    color-mix(in srgb, var(--conversation-text) 48%, transparent) 61%,
+    color-mix(in srgb, var(--conversation-text) 48%, transparent) 80%
+  );
+  background-clip: text;
+  background-size: 240% 100%;
+  color: transparent;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+@keyframes activity-text-shimmer {
+  from {
+    background-position: 140% 0;
+  }
+  to {
+    background-position: -140% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transcript-work.is-live .message-worked-summary,
+  .transcript-thought.is-running > button > span,
+  .activity-list .activity-item.activity-status-running .activity-row-label,
+  .agent-starting > span:last-child {
+    animation: none;
+    background: none;
+    color: color-mix(in srgb, var(--conversation-text) 72%, transparent);
+    -webkit-text-fill-color: currentColor;
+  }
 }
 
 .activity-list .activity-row {

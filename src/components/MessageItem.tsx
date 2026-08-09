@@ -227,7 +227,9 @@ function TranscriptMessage({
   return (
     <>
       {header ? (
-        <section className={`message-worked-rail transcript-work${expanded ? ' is-expanded' : ''}`}>
+        <section
+          className={`message-worked-rail transcript-work${expanded ? ' is-expanded' : ''}${live ? ' is-live' : ''}`}
+        >
           <button
             type="button"
             className="message-worked"
@@ -301,7 +303,9 @@ function ThoughtSegment({
         ? 'Thought briefly'
         : `Thought for ${formatWorkedDuration(duration)}`;
   return (
-    <section className={`transcript-thought${expanded ? ' is-expanded' : ''}`}>
+    <section
+      className={`transcript-thought${expanded ? ' is-expanded' : ''}${live && segment.endedAt == null ? ' is-running' : ''}`}
+    >
       <button type="button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
         <span>{label}</span>
         <ChevronDown size={14} strokeWidth={1.7} aria-hidden />

@@ -149,9 +149,11 @@ describe('MessageItem rendering states', () => {
   it('keeps the just-generated turn open but resets a different historical run to collapsed', async () => {
     applyStateChange('live-turn', { state: 'Running', startedAt: Date.now() });
     applyRunEvent('live-turn', { type: 'thought', data: 'checking' });
-    const { rerender } = render(<MessageItem runId="live-turn" autoExpandWork />);
+    const { container, rerender } = render(<MessageItem runId="live-turn" autoExpandWork />);
     const liveWork = screen.getByRole('button', { name: /Working for/ });
     expect(liveWork).toHaveAttribute('aria-expanded', 'true');
+    expect(container.querySelector('.transcript-work')).toHaveClass('is-live');
+    expect(container.querySelector('.transcript-thought')).toHaveClass('is-running');
 
     await act(async () => {
       applyRunEvent('live-turn', {
@@ -165,6 +167,8 @@ describe('MessageItem rendering states', () => {
       'aria-expanded',
       'true',
     );
+    expect(container.querySelector('.transcript-work')).not.toHaveClass('is-live');
+    expect(container.querySelector('.transcript-thought')).not.toHaveClass('is-running');
 
     rerender(
       <MessageItem
