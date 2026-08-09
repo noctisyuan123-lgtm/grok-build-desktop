@@ -4066,24 +4066,25 @@ button.status-cluster.status-action:disabled {
   padding: 11px 18px;
   border-radius: 12px;
   border: none;
-  background: linear-gradient(180deg, var(--grok-accent-hi), var(--grok-accent));
-  /* Was hardcoded `white` — invisible in dark mode where the accent is an
-     off-white. --accent-ink flips with the theme so the label always
-     contrasts the button. */
+  /* Flat mono primary — the old gradient + inset-gloss pill read as a shiny
+     white lozenge that fought the restrained graphite/parchment canvas.
+     NOTE: `var(--accent)` would be the wrong token here — .app-shell.theme-*
+     redefines it to legacy teal (#5aa89d / #4d8f83), and cream --accent-ink
+     on the light teal measures ~3:1 (below AA). --text-1 / --accent-ink /
+     --accent-hover flip with data-theme and are NOT overridden by the legacy
+     app-shell blocks, so the button stays mono in both modes. */
+  background: var(--text-1);
   color: var(--accent-ink);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.2px;
   cursor: pointer;
-  box-shadow:
-    0 1px 0 rgba(0, 0, 0, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.18);
   transition:
-    filter 120ms ease,
+    background 120ms ease,
     transform 120ms ease;
 }
-.composer-send:hover {
-  filter: brightness(1.08);
+.composer-send:hover:not(:disabled) {
+  background: var(--accent-hover);
 }
 .composer-send:active {
   transform: translateY(1px);
@@ -6530,14 +6531,17 @@ body,
 }
 .composer-inline-bar .composer-send {
   border-radius: 8px;
-  font-size: 11px;
+  font-size: 12px;
   min-height: 28px;
   order: initial;
   padding: 0 13px;
 }
 .composer-inline-hint {
-  color: var(--text-3);
-  font-size: 9.5px;
+  /* --text-4 is the faintest token that still holds WCAG AA 4.5:1 on both
+     the dark shell and the light card — the old --text-3 at 9.5px measured
+     well under 4:1 and read as decorative noise. */
+  color: var(--text-4);
+  font-size: 11px;
   margin-left: auto;
   white-space: nowrap;
 }
@@ -6654,6 +6658,76 @@ body,
   .composer-compact-controls > select.model-select-footer {
     display: none;
   }
+}
+
+/* ===== Light-theme composer + user bubble =================================
+   These blocks were designed dark-first and carried hardcoded
+   #202020/#252525 fills that stayed black in light mode (including a
+   dark-on-dark user bubble). Re-skin them with the flipping tokens here;
+   the dark rules above are deliberately left untouched. */
+.theme-light .composer-input-shell {
+  background: var(--bg-3);
+  border-color: var(--border-2);
+}
+.theme-light .composer-input-shell:focus-within {
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 2px rgba(31, 29, 25, 0.08);
+}
+.theme-light .composer-attach:hover:not(:disabled) {
+  background: rgba(31, 29, 25, 0.06);
+}
+.theme-light .composer-compact-controls > select:hover,
+.theme-light .composer-compact-controls > select:focus {
+  background: rgba(31, 29, 25, 0.05);
+  border-color: rgba(31, 29, 25, 0.12);
+}
+.theme-light .composer-advanced-trigger:hover,
+.theme-light .composer-advanced-trigger[aria-expanded='true'],
+.theme-light .composer-compact-controls .mini-run:hover {
+  background: rgba(31, 29, 25, 0.055);
+  border-color: rgba(31, 29, 25, 0.12);
+}
+.theme-light .composer-advanced-popover {
+  background: var(--bg-3);
+  border-color: var(--border-2);
+  box-shadow: 0 14px 42px rgba(31, 29, 25, 0.18);
+}
+.theme-light .composer-advanced-popover select {
+  background: var(--bg-1);
+  border-color: var(--border-2);
+}
+.theme-light .composer-config-dot {
+  border-color: var(--bg-3);
+}
+.theme-light .composer-attachment {
+  background: var(--bg-3);
+  border-color: var(--border-2);
+}
+.theme-light .composer-attachment-icon {
+  background: rgba(31, 29, 25, 0.05);
+}
+.theme-light .composer-attachment > button:hover {
+  background: rgba(31, 29, 25, 0.06);
+}
+.theme-light .composer-drop-overlay {
+  background: rgba(246, 243, 236, 0.92);
+  border: 1px dashed var(--border-strong);
+}
+.theme-light .message.message-user .message-body {
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  box-shadow: 0 1px 2px rgba(31, 29, 25, 0.06);
+}
+.theme-light .message-attachment-image {
+  background: var(--bg-2);
+  border-color: var(--border-2);
+}
+.theme-light .message-attachment-file {
+  background: var(--bg-3);
+  border-color: var(--border);
+}
+.theme-light .message-worked {
+  border-bottom-color: rgba(31, 29, 25, 0.12);
 }
 
 /* Integrated bottom terminal. It participates in the workspace grid instead
