@@ -3,6 +3,7 @@ import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MessageItem } from '../MessageItem';
 import { applyRunEvent, applyStateChange, streamStore } from '../../lib/streamStore';
+import { renderMarkdown } from '../../lib/markdown';
 
 beforeEach(() => {
   streamStore.__reset();
@@ -39,6 +40,18 @@ describe('MessageItem sanitization', () => {
     expect(screen.getByText('legacy')).toBeInTheDocument();
     expect(container.querySelector('script')).toBeNull();
     expect((window as unknown as Record<string, unknown>).__pwned).toBeUndefined();
+  });
+
+  it('copies a fenced code block through the VS Code preview control', async () => {
+    const user = userEvent.setup();
+    applyRunEvent('copy-code', { type: 'text', data: 'code' });
+    streamStore.setHtml('copy-code', renderMarkdown('```sh\necho ok\n```'));
+    render(<MessageItem runId="copy-code" />);
+
+    await user.click(screen.getByRole('button', { name: 'Copy code block' }));
+
+    await expect(navigator.clipboard.readText()).resolves.toBe('echo ok\n');
+    expect(screen.getByRole('button', { name: 'Copied' })).toHaveClass('copied');
   });
 });
 

@@ -35,6 +35,14 @@ const markdown = new MarkdownIt({
     output: 'mathml',
   } as MarkdownKatexOptions & KatexOptions);
 
+// VS Code's Markdown preview enhances every fenced block with a copy button
+// after markdown-it renders the native <pre><code> structure. Keep the same
+// structure here (no custom title bar/shell) and let the React container own
+// the clipboard interaction so it remains safe under the Tauri CSP.
+const defaultFence = markdown.renderer.rules.fence!;
+markdown.renderer.rules.fence = (...args) =>
+  defaultFence(...args).replace('</pre>', `${vscodeCopyButtonHtml()}</pre>`);
+
 export function renderMarkdown(source: string): string {
   return markdown.render(normalizeMathDelimiters(source));
 }
@@ -119,4 +127,18 @@ function normalizeLanguage(language: string): string {
     default:
       return language;
   }
+}
+
+function vscodeCopyButtonHtml(): string {
+  return (
+    '<button class="code-block-copy-button" type="button" aria-label="Copy code block">' +
+    '<svg class="code-block-copy-icon" aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 16 16" fill="none">' +
+    '<path d="M4 4H2V14H11V12H4V4Z" fill="currentColor"></path>' +
+    '<path fill-rule="evenodd" clip-rule="evenodd" d="M5 2H14V11H5V2ZM6 3H13V10H6V3Z" fill="currentColor"></path>' +
+    '</svg>' +
+    '<svg class="code-block-check-icon" aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 16 16" fill="none">' +
+    '<path d="M6.27 10.87L3.63 8.23L2.56 9.3L6.27 13.01L14.07 5.21L13 4.14L6.27 10.87Z" fill="currentColor"></path>' +
+    '</svg>' +
+    '</button>'
+  );
 }

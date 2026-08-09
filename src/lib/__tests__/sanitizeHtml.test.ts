@@ -66,6 +66,16 @@ describe('sanitizeHtml', () => {
     expect(safe).toContain('<span class="hljs-keyword">const</span>');
   });
 
+  it('keeps the VS Code copy control while stripping executable attributes', () => {
+    const safe = sanitizeHtml(
+      '<pre><code>echo ok</code><button class="code-block-copy-button" type="button" aria-label="Copy code block" onclick="steal()"><svg viewBox="0 0 16 16"><path d="M0 0"></path></svg></button></pre>',
+    );
+    expect(safe).toContain('class="code-block-copy-button"');
+    expect(safe).toContain('aria-label="Copy code block"');
+    expect(safe).toContain('<svg');
+    expect(safe).not.toContain('onclick');
+  });
+
   it('keeps KaTeX MathML semantics without flattening the TeX annotation', () => {
     const safe = sanitizeHtml(renderMarkdown('$E=mc^2$'));
     const rendered = document.createElement('div');

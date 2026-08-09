@@ -4365,15 +4365,15 @@ button.status-cluster.status-action:disabled {
 /* VS Code Agent Pane parity. The parser uses markdown-it (as VS Code does);
    keep this scoped so the rest of the desktop UI retains its theme. */
 .message.message-assistant .message-body.markdown-body {
-  --vscode-editor-foreground: var(--conversation-text);
+  --vscode-editor-foreground: var(--grok-text-1);
   --vscode-textCodeBlock-background: var(--grok-bg-1);
   --vscode-widget-border: var(--grok-border-1);
   color: var(--vscode-editor-foreground);
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, Ubuntu, 'Droid Sans',
     sans-serif;
-  font-size: 13px;
-  line-height: 21px;
+  font-size: 14px;
+  line-height: 22px;
   white-space: normal;
   word-break: normal;
 }
@@ -4578,23 +4578,71 @@ button.status-cluster.status-action:disabled {
     'Courier New',
     monospace
   );
-  font-size: 12px;
-  line-height: 18px;
+  font-size: 1em;
+  line-height: 1.357em;
   padding: 0;
 }
 .message.message-assistant .markdown-body pre,
 .message.message-assistant .markdown-body .code-block {
   background: var(--vscode-textCodeBlock-background);
   border: 1px solid var(--vscode-widget-border);
-  border-radius: 10px;
-  margin: 0 0 14px;
+  border-radius: 3px;
+  margin: 0 0 16px;
   overflow: auto;
-  padding: 9px 12px;
+  padding: 16px;
+  position: relative;
 }
 .message.message-assistant .markdown-body pre code {
   color: inherit;
   display: inline-block;
   tab-size: 4;
+}
+
+/* Copied from VS Code's markdown-language-features/media/markdown.css. */
+.markdown-body .code-block-copy-button {
+  align-items: center;
+  background-color: var(--vscode-textCodeBlock-background, var(--vscode-editor-background));
+  border: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, 0.35));
+  border-radius: 4px;
+  color: var(--vscode-editor-foreground);
+  cursor: pointer;
+  display: flex;
+  height: 28px;
+  justify-content: center;
+  opacity: 0;
+  padding: 0;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  transition: opacity 150ms ease;
+  width: 28px;
+}
+
+.markdown-body pre:hover > .code-block-copy-button,
+.markdown-body .code-block-copy-button:focus,
+.markdown-body .code-block-copy-button.copied {
+  opacity: 1;
+}
+
+.markdown-body .code-block-copy-button:hover {
+  background-color: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+
+.markdown-body .code-block-copy-button:active {
+  background-color: var(--vscode-toolbar-activeBackground, rgba(99, 102, 103, 0.31));
+}
+
+.markdown-body .code-block-copy-button.copied {
+  color: var(--vscode-testing-iconPassed, #73c991);
+}
+
+.markdown-body .code-block-check-icon,
+.markdown-body .code-block-copy-button.copied .code-block-copy-icon {
+  display: none;
+}
+
+.markdown-body .code-block-copy-button.copied .code-block-check-icon {
+  display: block;
 }
 .message.message-assistant .markdown-body a {
   color: var(--accent);
@@ -4615,6 +4663,10 @@ button.status-cluster.status-action:disabled {
 .markdown-body .hljs-name {
   color: #569cd6;
 }
+.markdown-body .hljs-link {
+  color: #569cd6;
+  text-decoration: underline;
+}
 .markdown-body .hljs-built_in,
 .markdown-body .hljs-type {
   color: #4ec9b0;
@@ -4627,10 +4679,29 @@ button.status-cluster.status-action:disabled {
 .markdown-body .hljs-meta-string {
   color: #d69d85;
 }
+.markdown-body .hljs-regexp,
+.markdown-body .hljs-template-tag {
+  color: #9a5334;
+}
+.markdown-body .hljs-subst,
+.markdown-body .hljs-function,
+.markdown-body .hljs-title,
+.markdown-body .hljs-params,
+.markdown-body .hljs-formula {
+  color: #dcdcdc;
+}
 .markdown-body .hljs-comment,
 .markdown-body .hljs-quote {
   color: #57a64a;
   font-style: italic;
+}
+.markdown-body .hljs-doctag {
+  color: #608b4e;
+}
+.markdown-body .hljs-meta,
+.markdown-body .hljs-meta-keyword,
+.markdown-body .hljs-tag {
+  color: #9b9b9b;
 }
 .markdown-body .hljs-variable,
 .markdown-body .hljs-template-variable {
@@ -4648,6 +4719,80 @@ button.status-cluster.status-action:disabled {
 .markdown-body .hljs-selector-attr,
 .markdown-body .hljs-selector-pseudo {
   color: #d7ba7d;
+}
+.markdown-body .hljs-section {
+  color: gold;
+}
+.markdown-body .hljs-emphasis {
+  font-style: italic;
+}
+.markdown-body .hljs-strong {
+  font-weight: bold;
+}
+.markdown-body .hljs-addition {
+  background-color: var(--vscode-diffEditor-insertedTextBackground, rgba(155, 185, 85, 0.2));
+  color: rgb(155, 185, 85);
+  display: inline-block;
+  width: 100%;
+}
+.markdown-body .hljs-deletion {
+  background: var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.2));
+  color: rgb(255, 0, 0);
+  display: inline-block;
+  width: 100%;
+}
+
+/* VS Code's light-preview overrides from media/highlight.css. */
+.theme-light .markdown-body .hljs-function,
+.theme-light .markdown-body .hljs-params,
+.theme-light .markdown-body .hljs-number,
+.theme-light .markdown-body .hljs-class {
+  color: inherit;
+}
+.theme-light .markdown-body .hljs-comment,
+.theme-light .markdown-body .hljs-quote,
+.theme-light .markdown-body .hljs-number,
+.theme-light .markdown-body .hljs-class,
+.theme-light .markdown-body .hljs-variable {
+  color: #008000;
+}
+.theme-light .markdown-body .hljs-keyword,
+.theme-light .markdown-body .hljs-selector-tag,
+.theme-light .markdown-body .hljs-name,
+.theme-light .markdown-body .hljs-tag {
+  color: #0000ff;
+}
+.theme-light .markdown-body .hljs-built_in,
+.theme-light .markdown-body .hljs-builtin-name {
+  color: #007acc;
+}
+.theme-light .markdown-body .hljs-string,
+.theme-light .markdown-body .hljs-section,
+.theme-light .markdown-body .hljs-attribute,
+.theme-light .markdown-body .hljs-literal,
+.theme-light .markdown-body .hljs-template-tag,
+.theme-light .markdown-body .hljs-template-variable,
+.theme-light .markdown-body .hljs-type {
+  color: #a31515;
+}
+.theme-light .markdown-body .hljs-subst,
+.theme-light .markdown-body .hljs-selector-attr,
+.theme-light .markdown-body .hljs-selector-pseudo,
+.theme-light .markdown-body .hljs-meta,
+.theme-light .markdown-body .hljs-meta-keyword {
+  color: #2b91af;
+}
+.theme-light .markdown-body .hljs-title,
+.theme-light .markdown-body .hljs-doctag {
+  color: #808080;
+}
+.theme-light .markdown-body .hljs-attr {
+  color: #ff0000;
+}
+.theme-light .markdown-body .hljs-symbol,
+.theme-light .markdown-body .hljs-bullet,
+.theme-light .markdown-body .hljs-link {
+  color: #00b0e8;
 }
 
 .composer {
@@ -7105,38 +7250,12 @@ body,
 .message.message-user .message-body {
   font-size: 14px;
 }
+/* da69c2c's final computed conversation size, after the VS Code base rules. */
 .message.message-assistant .message-body.markdown-body {
   font-size: 13px;
   line-height: 21px;
 }
-
-/* Keep every Markdown surface on the same Codex-like type ramp. The previous
-   pass only changed the prose root, leaving headings, tables and code on older
-   relative sizes and dimmer legacy tokens. */
-.message.message-assistant .markdown-body h1 {
-  font-size: 20px;
-  line-height: 27px;
-}
-.message.message-assistant .markdown-body h2 {
-  font-size: 17px;
-  line-height: 24px;
-}
-.message.message-assistant .markdown-body h3 {
-  font-size: 15px;
-  line-height: 22px;
-}
-.message.message-assistant .markdown-body h4 {
-  font-size: 13px;
-  line-height: 21px;
-}
-.message.message-assistant .markdown-body h5 {
-  font-size: 12px;
-  line-height: 19px;
-}
-.message.message-assistant .markdown-body h6 {
-  font-size: 11px;
-  line-height: 18px;
-}
+/* The table remains the one intentional post-VS-Code customization. */
 .message.message-assistant .markdown-body table:not(.vlist-t) {
   color: var(--conversation-text);
   font-size: 13px;
@@ -7148,11 +7267,6 @@ body,
   font-weight: 600;
   letter-spacing: 0.01em;
 }
-.message.message-assistant .markdown-body strong,
-.message.message-assistant .markdown-body em {
-  color: inherit;
-}
-
 /* Compact composer: frequent input owns the space; low-frequency run knobs
    live in an upward popover instead of a permanent full-width footer row. */
 .composer-row .composer {

@@ -40,6 +40,8 @@ describe('renderMarkdown extensions', () => {
     expect(html).toContain('class="language-ts"');
     expect(html).toContain('<span class="hljs-keyword">const</span>');
     expect(html).toContain('<span class="hljs-number">1</span>');
+    expect(html).toContain('class="code-block-copy-button"');
+    expect(html).toContain('aria-label="Copy code block"');
     expect(html).not.toContain('code-block-shell');
     expect(html).not.toContain('code-block-head');
   });

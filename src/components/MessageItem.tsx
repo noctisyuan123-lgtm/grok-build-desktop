@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useRunHtml, useRunSnapshot } from '../hooks/useRunSnapshot';
 import { sanitizeHtml } from '../lib/sanitizeHtml';
@@ -95,6 +95,7 @@ function MessageItemImpl({
           <div
             className="message-body markdown-body"
             dangerouslySetInnerHTML={{ __html: safeHtml }}
+            onClick={handleMarkdownClick}
           />
           <MessageActions sourceText={fallbackText || ''} canUndo={canUndo} onUndo={onUndo} />
         </>
@@ -154,6 +155,7 @@ function MessageItemImpl({
             <div
               className="message-body markdown-body markdown-streaming"
               dangerouslySetInnerHTML={{ __html: safeHtml }}
+              onClick={handleMarkdownClick}
             />
           ) : snap.text || fallbackText ? (
             <pre className="message-body streaming-raw">{snap.text || fallbackText || ''}</pre>
@@ -335,6 +337,7 @@ function MarkdownSegment({
     <div
       className={`message-body markdown-body ${className}`}
       dangerouslySetInnerHTML={{ __html: safeHtml }}
+      onClick={handleMarkdownClick}
     />
   ) : (
     <pre className={`message-body streaming-raw ${className}`}>{text}</pre>
@@ -346,4 +349,38 @@ function formatWorkedDuration(ms: number): string {
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   return `${minutes}m ${seconds % 60}s`;
+}
+
+function handleMarkdownClick(event: MouseEvent<HTMLDivElement>): void {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const button = target.closest<HTMLButtonElement>('.code-block-copy-button');
+  if (!button) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const code = button.parentElement?.querySelector('code');
+  if (!code) return;
+  void copyCodeBlock(button, code.textContent ?? '');
+}
+
+async function copyCodeBlock(button: HTMLButtonElement, text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const code = button.parentElement?.querySelector('code');
+    const selection = window.getSelection();
+    if (!code || !selection) return;
+    selection.removeAllRanges();
+    const range = document.createRange();
+    range.selectNodeContents(code);
+    selection.addRange(range);
+    document.execCommand('copy');
+    selection.removeAllRanges();
+  }
+  button.classList.add('copied');
+  button.setAttribute('aria-label', 'Copied');
+  window.setTimeout(() => {
+    button.classList.remove('copied');
+    button.setAttribute('aria-label', 'Copy code block');
+  }, 2_000);
 }
