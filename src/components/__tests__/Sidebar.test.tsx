@@ -339,11 +339,11 @@ describe('destructive actions offer undo', () => {
 });
 
 describe('Sidebar primary navigation', () => {
-  it('New Session creates a fresh conversation row', async () => {
+  it('New Session stays out of history until its first message', async () => {
     const user = userEvent.setup();
     render(<Harness />);
     await user.click(screen.getByRole('button', { name: /New Session/ }));
-    await screen.findByText('New conversation');
+    expect(screen.queryByText('New conversation')).not.toBeInTheDocument();
     // Both original conversations survive as history rows.
     expect(screen.getByText('fix the login flake')).toBeInTheDocument();
     expect(screen.getByText('write release notes')).toBeInTheDocument();
@@ -352,6 +352,6 @@ describe('Sidebar primary navigation', () => {
 
   it('surfaces tool health from the grok status', () => {
     render(<Harness />);
-    expect(screen.getByText('Grok ready')).toBeInTheDocument();
+    expect(screen.getByText('Grok CLI installed')).toBeInTheDocument();
   });
 });

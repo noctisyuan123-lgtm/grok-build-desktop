@@ -35,6 +35,19 @@ const markdown = new MarkdownIt({
     output: 'mathml',
   } as MarkdownKatexOptions & KatexOptions);
 
+// Keep fenced-code metadata visible instead of silently throwing the language
+// away. This small header is intentionally static (copy remains a message-level
+// action) so it works in the strict Tauri CSP without inline handlers.
+const renderFence = markdown.renderer.rules.fence;
+markdown.renderer.rules.fence = (tokens, index, options, env, self) => {
+  const rendered = renderFence
+    ? renderFence(tokens, index, options, env, self)
+    : self.renderToken(tokens, index, options);
+  const language = tokens[index]?.info.trim().split(/\s+/u)[0];
+  if (!language) return rendered;
+  return `<div class="code-block-shell"><div class="code-block-head"><span class="code-block-lang">${markdown.utils.escapeHtml(language)}</span></div>${rendered}</div>`;
+};
+
 export function renderMarkdown(source: string): string {
   return markdown.render(normalizeMathDelimiters(source));
 }

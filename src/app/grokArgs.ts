@@ -46,11 +46,13 @@ export function buildGrokRules(
     'Keep edits narrow and make verification easy: give one command to verify each change.',
     'If the request is ambiguous, make the safest useful assumption and state it in one line.',
   ];
-  // The only action-policy intent not already enforced by a CLI flag:
-  // "review" has no grok permission flag, so the read-only contract lives here.
+  // The Plan policy has no legacy Grok CLI flag, so its contract travels with
+  // the turn. In ACP, Grok can enter its native plan mode via
+  // `enter_plan_mode`; the host also rejects protected actions as a hard
+  // read-only backstop.
   if (config.actionPolicy === 'review') {
     rules.push(
-      'Stay read-only: analyze and propose changes, but do not edit files or run mutating commands.',
+      'Enter plan mode before doing the work. Stay read-only: inspect and reason, but do not edit files or run mutating commands. Return a concrete implementation plan.',
     );
   }
   return rules.join('\n');
@@ -69,7 +71,7 @@ export function buildGrokArgs(config: GrokRunConfig): string[] {
     args.push('--reasoning-effort', r);
   }
   // Action policy → REAL grok permission behavior.
-  //   review   → read-only contract (carried by --rules); no permission flag
+  //   review   → Plan contract (carried by --rules); no permission flag
   //   patch    → respect the advanced Settings permission-mode override (incl.
   //              "plan" for power users), else grok's default approvals
   //   autopilot→ --always-approve  (auto-approves EVERY tool call — risky)

@@ -4,16 +4,25 @@ import { sanitizeHtml } from '../lib/sanitizeHtml';
 import { TraceTimeline } from './TraceTimeline';
 import { MessageActions } from './MessageActions';
 import { t } from '../i18n';
+import type { TraceEvent } from '../lib/traceParser';
 
 interface Props {
   runId: string;
   fallbackText?: string;
   durationMs?: number;
+  fallbackTraces?: TraceEvent[];
   canUndo?: boolean;
   onUndo?: () => void;
 }
 
-function MessageItemImpl({ runId, fallbackText, durationMs, canUndo = false, onUndo }: Props) {
+function MessageItemImpl({
+  runId,
+  fallbackText,
+  durationMs,
+  fallbackTraces,
+  canUndo = false,
+  onUndo,
+}: Props) {
   const snap = useRunSnapshot(runId);
   const html = useRunHtml(runId);
   const workedMs =
@@ -26,12 +35,11 @@ function MessageItemImpl({ runId, fallbackText, durationMs, canUndo = false, onU
   // markdown-it does not sanitize; strip scripts/handlers before injecting.
   const safeHtml = useMemo(() => (html ? sanitizeHtml(html) : html), [html]);
   const workedRow = workedLabel ? (
-    <div className="message-worked" aria-label={t('message.workedFor', { duration: workedLabel })}>
-      <span>{t('message.workedFor', { duration: workedLabel })}</span>
-      <span className="message-worked-chevron" aria-hidden>
-        ›
-      </span>
-    </div>
+    <TraceTimeline
+      runId={runId}
+      workedLabel={t('message.workedFor', { duration: workedLabel })}
+      fallbackTraces={fallbackTraces}
+    />
   ) : null;
 
   // Restored/legacy assistant messages (loaded from storage after a restart)
@@ -98,7 +106,6 @@ function MessageItemImpl({ runId, fallbackText, durationMs, canUndo = false, onU
       ) : snap.text || fallbackText ? (
         <pre className="message-body streaming-raw">{snap.text || fallbackText || ''}</pre>
       ) : null}
-      {!runIsLive ? <TraceTimeline runId={runId} /> : null}
       {/* A failed/cancelled run must say so in the message area — the only
           other surface (StatusBar suffix) resets to "idle" as soon as the
           queue moves on, leaving a silent empty bubble. */}

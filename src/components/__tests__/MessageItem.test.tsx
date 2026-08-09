@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MessageItem } from '../MessageItem';
 import { applyRunEvent, applyStateChange, streamStore } from '../../lib/streamStore';
 
@@ -50,6 +51,39 @@ describe('MessageItem rendering states', () => {
 
     rerender(<MessageItem runId="msg:untimed" fallbackText="legacy" />);
     expect(screen.queryByText(/Worked for/)).toBeNull();
+  });
+
+  it('does not draw a fake disclosure arrow when no activity detail exists', () => {
+    render(<MessageItem runId="msg:quiet" fallbackText="done" durationMs={19_000} />);
+    expect(screen.getByLabelText('Worked for 19s')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Worked for 19s' })).toBeNull();
+  });
+
+  it('expands persisted activity from the Worked disclosure after restart', async () => {
+    const user = userEvent.setup();
+    render(
+      <MessageItem
+        runId="msg:tools"
+        fallbackText="done"
+        durationMs={19_000}
+        fallbackTraces={[
+          {
+            key: 'tool:1',
+            kind: 'tool',
+            label: 'Read src/App.tsx',
+            status: 'done',
+            startedAt: 1_000,
+            endedAt: 2_000,
+          },
+        ]}
+      />,
+    );
+    const disclosure = screen.getByRole('button', { name: 'Worked for 19s' });
+    expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('Read src/App.tsx')).toBeNull();
+    await user.click(disclosure);
+    expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Read src/App.tsx')).toBeInTheDocument();
   });
 
   it('uses completed snapshot timestamps and hides worked time while running', () => {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { MessageItem } from './MessageItem';
 import { useActiveRun } from '../hooks/useActiveRun';
+import type { TraceEvent } from '../lib/traceParser';
 
 export interface MessageRef {
   runId: string;
@@ -17,6 +18,7 @@ export interface MessageRef {
    */
   fallbackText?: string;
   durationMs?: number;
+  traces?: TraceEvent[];
   canUndo?: boolean;
   attachments?: Array<{
     id: string;
@@ -162,6 +164,7 @@ export function MessageList({ messages, focusId, focusNonce, onUndoAssistant }: 
               runId={msg.runId}
               fallbackText={msg.fallbackText}
               durationMs={msg.durationMs}
+              fallbackTraces={msg.traces}
               canUndo={Boolean(msg.canUndo)}
               onUndo={
                 assistantId && onUndoAssistant

@@ -1,3 +1,4 @@
+use super::core::{self, AcpHost, CoreConfig};
 use super::db::{Db, RunRecord, RunState};
 use super::event::GrokEvent;
 use super::parser::parse_line;
@@ -64,6 +65,7 @@ pub struct RunQueue {
     inner: Arc<Mutex<Inner>>,
     notify: Arc<Notify>,
     pub tx: broadcast::Sender<QueueMessage>,
+    core: Arc<Mutex<Option<AcpHost>>>,
 }
 
 struct Inner {
@@ -95,6 +97,7 @@ impl RunQueue {
             inner: Arc::new(Mutex::new(inner)),
             notify: Arc::new(Notify::new()),
             tx,
+            core: Arc::new(Mutex::new(None)),
         };
         (queue, rx)
     }
@@ -325,6 +328,11 @@ impl RunQueue {
         let args: Vec<String> = serde_json::from_str(&rec.args_json).unwrap_or_default();
         let grok_path = self.inner.lock().await.grok_path.clone();
         let cwd = std::path::PathBuf::from(&rec.cwd);
+
+        if core::should_use_acp(&grok_path) {
+            self.run_one_core(&rec, &args, &grok_path, &cwd).await;
+            return;
+        }
 
         let spawn_result = process::spawn(&grok_path, &args, &cwd);
         match spawn_result {
@@ -578,6 +586,71 @@ impl RunQueue {
 
     pub fn notify_worker(&self) {
         self.notify.notify_one();
+    }
+
+    async fn run_one_core(
+        &self,
+        rec: &RunRecord,
+        args: &[String],
+        grok_path: &std::path::Path,
+        cwd: &std::path::Path,
+    ) {
+        let config = CoreConfig::from_legacy_args(args);
+        let mut slot = self.core.lock().await;
+        let reuse = slot
+            .as_mut()
+            .is_some_and(|host| host.matches(grok_path, &config));
+        if !reuse {
+            *slot = match AcpHost::connect(grok_path, cwd, &config).await {
+                Ok(host) => Some(host),
+                Err(error) => {
+                    drop(slot);
+                    self.finalize(&rec.id, RunState::Failed, Some(error)).await;
+                    return;
+                }
+            };
+        }
+        let host = slot.as_mut().expect("ACP host initialized");
+        {
+            let mut inner = self.inner.lock().await;
+            inner.active_pgid = Some(host.pgid());
+        }
+        let result = host
+            .run_turn(&rec.id, &rec.prompt, cwd, &config, &self.tx)
+            .await;
+        let cancelled = self.inner.lock().await.cancelled.contains(&rec.id);
+        match result {
+            Ok(turn) if !cancelled => {
+                let event = GrokEvent::End {
+                    stop_reason: turn.stop_reason,
+                    session_id: turn.session_id,
+                    request_id: turn.request_id,
+                };
+                let raw = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
+                let _ = self.tx.send(QueueMessage {
+                    run_id: rec.id.clone(),
+                    kind: QueueMessageKind::Event { event, raw },
+                });
+                drop(slot);
+                self.finalize(&rec.id, RunState::Done, None).await;
+            }
+            Ok(_) => {
+                *slot = None;
+                drop(slot);
+                self.finalize(&rec.id, RunState::Cancelled, None).await;
+            }
+            Err(error) => {
+                *slot = None;
+                drop(slot);
+                let state = if cancelled {
+                    RunState::Cancelled
+                } else {
+                    RunState::Failed
+                };
+                self.finalize(&rec.id, state, (!cancelled).then_some(error))
+                    .await;
+            }
+        }
     }
 
     async fn finalize(&self, id: &str, state: RunState, error: Option<String>) {

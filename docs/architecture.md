@@ -1,28 +1,35 @@
 # Grok Build Desktop Architecture
 
 Grok Build Desktop is a Tauri 2 desktop shell with a React workbench and a Rust
-command bridge. It never talks to a model API directly — every run shells out to
-the user's locally installed `grok` CLI.
+Core host. It never talks to a model API directly. Version 0.5 keeps one
+`grok agent stdio` process alive and uses Grok's first-party ACP protocol; the
+old one-shot streaming CLI runner remains only as an explicit compatibility
+fallback.
 
 ## Runtime Layers
 
 - React (`src/`) renders the workbench: conversations sidebar, composer with
   workflow/effort/action-policy controls, streaming conversation, capability
   inspector, Tools & Skills hub, settings, terminal dock, and static preview.
-- Tauri commands in `src-tauri/src/lib.rs` call local subprocesses; the run
-  engine lives in `src-tauri/src/runs/` (db, event, parser, process, queue).
-- A streaming Grok run flows:
+- Tauri commands in `src-tauri/src/lib.rs` call local capabilities; the run
+  engine lives in `src-tauri/src/runs/` (Core host, db, event adapter, process,
+  queue).
+- A Grok Core run flows:
   1. The frontend builds the argument list (`buildGrokArgs` in `src/App.tsx`)
      and calls `invoke('enqueue_run', { prompt, cwd, args })`.
   2. `RunQueue` (`src-tauri/src/runs/queue.rs`) persists the run to
-     `runs.sqlite` (FIFO, survives restart) and spawns
-     `grok … --output-format streaming-json -p …` in its own process group.
-  3. Stdout is parsed line-by-line (`runs/parser.rs`) and broadcast; `lib.rs`
+     `runs.sqlite` (FIFO, survives restart). `runs/core.rs` starts or reuses a
+     process-group-isolated `grok agent stdio` Core host, performs ACP
+     `initialize`, then uses `session/load` or `session/new` followed by
+     `session/prompt`.
+  3. ACP `session/update` notifications are translated into the stable desktop
+     event shape while their complete payload is retained for tool, task and
+     subagent rendering; `lib.rs`
      forwards it as Tauri events (`grok-desktop://run-event`,
      `grok-desktop://run-state-changed`, `grok-desktop://queue-changed`).
   4. `src/lib/streamStore.ts` accumulates a `RunSnapshot` consumed via
      `useSyncExternalStore` hooks; markdown is rendered off-thread by a Web
-     Worker (`marked` + `highlight.js`) and sanitized with DOMPurify before
+     Worker (`markdown-it` + `highlight.js`) and sanitized with DOMPurify before
      injection.
 - The grok binary is resolved from `GROK_DESKTOP_GROK_CMD`, else the first
   `grok` found on the app's fixed search path (`~/.local/bin`, `~/.grok/bin`,
@@ -62,6 +69,10 @@ list`, and `grok sessions list`. The right inspector separates Context,
 
 - `GROK_DESKTOP_PYTHON`: Python executable for scripts and package checks.
 - `GROK_DESKTOP_GROK_CMD`: Grok CLI executable (overrides path search).
+- `GROK_DESKTOP_RUNTIME`: `acp` forces the persistent Core host; `legacy`
+  forces the old one-process-per-turn streaming JSON runner. When unset, a
+  normal executable named `grok` uses ACP and test/custom binaries retain the
+  compatibility runner.
 - `GROK_DESKTOP_NO_OUTPUT_TIMEOUT_SECS`: streaming watchdog — how long a run
   may go without printing anything to stdout before it is killed as wedged.
   The timer resets on every line, so an actively thinking grok never trips it.
@@ -86,7 +97,8 @@ list`, and `grok sessions list`. The right inspector separates Context,
 - Plan Mode view: separate "plan" from "apply" (the raw
   `--permission-mode plan` primitive is already exposed in Settings).
 - Sub-agent visualization for best-of-n / fan-out runs.
-- Session pinning: capture the `sessionId` from the `end` event and resume
-  with `-r <sessionId>` instead of `-c`.
+- Native in-process Core: replace the ACP child transport with a direct
+  `xai-grok-shell` Rust adapter once its embedding API is stable. The renderer
+  and run-event contract do not change.
 - A larger, community-driven Skills catalog.
 - Notarized macOS builds and a Linux build target.

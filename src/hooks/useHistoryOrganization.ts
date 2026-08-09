@@ -182,16 +182,19 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
       );
     };
     const rows: HistoryRow[] = tabs
-      .map((t) => {
+      .flatMap((t) => {
         const msgs =
           (t.id === activeTabId ? (messages as unknown as TabMessage[]) : t.messages) ?? [];
         const fp = firstUserLine(msgs);
+        // A blank New Session is an ephemeral compose surface, not history.
+        // It becomes a conversation row only after its first user message.
+        if (!fp) return [];
         const promptCount = msgs.filter((m) => m.role === 'user').length;
         const lastTs = msgs.length
           ? Math.max(...msgs.map((m) => (m as { ts?: number }).ts ?? 0))
           : t.createdAt;
         const fallback = deriveConversationTitle(fp);
-        return {
+        return [{
           id: t.id,
           title: promptLabels[t.id] ?? fallback,
           detail: promptCount > 0 ? `${promptCount} message${promptCount > 1 ? 's' : ''}` : 'empty',
@@ -201,7 +204,7 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
           archived: archivedPromptIds.has(t.id),
           lastTs,
           active: t.id === activeTabId,
-        };
+        }];
       })
       .sort((a, b) => b.lastTs - a.lastTs);
     if (!historyFilter.trim()) return rows;

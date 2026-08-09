@@ -6067,9 +6067,10 @@ select:focus-visible {
   --button-hover: #2c2c2c;
   --selected: #272727;
   --selected-strong: #303030;
-  /* Codex desktop uses a 60% white conversation-body token in dark mode.
-     Keeping prose below full foreground reduces glare during long sessions. */
-  --conversation-text: rgba(255, 255, 255, 0.6);
+  /* Codex-like long-form foreground: primary answer content uses one warm
+     off-white token. Muted chrome may still be grey, but Markdown elements
+     must not invent their own lower-contrast foregrounds. */
+  --conversation-text: #ece9e2;
   background: #171717;
 }
 
@@ -6157,16 +6158,40 @@ select:focus-visible {
   display: flex;
   font-size: 13px;
   gap: 7px;
+  justify-content: flex-start;
   line-height: 1;
   margin-bottom: 28px;
   padding-bottom: 14px;
+  width: 100%;
+}
+
+button.message-worked {
+  background: transparent;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+button.message-worked:hover {
+  color: var(--conversation-text);
 }
 
 .message-worked-chevron {
   color: var(--text-soft);
-  font-size: 20px;
-  line-height: 0.7;
-  transform: translateY(-0.5px);
+  flex: none;
+  margin-left: 1px;
+  transition: transform 160ms ease;
+}
+
+.message-worked-rail.is-expanded .message-worked-chevron {
+  transform: rotate(180deg);
+}
+
+.message-worked-list {
+  margin: -18px 0 24px 2px;
 }
 
 @media (max-width: 720px) {
@@ -6483,6 +6508,78 @@ body,
   line-height: 21px;
 }
 
+/* Keep every Markdown surface on the same Codex-like type ramp. The previous
+   pass only changed the prose root, leaving headings, tables and code on older
+   relative sizes and dimmer legacy tokens. */
+.message.message-assistant .markdown-body h1 {
+  font-size: 20px;
+  line-height: 27px;
+}
+.message.message-assistant .markdown-body h2 {
+  font-size: 17px;
+  line-height: 24px;
+}
+.message.message-assistant .markdown-body h3 {
+  font-size: 15px;
+  line-height: 22px;
+}
+.message.message-assistant .markdown-body h4,
+.message.message-assistant .markdown-body h5,
+.message.message-assistant .markdown-body h6 {
+  font-size: 13px;
+  line-height: 21px;
+}
+.message.message-assistant .markdown-body table:not(.vlist-t) {
+  color: var(--conversation-text);
+  font-size: 13px;
+  line-height: 20px;
+}
+.message.message-assistant .markdown-body table:not(.vlist-t) > thead > tr > th {
+  color: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.message.message-assistant .markdown-body code,
+.message.message-assistant .markdown-body pre code {
+  font-size: 12.5px;
+  line-height: 20px;
+}
+.message.message-assistant .markdown-body .code-block-head {
+  color: var(--conversation-text);
+  font-family: 'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.025em;
+  line-height: 18px;
+  padding: 8px 12px 7px;
+}
+.message.message-assistant .markdown-body strong,
+.message.message-assistant .markdown-body em,
+.message.message-assistant .markdown-body .code-block-lang {
+  color: inherit;
+}
+.message.message-assistant .markdown-body .code-block-lang {
+  font-size: inherit;
+}
+.message.message-assistant .markdown-body .code-block-shell {
+  background: var(--vscode-textCodeBlock-background);
+  border: 1px solid var(--vscode-widget-border);
+  border-radius: 4px;
+  margin: 0 0 16px;
+  overflow: hidden;
+}
+.message.message-assistant .markdown-body .code-block-shell pre {
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+}
+.message.message-assistant .markdown-body blockquote,
+.message.message-assistant .markdown-body .footnotes,
+.message.message-assistant .markdown-body .md-image-alt {
+  color: color-mix(in srgb, var(--conversation-text) 86%, transparent);
+}
+
 /* Compact composer: frequent input owns the space; low-frequency run knobs
    live in an upward popover instead of a permanent full-width footer row. */
 .composer-row .composer {
@@ -6790,6 +6887,37 @@ body,
   z-index: 2;
 }
 
+/* A right dock is a real second workspace column. The earlier integrated
+   terminal rule unconditionally reserved a bottom row, so the saved Right
+   preference changed the class but never the rendered position. */
+.workspace.dock-right.terminal-open {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 430px);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.workspace.dock-right.terminal-open > .window-titlebar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+.workspace.dock-right.terminal-open > .workbench {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.workspace.dock-right.terminal-open > .terminal-dock {
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 0;
+  grid-column: 2;
+  grid-row: 2;
+  height: 100%;
+  min-height: 0;
+}
+
+.workspace.dock-right.terminal-open > .terminal-dock .terminal-resizer {
+  display: none;
+}
+
 .terminal-resizer {
   cursor: ns-resize;
   height: 7px;
@@ -6904,5 +7032,31 @@ body,
   .workspace.terminal-open > .terminal-dock {
     height: var(--terminal-height, 240px);
     margin: 0;
+  }
+
+  .workspace.dock-right.terminal-open {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(520px, 1fr) var(--terminal-height, 240px);
+  }
+
+  .workspace.dock-right.terminal-open > .window-titlebar,
+  .workspace.dock-right.terminal-open > .workbench,
+  .workspace.dock-right.terminal-open > .terminal-dock {
+    grid-column: 1;
+  }
+
+  .workspace.dock-right.terminal-open > .window-titlebar {
+    grid-row: 1;
+  }
+
+  .workspace.dock-right.terminal-open > .workbench {
+    grid-row: 2;
+  }
+
+  .workspace.dock-right.terminal-open > .terminal-dock {
+    border-left: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    grid-row: 3;
+    height: var(--terminal-height, 240px);
   }
 }

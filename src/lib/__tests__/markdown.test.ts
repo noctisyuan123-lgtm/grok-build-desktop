@@ -33,4 +33,11 @@ describe('renderMarkdown extensions', () => {
     const source = '`\\(inline code\\)`\n\n```txt\n\\[block code\\]\n```';
     expect(normalizeMathDelimiters(source)).toBe(source);
   });
+
+  it('keeps a compact language title above fenced code', () => {
+    const html = renderMarkdown('```ts\nconst value = 1;\n```');
+    expect(html).toContain('class="code-block-shell"');
+    expect(html).toContain('class="code-block-lang">ts</span>');
+    expect(html).toContain('class="language-ts"');
+  });
 });

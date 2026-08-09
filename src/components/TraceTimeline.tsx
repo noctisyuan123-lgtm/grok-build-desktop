@@ -8,6 +8,8 @@ import { t } from '../i18n';
 
 interface Props {
   runId: string;
+  workedLabel?: string;
+  fallbackTraces?: TraceEvent[];
 }
 
 /**
@@ -15,15 +17,44 @@ interface Props {
  * individual tools and subagents stay behind one disclosure so a long task
  * does not become a wall of cards.
  */
-export function TraceTimeline({ runId }: Props) {
+export function TraceTimeline({ runId, workedLabel, fallbackTraces = [] }: Props) {
   const snapshot = useRunSnapshot(runId);
-  const traces = snapshot?.traces ?? [];
+  const traces = snapshot?.traces.length ? snapshot.traces : fallbackTraces;
   const [expanded, setExpanded] = useState(false);
   const hasError = traces.some((trace) => trace.status === 'error');
 
   useEffect(() => {
     if (hasError) setExpanded(true);
   }, [hasError]);
+
+  if (workedLabel) {
+    return (
+      <section className={`message-worked-rail${expanded ? ' is-expanded' : ''}`}>
+        {traces.length > 0 ? (
+          <button
+            type="button"
+            className="message-worked"
+            onClick={() => setExpanded((value) => !value)}
+            aria-expanded={expanded}
+          >
+            <span>{workedLabel}</span>
+            <ChevronDown className="message-worked-chevron" size={17} strokeWidth={1.8} aria-hidden />
+          </button>
+        ) : (
+          <div className="message-worked" aria-label={workedLabel}>
+            <span>{workedLabel}</span>
+          </div>
+        )}
+        {expanded && traces.length > 0 ? (
+          <div className="activity-list message-worked-list" aria-label={t('message.traceAriaLabel')}>
+            {traces.map((trace) => (
+              <ActivityRow key={trace.key} trace={trace} />
+            ))}
+          </div>
+        ) : null}
+      </section>
+    );
+  }
 
   if (!snapshot || (traces.length === 0 && !isLive(snapshot))) return null;
 

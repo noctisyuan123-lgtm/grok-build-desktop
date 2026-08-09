@@ -35,6 +35,7 @@ describe('buildGrokRules', () => {
   it('adds the read-only contract only for the review policy', () => {
     const review = buildGrokRules({ mode: 'coding', actionPolicy: 'review' })!;
     const patch = buildGrokRules({ mode: 'coding', actionPolicy: 'patch' })!;
+    expect(review).toContain('Enter plan mode');
     expect(review).toContain('Stay read-only');
     expect(patch).not.toContain('Stay read-only');
     expect(patch).toContain('senior engineer');

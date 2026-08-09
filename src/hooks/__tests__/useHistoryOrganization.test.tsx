@@ -34,6 +34,13 @@ const tabs: Tab[] = [
     ],
   },
   { id: 't3', name: 'empty', cwd: '', createdAt: 3, messages: [] },
+  {
+    id: 't4',
+    name: 'old',
+    cwd: '/old',
+    createdAt: 4,
+    messages: [message('m5', 'archive this conversation', 50)],
+  },
 ];
 
 function render(activeMessages: ChatMessage[] = tabs[0].messages as ChatMessage[]) {
@@ -56,13 +63,11 @@ describe('recentPrompts derivation', () => {
   it('lists one row per conversation, newest activity first, titled by a compact intent summary', () => {
     const { result } = render();
     const rows = result.current.recentPrompts;
-    // t2 has the newest activity (ts 400); the empty t3 falls back to its
-    // createdAt (3) and sorts last.
-    expect(rows.map((r) => r.id)).toEqual(['t2', 't1', 't3']);
+    // Empty draft tabs are compose surfaces and do not enter HISTORY.
+    expect(rows.map((r) => r.id)).toEqual(['t2', 't1', 't4']);
     expect(rows.find((r) => r.id === 't1')!.title).toBe('fix the flaky login test');
     expect(rows.find((r) => r.id === 't2')!.detail).toBe('2 messages');
-    expect(rows.find((r) => r.id === 't3')!.title).toBe('New conversation');
-    expect(rows.find((r) => r.id === 't3')!.detail).toBe('empty');
+    expect(rows.find((r) => r.id === 't3')).toBeUndefined();
     expect(rows.find((r) => r.id === 't1')!.active).toBe(true);
   });
 
@@ -80,21 +85,21 @@ describe('pin / archive / group organization', () => {
     const { result } = render();
     act(() => result.current.togglePinPrompt('t2'));
     act(() => result.current.setPromptGroupId('t1', 'Work'));
-    act(() => result.current.toggleArchivePrompt('t3'));
+    act(() => result.current.toggleArchivePrompt('t4'));
 
     const view = result.current.historyView;
     expect(view.pinned.map((r) => r.id)).toEqual(['t2']);
     expect(view.groups).toEqual([['Work', expect.any(Array)]]);
     expect(view.groups[0][1].map((r) => r.id)).toEqual(['t1']);
     expect(view.ungrouped).toEqual([]);
-    expect(view.archived.map((r) => r.id)).toEqual(['t3']);
+    expect(view.archived.map((r) => r.id)).toEqual(['t4']);
 
     // Persisted so restarts keep the layout.
     expect(JSON.parse(window.localStorage.getItem(storageKeys.historyPinned)!)).toEqual(['t2']);
     expect(JSON.parse(window.localStorage.getItem(storageKeys.historyGroups)!)).toEqual({
       t1: 'Work',
     });
-    expect(JSON.parse(window.localStorage.getItem(storageKeys.historyArchived)!)).toEqual(['t3']);
+    expect(JSON.parse(window.localStorage.getItem(storageKeys.historyArchived)!)).toEqual(['t4']);
   });
 
   it('archiving a pinned conversation unpins it', () => {

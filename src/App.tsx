@@ -311,6 +311,7 @@ function App() {
             snap.startedAt != null && snap.endedAt != null
               ? Math.max(0, snap.endedAt - snap.startedAt)
               : message.meta?.durationMs;
+          const traces = snap.traces.map(({ raw: _raw, ...trace }) => trace).slice(-100);
           return {
             ...message,
             content: snap.text || message.content,
@@ -318,6 +319,7 @@ function App() {
             meta: {
               ...message.meta,
               ...(durationMs == null ? {} : { durationMs }),
+              ...(traces.length === 0 ? {} : { traces }),
               ...(snap.sessionId ? { sessionId: snap.sessionId } : {}),
             },
           };
@@ -719,6 +721,7 @@ function App() {
             role: 'assistant' as const,
             fallbackText: m.content,
             durationMs: m.meta?.durationMs,
+            traces: m.meta?.traces,
             id: m.id,
             canUndo: index === latestIndex && m.status !== 'streaming' && !grokIsRunning,
           },

@@ -1,3 +1,4 @@
+pub mod core;
 pub mod db;
 pub mod event;
 pub mod parser;
