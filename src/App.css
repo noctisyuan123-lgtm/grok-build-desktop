@@ -7475,7 +7475,36 @@ body,
    run cancellation occupies the send button's exact footprint, and scroll
    chrome remains quiet until the pointer asks for it. */
 .message-worked-list .activity-row {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 9px;
   justify-content: flex-start;
+  min-height: 36px;
+  padding: 7px 10px;
+}
+
+.message-worked-list {
+  border-left: 0;
+  gap: 7px;
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.message-worked-list .activity-row-label {
+  color: var(--conversation-text);
+  flex: 1 1 auto;
+  font-size: 13.5px;
+  font-weight: 620;
+  max-width: none;
+}
+
+.message-worked-list .activity-item.activity-status-done .activity-row {
+  opacity: 1;
+}
+
+.theme-light .message-worked-list .activity-row {
+  background: rgba(0, 0, 0, 0.025);
+  border-color: rgba(0, 0, 0, 0.075);
 }
 
 .composer-inline-bar .composer-send.composer-stop {

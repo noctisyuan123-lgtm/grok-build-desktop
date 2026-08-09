@@ -43,7 +43,7 @@ describe('TraceTimeline activity rail', () => {
     await user.click(disclosure);
     expect(disclosure).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByLabelText('Tool and subagent activity')).toBeInTheDocument();
-    expect(screen.getByText('{"path":"src/App.tsx"}')).toBeInTheDocument();
+    expect(screen.getAllByText('Read src/App.tsx')).toHaveLength(2);
   });
 
   it('keeps the current subagent action primary and moves concurrency into metadata', () => {
@@ -74,7 +74,7 @@ describe('TraceTimeline activity rail', () => {
     expect(screen.getByText(/3 turns/)).toBeInTheDocument();
   });
 
-  it('auto-expands errors and keeps failure detail visible', () => {
+  it('auto-expands errors and keeps the failed tool visibly marked', () => {
     seed(
       [
         makeTrace({
@@ -87,7 +87,7 @@ describe('TraceTimeline activity rail', () => {
     );
     render(<TraceTimeline runId="r1" />);
     expect(screen.getByLabelText('Tool and subagent activity')).toBeInTheDocument();
-    expect(screen.getByText('permission denied')).toBeInTheDocument();
+    expect(screen.queryByText('permission denied')).toBeNull();
     expect(screen.getByText('×')).toBeInTheDocument();
   });
 
@@ -116,14 +116,45 @@ describe('TraceTimeline activity rail', () => {
     expect(container.querySelector('.activity-row-time')).toBeNull();
   });
 
-  it('reveals raw diagnostics only after clicking an individual row', async () => {
+  it('lists tool calls without a second raw-detail disclosure', async () => {
     seed([makeTrace({ raw: { toolCallId: '1', rawOutput: { lines: 42 } } })]);
     const user = userEvent.setup();
     const { container } = render(<TraceTimeline runId="r1" />);
     await user.click(screen.getByRole('button', { name: /Read src\/App.tsx/ }));
     expect(container.querySelector('pre.activity-raw')).toBeNull();
-    const buttons = screen.getAllByRole('button');
-    await user.click(buttons[1]!);
-    expect(container.querySelector('pre.activity-raw')).toHaveTextContent('"lines": 42');
+    expect(container.querySelectorAll('.activity-row')).toHaveLength(1);
+    expect(container.querySelector('.activity-row')?.tagName).toBe('DIV');
+  });
+
+  it('renders restored activity as clear tool cards from the Worked disclosure', async () => {
+    const user = userEvent.setup();
+    render(
+      <TraceTimeline
+        runId="restored"
+        workedLabel="Worked for 14s"
+        fallbackTraces={[
+          makeTrace({
+            status: 'done',
+            endedAt: 2_000,
+            raw: undefined,
+            detail: '{"path":"/Users/untitled/Desktop/hello.py"}',
+          }),
+          makeTrace({
+            key: 'tool:legacy',
+            label: 'Tool',
+            status: 'done',
+            endedAt: 2_500,
+            raw: undefined,
+            detail: undefined,
+          }),
+        ]}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Worked for 14s' }));
+    expect(document.querySelectorAll('.message-worked-list .activity-row')).toHaveLength(1);
+    expect(screen.getByText('Read src/App.tsx')).toBeInTheDocument();
+    expect(screen.queryByText('Tool call')).toBeNull();
+    expect(document.querySelector('pre.activity-raw')).toBeNull();
   });
 });

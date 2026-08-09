@@ -59,6 +59,12 @@ describe('classifyEvent', () => {
     expect(failed.detail).toContain('permission denied');
   });
 
+  it('ignores nameless ACP bookkeeping updates instead of adding a fake Tool row', () => {
+    expect(
+      classifyEvent({ type: 'tool_call_update', status: 'completed', durationMs: 8_500 }).kind,
+    ).toBe('ignore');
+  });
+
   it('keeps compatibility with legacy snake_case tool events', () => {
     const start = eventOf({
       type: 'tool_use',

@@ -215,6 +215,9 @@ export function classifyEvent(raw: unknown, now = Date.now()): TraceParseResult 
     obj.rawInput ?? obj.raw_input ?? obj.input ?? obj.arguments ?? obj.args ?? obj.params;
   const output = obj.rawOutput ?? obj.raw_output ?? obj.output ?? obj.result ?? obj.response;
   const error = readField(obj, 'error', 'message', 'stderr');
+  // ACP can emit bookkeeping-only tool updates without an id, title, input,
+  // output, or error. They used to become a misleading extra “Tool” row.
+  if (!id && !name && input == null && output == null && !error) return { kind: 'ignore' };
   const detail =
     status === 'error' ? (error ?? shorten(output)) : (shorten(output) ?? shorten(input));
   const parent = readField(obj, 'parentSessionId', 'parent_session_id', 'parentId', 'parent_id');

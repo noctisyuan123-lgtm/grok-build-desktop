@@ -313,6 +313,7 @@ function App() {
             snap.startedAt != null && snap.endedAt != null
               ? Math.max(0, snap.endedAt - snap.startedAt)
               : message.meta?.durationMs;
+          // Persist the compact tool list, not potentially huge raw payloads.
           const traces = snap.traces.map(({ raw: _raw, ...trace }) => trace).slice(-100);
           return {
             ...message,

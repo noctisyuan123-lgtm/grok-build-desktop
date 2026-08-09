@@ -136,6 +136,14 @@ describe('composer submit → queued run → streamed reply', () => {
 
     // Streamed text chunks…
     await act(async () => {
+      await tauri.emitRunEvent(runId, {
+        type: 'tool_call',
+        toolCallId: 'tool-1',
+        title: 'Read file',
+        status: 'completed',
+        rawInput: { path: 'src/App.tsx' },
+        rawOutput: { lines: 42 },
+      });
       await tauri.emitRunEvent(runId, { type: 'text', data: 'Hello from mock grok. ' });
       await tauri.emitRunEvent(runId, { type: 'text', data: 'All systems streaming.' });
     });
@@ -177,10 +185,13 @@ describe('composer submit → queued run → streamed reply', () => {
         role: string;
         content: string;
         status?: string;
+        meta?: { traces?: Array<{ label?: string; raw?: unknown }> };
       }>;
       const assistant = stored.find((m) => m.role === 'assistant');
       expect(assistant?.content).toBe('Hello from mock grok. All systems streaming.');
       expect(assistant?.status).toBe('done');
+      expect(assistant?.meta?.traces?.[0]?.label).toBe('Read file');
+      expect(assistant?.meta?.traces?.[0]?.raw).toBeUndefined();
     });
     expect(tauri.unknownCommands).toEqual([]);
   });

@@ -37,7 +37,11 @@ export interface TauriAppMock {
     extra?: { startedAt?: number; endedAt?: number; error?: string },
   ) => Promise<void>;
   /** Emit grok-desktop://run-event. */
-  emitRunEvent: (runId: string, event: Record<string, unknown>) => Promise<void>;
+  emitRunEvent: (
+    runId: string,
+    event: Record<string, unknown>,
+    raw?: Record<string, unknown>,
+  ) => Promise<void>;
   /** Emit grok-desktop://queue-changed. */
   emitQueue: (active: string | null, queue?: unknown[]) => Promise<void>;
   /** Play a full streamed run: Running → text chunks → end → Done → empty queue. */
@@ -174,8 +178,8 @@ export function installTauriAppMock(overrides: Record<string, CommandHandler> = 
 
   const emitRunState: TauriAppMock['emitRunState'] = (runId, state, extra = {}) =>
     emit('grok-desktop://run-state-changed', { runId, state, ...extra });
-  const emitRunEvent: TauriAppMock['emitRunEvent'] = (runId, event) =>
-    emit('grok-desktop://run-event', { runId, event });
+  const emitRunEvent: TauriAppMock['emitRunEvent'] = (runId, event, raw = event) =>
+    emit('grok-desktop://run-event', { runId, event, raw });
   const emitQueue: TauriAppMock['emitQueue'] = (active, queue = []) =>
     emit('grok-desktop://queue-changed', { active, queue });
 

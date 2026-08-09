@@ -19,7 +19,8 @@ interface Props {
  */
 export function TraceTimeline({ runId, workedLabel, fallbackTraces = [] }: Props) {
   const snapshot = useRunSnapshot(runId);
-  const traces = snapshot?.traces.length ? snapshot.traces : fallbackTraces;
+  const availableTraces = snapshot?.traces.length ? snapshot.traces : fallbackTraces;
+  const traces = availableTraces.filter(isVisibleTrace);
   const [expanded, setExpanded] = useState(false);
   const hasError = traces.some((trace) => trace.status === 'error');
 
@@ -77,6 +78,16 @@ export function TraceTimeline({ runId, workedLabel, fallbackTraces = [] }: Props
   );
 }
 
+function isVisibleTrace(trace: TraceEvent): boolean {
+  return !(
+    trace.kind === 'tool' &&
+    trace.label === 'Tool' &&
+    trace.detail == null &&
+    trace.progress == null &&
+    trace.raw == null
+  );
+}
+
 function ActivitySummary({
   snapshot,
   expanded,
@@ -116,42 +127,23 @@ function ActivitySummary({
 }
 
 function ActivityRow({ trace }: { trace: TraceEvent }) {
-  const [open, setOpen] = useState(false);
-  const canOpen = Boolean(trace.raw);
   const duration =
     trace.endedAt != null ? formatDuration(Math.max(0, trace.endedAt - trace.startedAt)) : null;
-  const row = (
-    <>
-      <span className={`activity-row-mark status-${trace.status}`} aria-hidden>
-        {statusIcon(trace.status)}
-      </span>
-      <span className="activity-row-label">{trace.label}</span>
-      {trace.detail ? <span className="activity-row-detail">{trace.detail}</span> : null}
-      {trace.progress ? <span className="activity-row-progress">{trace.progress}</span> : null}
-      {duration ? <span className="activity-row-time">{duration}</span> : null}
-    </>
-  );
+  const label = trace.label === 'Tool' ? 'Tool call' : trace.label;
 
   return (
     <div
-      className={`activity-item activity-kind-${trace.kind} activity-status-${trace.status}${open ? ' row-open' : ''}`}
+      className={`activity-item activity-kind-${trace.kind} activity-status-${trace.status}`}
       data-parent={trace.parentKey || undefined}
     >
-      {canOpen ? (
-        <button
-          type="button"
-          className="activity-row"
-          onClick={() => setOpen((value) => !value)}
-          aria-expanded={open}
-        >
-          {row}
-        </button>
-      ) : (
-        <div className="activity-row">{row}</div>
-      )}
-      {open && trace.raw ? (
-        <pre className="activity-raw">{JSON.stringify(trace.raw, null, 2)}</pre>
-      ) : null}
+      <div className="activity-row">
+        <span className={`activity-row-mark status-${trace.status}`} aria-hidden>
+          {statusIcon(trace.status)}
+        </span>
+        <span className="activity-row-label">{label}</span>
+        {trace.progress ? <span className="activity-row-progress">{trace.progress}</span> : null}
+        {duration ? <span className="activity-row-time">{duration}</span> : null}
+      </div>
     </div>
   );
 }
