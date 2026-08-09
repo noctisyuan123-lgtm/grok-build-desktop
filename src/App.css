@@ -25,6 +25,7 @@
   --text-2: #999692;
   --text-3: #6a6864;
   --text-4: #888580;
+  --conversation-text: var(--text-1);
 
   /* Borders — hairlines, low contrast */
   --border: #24272a;
@@ -3710,10 +3711,10 @@ button.status-cluster.status-action:disabled {
 }
 .message.message-user .message-body,
 .message.message-assistant .message-body {
-  color: var(--grok-text-1);
+  color: var(--conversation-text);
   font-family: inherit;
-  font-size: 14px;
-  line-height: 1.55;
+  font-size: 13px;
+  line-height: 21px;
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
@@ -3745,15 +3746,15 @@ button.status-cluster.status-action:disabled {
 /* VS Code Agent Pane parity. The parser uses markdown-it (as VS Code does);
    keep this scoped so the rest of the desktop UI retains its theme. */
 .message.message-assistant .message-body.markdown-body {
-  --vscode-editor-foreground: var(--grok-text-1);
+  --vscode-editor-foreground: var(--conversation-text);
   --vscode-textCodeBlock-background: var(--grok-bg-1);
   --vscode-widget-border: var(--grok-border-1);
   color: var(--vscode-editor-foreground);
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, Ubuntu, 'Droid Sans',
     sans-serif;
-  font-size: 14px;
-  line-height: 22px;
+  font-size: 13px;
+  line-height: 21px;
   white-space: normal;
   word-break: normal;
 }
@@ -3958,8 +3959,8 @@ button.status-cluster.status-action:disabled {
     'Courier New',
     monospace
   );
-  font-size: 1em;
-  line-height: 1.357em;
+  font-size: 12px;
+  line-height: 18px;
   padding: 0;
 }
 .message.message-assistant .markdown-body pre,
@@ -6066,6 +6067,9 @@ select:focus-visible {
   --button-hover: #2c2c2c;
   --selected: #272727;
   --selected-strong: #303030;
+  /* Codex desktop uses a 60% white conversation-body token in dark mode.
+     Keeping prose below full foreground reduces glare during long sessions. */
+  --conversation-text: rgba(255, 255, 255, 0.6);
   background: #171717;
 }
 
@@ -6134,8 +6138,8 @@ select:focus-visible {
   border: 1px solid rgba(255, 255, 255, 0.025);
   border-radius: 22px;
   box-shadow: 0 1px 1px rgba(0, 0, 0, 0.16);
-  font-size: 15px;
-  line-height: 1.55;
+  font-size: 13px;
+  line-height: 21px;
   max-width: min(74%, 920px);
   padding: 13px 19px;
   white-space: pre-wrap;
