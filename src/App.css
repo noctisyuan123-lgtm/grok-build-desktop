@@ -7425,7 +7425,7 @@ body,
 
 .terminal-xterm .xterm-viewport {
   background-color: transparent !important;
-  scrollbar-color: #555 transparent;
+  scrollbar-color: var(--scroll-thumb) transparent;
 }
 
 .terminal-xterm .xterm-screen {
@@ -7469,4 +7469,62 @@ body,
     grid-row: 3;
     height: var(--terminal-height, 240px);
   }
+}
+
+/* Final interaction polish: message-local traces stay anchored to the left,
+   run cancellation occupies the send button's exact footprint, and scroll
+   chrome remains quiet until the pointer asks for it. */
+.message-worked-list .activity-row {
+  justify-content: flex-start;
+}
+
+.composer-inline-bar .composer-send.composer-stop {
+  background: var(--text-1);
+  border: 0;
+  border-radius: 50%;
+  color: var(--bg-0);
+}
+
+.composer-stop-square {
+  background: currentColor;
+  border-radius: 2px;
+  display: block;
+  height: 10px;
+  width: 10px;
+}
+
+.app-shell.theme-dark {
+  --scroll-thumb: #292929;
+  --scroll-thumb-hover: #555;
+}
+
+.app-shell.theme-light {
+  --scroll-thumb: #dedbd3;
+  --scroll-thumb-hover: #aaa59b;
+}
+
+* {
+  scrollbar-color: var(--scroll-thumb, #292929) transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-clip: padding-box;
+  background-color: var(--scroll-thumb, #292929);
+  border: 3px solid transparent;
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scroll-thumb-hover, #555);
 }

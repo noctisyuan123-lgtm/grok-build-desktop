@@ -32,6 +32,20 @@ function renderComposer(overrides: Partial<Parameters<typeof Composer>[0]> = {})
 }
 
 describe('Composer submit', () => {
+  it('replaces the send arrow with a round square stop control while running', async () => {
+    mockIPC(() => undefined);
+    const onStop = vi.fn();
+    const user = userEvent.setup();
+    const { container } = renderComposer({ onStop });
+
+    expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument();
+    const stop = screen.getByRole('button', { name: 'Stop run' });
+    expect(stop).toHaveClass('composer-send', 'composer-stop');
+    expect(container.querySelector('.composer-stop-square')).toBeInTheDocument();
+    await user.click(stop);
+    expect(onStop).toHaveBeenCalledTimes(1);
+  });
+
   it('enqueues the typed prompt with the built args plus -p, then clears the box', async () => {
     const calls: Array<{ cmd: string; payload: unknown }> = [];
     mockIPC((cmd, payload) => {

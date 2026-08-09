@@ -793,12 +793,9 @@ function App() {
             input, model chip, Preview/Context/Terminal/Tools/Settings, status
             pill) is gone — those all live in the sidebar, ⌘K palette, the
             bottom status bar, and Settings now. What stays here is just the
-            project chip (click → folder picker), a draggable spacer, a tiny
-            connection dot, and the contextual Stop button while running. */}
+            project chip (click → folder picker), a draggable spacer, theme,
+            and panels. Stop replaces the composer send button while running. */}
         <TitleBar
-          grokIsRunning={grokIsRunning}
-          activeRunId={activeRunId}
-          stopRun={stopRun}
           themeMode={themeMode}
           setThemeMode={setThemeMode}
           anyPanelOpen={contextOpen || previewOpen || terminalOpen || toolsOpen}

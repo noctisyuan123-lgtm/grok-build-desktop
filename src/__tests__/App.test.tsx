@@ -185,7 +185,7 @@ describe('composer submit → queued run → streamed reply', () => {
     expect(tauri.unknownCommands).toEqual([]);
   });
 
-  it('stops a running run from the title bar and marks the message stopped', async () => {
+  it('stops a running run from the composer send position and marks the message stopped', async () => {
     const ctx = await bootApp();
     const { tauri, user } = ctx;
     const runId = await submitPrompt(ctx, 'Long running task');
@@ -196,7 +196,8 @@ describe('composer submit → queued run → streamed reply', () => {
       await tauri.emitRunEvent(runId, { type: 'text', data: 'partial output' });
     });
 
-    await user.click(await screen.findByRole('button', { name: t('titleBar.stop') }));
+    expect(screen.queryByText('Stop')).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: t('composerSection.stopRun') }));
     await waitFor(() => {
       const cancel = tauri.calls.find((c) => c.cmd === 'cancel_run');
       expect(cancel?.args).toEqual({ runId });

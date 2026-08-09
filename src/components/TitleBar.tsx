@@ -1,13 +1,10 @@
-// The minimal in-app toolbar: a draggable spacer, Stop/connection state,
-// theme toggle, and panels menu. Project selection lives in Settings/sidebar.
-import { ChevronDown, Moon, PanelRight, Sun, X } from 'lucide-react';
+// The minimal in-app toolbar: a draggable spacer, theme toggle, and panels
+// menu. Run cancellation lives in the composer's send-button position.
+import { ChevronDown, Moon, PanelRight, Sun } from 'lucide-react';
 import type { ThemeMode } from '../app/types';
 import { t } from '../i18n';
 
 export interface TitleBarProps {
-  grokIsRunning: boolean;
-  activeRunId: string | null;
-  stopRun: (runId: string) => void;
   themeMode: ThemeMode;
   setThemeMode: (mode: ThemeMode) => void;
   anyPanelOpen: boolean;
@@ -15,9 +12,6 @@ export interface TitleBarProps {
 }
 
 export function TitleBar({
-  grokIsRunning,
-  activeRunId,
-  stopRun,
   themeMode,
   setThemeMode,
   anyPanelOpen,
@@ -27,17 +21,6 @@ export function TitleBar({
     <header className="window-titlebar minimal" data-tauri-drag-region>
       <div className="titlebar-spacer" data-tauri-drag-region />
       <div className="titlebar-right">
-        {grokIsRunning && activeRunId ? (
-          <button
-            className="primary-run"
-            onClick={() => stopRun(activeRunId)}
-            type="button"
-            title={t('titleBar.stopTitle')}
-          >
-            <X size={15} />
-            <span>{t('titleBar.stop')}</span>
-          </button>
-        ) : null}
         {/* Day / night theme toggle (also ⌘⇧L). Bordered + full-contrast
                 sun/moon so it reads as a control, not a stray dot. */}
         <button

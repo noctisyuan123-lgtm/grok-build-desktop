@@ -4,7 +4,7 @@
 // from App.tsx unchanged; run-config state rides in as the grouped
 // useModelConfig result.
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, SlidersHorizontal, X } from 'lucide-react';
+import { AlertTriangle, SlidersHorizontal } from 'lucide-react';
 import { Composer, type ComposerHandle } from './Composer';
 import type { useModelConfig } from '../hooks/useModelConfig';
 import {
@@ -145,6 +145,9 @@ export function ComposerSection({
         }}
         onEnqueued={handleEnqueued}
         onError={(message) => setSessionNotice(t('composerSection.sendFailed', { message }))}
+        onStop={
+          grokIsRunning && activeRunId ? () => stopRun(activeRunId) : undefined
+        }
         controls={
           <div className="composer-compact-controls">
             <select
@@ -293,16 +296,6 @@ export function ComposerSection({
                 </div>
               ) : null}
             </div>
-            {grokIsRunning && activeRunId ? (
-              <button
-                className="mini-run"
-                onClick={() => stopRun(activeRunId)}
-                type="button"
-                title={t('composerSection.stopRun')}
-              >
-                <X size={14} />
-              </button>
-            ) : null}
           </div>
         }
       />

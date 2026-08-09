@@ -258,8 +258,6 @@ export const en = {
   'message.turnUndone': 'Response moved back to the composer.',
 
   // ── Title bar ─────────────────────────────────────────────────────────────
-  'titleBar.stopTitle': 'Stop the current run',
-  'titleBar.stop': 'Stop',
   'titleBar.toLight': 'Switch to light theme',
   'titleBar.toDark': 'Switch to dark theme',
   'titleBar.toLightTitle': 'Switch to light mode (⌘⇧L)',

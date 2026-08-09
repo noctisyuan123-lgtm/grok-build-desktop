@@ -64,6 +64,8 @@ interface Props {
   onTextChange?: (text: string) => void;
   /** Compact mode/model/run controls rendered inside the input card. */
   controls?: ReactNode;
+  /** Replaces the send arrow while the active run can be stopped. */
+  onStop?: () => void;
 }
 
 /**
@@ -95,7 +97,7 @@ function detectActiveMention(text: string, caret: number): { start: number; quer
 }
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { cwd, argsBuilder, initialValue, placeholder, onEnqueued, onError, onTextChange, controls }: Props,
+  { cwd, argsBuilder, initialValue, placeholder, onEnqueued, onError, onTextChange, controls, onStop }: Props,
   outerRef,
 ) {
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -507,28 +509,40 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             )}
           </button>
           {controls}
-          <button
-            className="composer-send"
-            type="button"
-            disabled={submitting}
-            aria-label={
-              submitting
-                ? t('composer.sendQueuing')
-                : hasInflight
-                  ? t('composer.sendEnqueue')
-                  : t('composer.send')
-            }
-            title={
-              submitting
-                ? t('composer.sendQueuing')
-                : hasInflight
-                  ? t('composer.sendEnqueue')
-                  : t('composer.send')
-            }
-            onClick={() => void submit()}
-          >
-            <ArrowUp size={19} strokeWidth={1.9} aria-hidden="true" />
-          </button>
+          {onStop ? (
+            <button
+              className="composer-send composer-stop"
+              type="button"
+              aria-label={t('composerSection.stopRun')}
+              title={t('composerSection.stopRun')}
+              onClick={onStop}
+            >
+              <span className="composer-stop-square" aria-hidden="true" />
+            </button>
+          ) : (
+            <button
+              className="composer-send"
+              type="button"
+              disabled={submitting}
+              aria-label={
+                submitting
+                  ? t('composer.sendQueuing')
+                  : hasInflight
+                    ? t('composer.sendEnqueue')
+                    : t('composer.send')
+              }
+              title={
+                submitting
+                  ? t('composer.sendQueuing')
+                  : hasInflight
+                    ? t('composer.sendEnqueue')
+                    : t('composer.send')
+              }
+              onClick={() => void submit()}
+            >
+              <ArrowUp size={19} strokeWidth={1.9} aria-hidden="true" />
+            </button>
+          )}
         </div>
       </div>
     </div>
