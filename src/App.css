@@ -1541,7 +1541,7 @@ pre {
   line-height: 1.55;
   min-height: 0;
   overflow: auto;
-  padding: 12px;
+  padding: 12px 12px;
 }
 
 .session-note + .terminal-view {
@@ -4464,7 +4464,7 @@ button.status-cluster.status-action:disabled {
   border-bottom: 1px solid rgba(255, 255, 255, 0.035);
   color: inherit;
   line-height: 1.5;
-  padding: 11px 12px;
+  padding: 12px;
   text-align: left;
 }
 .message.message-assistant .markdown-body table:not(.vlist-t) > thead > tr > th {
