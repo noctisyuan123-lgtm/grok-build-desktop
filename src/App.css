@@ -6730,6 +6730,32 @@ body,
   border-bottom-color: rgba(31, 29, 25, 0.12);
 }
 
+/* ── Light-theme assistant markdown ────────────────────────────────────────
+   Same dark-first disease as the composer: white-alpha hairlines (headings,
+   blockquote bar, hr, table rules, footnote separator) vanish on the
+   parchment canvas. Ink-based equivalents keep the same visual weight; the
+   dark rules above are untouched. */
+.theme-light .message.message-assistant .markdown-body h1,
+.theme-light .message.message-assistant .markdown-body h2 {
+  border-bottom-color: rgba(31, 29, 25, 0.14);
+}
+.theme-light .message.message-assistant .markdown-body blockquote {
+  border-left-color: rgba(31, 29, 25, 0.22);
+}
+.theme-light .message.message-assistant .markdown-body hr {
+  border-bottom-color: rgba(31, 29, 25, 0.14);
+}
+.theme-light .message.message-assistant .markdown-body table:not(.vlist-t) > thead > tr > th,
+.theme-light .message.message-assistant .markdown-body table:not(.vlist-t) > tbody > tr > td {
+  border-bottom-color: rgba(31, 29, 25, 0.08);
+}
+.theme-light .message.message-assistant .markdown-body table:not(.vlist-t) > thead > tr > th {
+  border-bottom-color: rgba(31, 29, 25, 0.18);
+}
+.theme-light .message.message-assistant .markdown-body .footnotes-sep {
+  border-bottom-color: rgba(31, 29, 25, 0.12);
+}
+
 /* Integrated bottom terminal. It participates in the workspace grid instead
    of floating over the conversation, and its top edge is the resize handle. */
 .workspace {
