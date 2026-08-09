@@ -100,7 +100,6 @@ export const en = {
   'composerSection.reasoningEffort': 'Reasoning effort',
   'composerSection.bestOfN': 'Best-of-N',
   'composerSection.runSettings': 'Run settings',
-  'composerSection.enterHint': '↵ Send · ⇧↵ Newline',
   'composerSection.stopRun': 'Stop run',
 
   // ── Settings modal ────────────────────────────────────────────────────────
@@ -197,7 +196,6 @@ export const en = {
   'sidebar.grokMissing': 'Grok missing',
   'sidebar.openSettings': 'Open settings',
   'sidebar.settingsTitle': 'Settings (⌘,)',
-  'sidebar.connected': 'Connected · grok.com',
   'sidebar.rowTitle': 'Open this conversation · right-click or Shift+F10 for actions',
   'sidebar.renamePrompt': 'Rename prompt',
   'sidebar.newGroupName': 'New group name',
@@ -274,12 +272,6 @@ export const en = {
   // ── Title bar ─────────────────────────────────────────────────────────────
   'titleBar.stopTitle': 'Stop the current run',
   'titleBar.stop': 'Stop',
-  'titleBar.connectedTitle': 'Connected to grok.com',
-  'titleBar.offlineTitle': 'Grok {status}',
-  'titleBar.connectedAria': 'Grok connected',
-  'titleBar.notConnectedAria': 'Grok not connected',
-  'titleBar.grok': 'Grok',
-  'titleBar.offline': 'Offline',
   'titleBar.toLight': 'Switch to light theme',
   'titleBar.toDark': 'Switch to dark theme',
   'titleBar.toLightTitle': 'Switch to light mode (⌘⇧L)',

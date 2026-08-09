@@ -8,8 +8,6 @@ export interface TitleBarProps {
   grokIsRunning: boolean;
   activeRunId: string | null;
   stopRun: (runId: string) => void;
-  isGrokReady: boolean;
-  statusLabel: string;
   themeMode: ThemeMode;
   setThemeMode: (mode: ThemeMode) => void;
   anyPanelOpen: boolean;
@@ -20,8 +18,6 @@ export function TitleBar({
   grokIsRunning,
   activeRunId,
   stopRun,
-  isGrokReady,
-  statusLabel,
   themeMode,
   setThemeMode,
   anyPanelOpen,
@@ -41,20 +37,7 @@ export function TitleBar({
             <X size={15} />
             <span>{t('titleBar.stop')}</span>
           </button>
-        ) : (
-          <span
-            className={`conn-pill ${isGrokReady ? 'ready' : 'blocked'}`}
-            title={
-              isGrokReady
-                ? t('titleBar.connectedTitle')
-                : t('titleBar.offlineTitle', { status: statusLabel.toLowerCase() })
-            }
-            aria-label={isGrokReady ? t('titleBar.connectedAria') : t('titleBar.notConnectedAria')}
-          >
-            <span className="conn-dot-mini" aria-hidden />
-            {isGrokReady ? t('titleBar.grok') : t('titleBar.offline')}
-          </span>
-        )}
+        ) : null}
         {/* Day / night theme toggle (also ⌘⇧L). Bordered + full-contrast
                 sun/moon so it reads as a control, not a stray dot. */}
         <button

@@ -82,10 +82,10 @@ describe('App boot', () => {
     expect(composerTextarea()).toBeInTheDocument();
     expect(document.querySelector('.status-bar-idle')).not.toBeInTheDocument();
 
-    // Sidebar brand + connected pill (auth status came from the mock).
+    // Connection labels are intentionally omitted from the minimal chrome.
     expect(screen.getByText(t('sidebar.brandTitle'))).toBeInTheDocument();
-    expect(await screen.findByText(t('sidebar.connected'))).toBeInTheDocument();
-    expect(await screen.findByLabelText(t('titleBar.connectedAria'))).toBeInTheDocument();
+    expect(document.querySelector('.account-text')).not.toBeInTheDocument();
+    expect(document.querySelector('.conn-pill')).not.toBeInTheDocument();
 
     // Boot invokes the same command surface the e2e harness documents.
     await waitFor(() => {

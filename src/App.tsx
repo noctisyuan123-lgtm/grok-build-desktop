@@ -641,11 +641,6 @@ function App() {
   );
   const grokToolStatus = statusMap.grok;
   const isGrokReady = Boolean(grokStatus?.authenticated);
-  const statusLabel = grokStatus?.authenticated
-    ? 'Connected'
-    : grokStatus?.installed
-      ? 'Login needed'
-      : 'Connect needed';
   const workspacePath = codingCwd.trim() || 'No project selected';
   const activeRun = useActiveRun();
   const grokIsRunning = Boolean(activeRun && activeRun.state === 'running');
@@ -777,8 +772,6 @@ function App() {
         runDoctor={runDoctor}
         grokToolStatus={grokToolStatus}
         isGrokReady={isGrokReady}
-        activeModel={activeModel}
-        statusLabel={statusLabel}
         sidebarCollapsed={sidebarCollapsed}
         setSidebarCollapsed={setSidebarCollapsed}
       />
@@ -800,8 +793,6 @@ function App() {
           grokIsRunning={grokIsRunning}
           activeRunId={activeRunId}
           stopRun={stopRun}
-          isGrokReady={isGrokReady}
-          statusLabel={statusLabel}
           themeMode={themeMode}
           setThemeMode={setThemeMode}
           anyPanelOpen={contextOpen || previewOpen || terminalOpen || toolsOpen}

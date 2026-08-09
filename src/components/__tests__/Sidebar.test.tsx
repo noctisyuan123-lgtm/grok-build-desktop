@@ -110,8 +110,6 @@ function Harness() {
           detail: '',
         }}
         isGrokReady
-        activeModel="grok-build"
-        statusLabel="Connected"
         sidebarCollapsed={sidebarCollapsed}
         setSidebarCollapsed={setSidebarCollapsed}
       />

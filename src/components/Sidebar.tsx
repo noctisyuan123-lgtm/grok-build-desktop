@@ -56,8 +56,6 @@ export interface SidebarProps {
   runDoctor: () => void;
   grokToolStatus: ToolStatus | undefined;
   isGrokReady: boolean;
-  activeModel: string;
-  statusLabel: string;
   sidebarCollapsed: boolean;
   setSidebarCollapsed: (collapsed: boolean) => void;
 }
@@ -81,8 +79,6 @@ export function Sidebar({
   runDoctor,
   grokToolStatus,
   isGrokReady,
-  activeModel,
-  statusLabel,
   sidebarCollapsed,
   setSidebarCollapsed,
 }: SidebarProps) {
@@ -526,11 +522,6 @@ export function Sidebar({
       >
         <div className={`avatar${isGrokReady ? ' ready' : ''}`}>
           <BrandGlyph size={17} />
-        </div>
-        <div className="account-text">
-          {/* Real data: active model + live grok connection status. */}
-          <strong>{activeModel}</strong>
-          <span>{isGrokReady ? t('sidebar.connected') : statusLabel}</span>
         </div>
         <span className="account-settings" aria-hidden="true">
           <Settings size={16} />

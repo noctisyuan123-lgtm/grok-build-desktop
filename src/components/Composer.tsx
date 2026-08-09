@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { FileImage, FileText, Paperclip, X } from 'lucide-react';
+import { ArrowUp, FileImage, FileText, Paperclip, X } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { enqueueRun } from '../lib/grok';
 import { useHasInflight } from '../hooks/useActiveRun';
@@ -507,15 +507,27 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             )}
           </button>
           {controls}
-          <span className="composer-inline-hint" aria-hidden="true">
-            {t('composerSection.enterHint')}
-          </span>
-          <button className="composer-send" disabled={submitting} onClick={() => void submit()}>
-            {submitting
-              ? t('composer.sendQueuing')
-              : hasInflight
-                ? t('composer.sendEnqueue')
-                : t('composer.send')}
+          <button
+            className="composer-send"
+            type="button"
+            disabled={submitting}
+            aria-label={
+              submitting
+                ? t('composer.sendQueuing')
+                : hasInflight
+                  ? t('composer.sendEnqueue')
+                  : t('composer.send')
+            }
+            title={
+              submitting
+                ? t('composer.sendQueuing')
+                : hasInflight
+                  ? t('composer.sendEnqueue')
+                  : t('composer.send')
+            }
+            onClick={() => void submit()}
+          >
+            <ArrowUp size={19} strokeWidth={1.9} aria-hidden="true" />
           </button>
         </div>
       </div>

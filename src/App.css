@@ -4249,42 +4249,6 @@ body[data-theme='light'] .hljs-comment {
   background: var(--warn);
 }
 
-/* Grok connection status — a small labelled pill so it reads as "Grok is
-   connected" at a glance, not a bare mystery dot. */
-.conn-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 24px;
-  padding: 0 9px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  flex-shrink: 0;
-  white-space: nowrap;
-  color: var(--text-2);
-  user-select: none;
-}
-.conn-pill .conn-dot-mini {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--text-4);
-  flex-shrink: 0;
-}
-.conn-pill.ready {
-  color: var(--text-1);
-}
-.conn-pill.ready .conn-dot-mini {
-  background: var(--success);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
-}
-.conn-pill.blocked .conn-dot-mini {
-  background: var(--warn);
-}
-
 /* Top-right details toggle — opens the right inspector drawer. */
 .detail-toggle {
   display: inline-flex;
@@ -6631,20 +6595,20 @@ body,
   width: 26px;
 }
 .composer-inline-bar .composer-send {
-  border-radius: 8px;
-  font-size: 12px;
-  min-height: 28px;
-  order: initial;
-  padding: 0 13px;
-}
-.composer-inline-hint {
-  /* --text-4 is the faintest token that still holds WCAG AA 4.5:1 on both
-     the dark shell and the light card — the old --text-3 at 9.5px measured
-     well under 4:1 and read as decorative noise. */
-  color: var(--text-4);
-  font-size: 11px;
+  align-items: center;
+  border-radius: 50%;
+  display: inline-flex;
+  flex: 0 0 34px;
+  height: 34px;
+  justify-content: center;
   margin-left: auto;
-  white-space: nowrap;
+  min-height: 34px;
+  order: initial;
+  padding: 0;
+  width: 34px;
+}
+.composer-inline-bar .composer-send svg {
+  display: block;
 }
 .composer-attachments {
   padding: 0 0 8px;
@@ -6753,9 +6717,6 @@ body,
   width: 100%;
 }
 @media (max-width: 760px) {
-  .composer-inline-hint {
-    display: none;
-  }
   .composer-compact-controls > select.model-select-footer {
     display: none;
   }
