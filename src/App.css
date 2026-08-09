@@ -4586,10 +4586,10 @@ button.status-cluster.status-action:disabled {
 .message.message-assistant .markdown-body .code-block {
   background: var(--vscode-textCodeBlock-background);
   border: 1px solid var(--vscode-widget-border);
-  border-radius: 3px;
-  margin: 0 0 16px;
+  border-radius: 10px;
+  margin: 0 0 14px;
   overflow: auto;
-  padding: 16px;
+  padding: 9px 12px;
 }
 .message.message-assistant .markdown-body pre code {
   color: inherit;
@@ -7709,14 +7709,18 @@ body,
 /* Ordered Cursor-style agent transcript. The outer work disclosure owns the
    entire process; thought, response and tool groups keep their real order. */
 .transcript-work {
-  margin-bottom: 18px;
+  margin-bottom: 8px;
+}
+
+.transcript-work > .message-worked {
+  margin-bottom: 7px;
 }
 
 .transcript-segments {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  margin: 2px 0 22px;
+  gap: 6px;
+  margin: 0 0 10px;
 }
 
 .transcript-response.message-body,
@@ -7758,12 +7762,30 @@ body,
 
 .transcript-thought-body {
   color: color-mix(in srgb, var(--conversation-text) 64%, transparent) !important;
-  margin-top: 12px !important;
+  margin-top: 5px !important;
 }
 
 .transcript-tool-group .message-worked-list {
-  margin: 7px 0 0;
+  margin: 4px 0 0;
   padding-left: 0;
+}
+
+.agent-starting {
+  align-items: center;
+  color: color-mix(in srgb, var(--conversation-text) 48%, transparent);
+  display: flex;
+  font-size: 12px;
+  gap: 7px;
+  line-height: 20px;
+  margin: 4px 0 10px;
+}
+
+.agent-starting-dot {
+  animation: activity-breathe 1.4s ease-in-out infinite;
+  background: currentColor;
+  border-radius: 50%;
+  height: 5px;
+  width: 5px;
 }
 
 .activity-list .activity-row {

@@ -175,13 +175,54 @@ describe('TraceTimeline activity rail', () => {
       'done',
     );
     const { container } = render(<TraceTimeline runId="r1" />);
-    await user.click(screen.getByRole('button', { name: /Made 1 edit/ }));
-    const edit = screen.getByRole('button', { name: /Edited .zshrc.*\+1.*−1/ });
+    const summary = screen.getByRole('button', { name: /Edited .zshrc.*\+1.*−1/ });
+    await user.click(summary);
+    const edit = screen.getAllByRole('button', { name: /Edited .zshrc.*\+1.*−1/ })[1]!;
     await user.click(edit);
     expect(screen.getByLabelText('Changes to .zshrc')).toBeInTheDocument();
     expect(container.querySelector('.activity-diff-line.is-add')).toHaveTextContent(
       'MODEL=k3-256k',
     );
     expect(container.querySelector('.activity-diff-line.is-del')).toHaveTextContent('MODEL=k3');
+  });
+
+  it('shows a created file addition count before the edit group is expanded', () => {
+    seed(
+      [
+        makeTrace({
+          label: 'Edit `/tmp/hello.py`',
+          status: 'done',
+          endedAt: 2_000,
+          path: '/tmp/hello.py',
+          diff: '+print("hello")',
+          additions: 1,
+          deletions: 0,
+        }),
+      ],
+      'done',
+    );
+    render(<TraceTimeline runId="r1" />);
+    expect(screen.getByRole('button', { name: /Edited hello.py.*\+1/ })).toBeInTheDocument();
+    expect(screen.queryByText('−0')).toBeNull();
+  });
+
+  it('repairs duplicate created-file stats stored by the first transcript build', () => {
+    seed(
+      [
+        makeTrace({
+          label: 'Edit `/tmp/hello.py`',
+          status: 'done',
+          endedAt: 2_000,
+          path: '/tmp/hello.py',
+          diff: '+print("hello")\n+main()\n-1\n+print("hello")\n+main()',
+          additions: 4,
+          deletions: 1,
+        }),
+      ],
+      'done',
+    );
+    render(<TraceTimeline runId="r1" />);
+    expect(screen.getByRole('button', { name: /Edited hello.py.*\+2/ })).toBeInTheDocument();
+    expect(screen.queryByText('−1')).toBeNull();
   });
 });

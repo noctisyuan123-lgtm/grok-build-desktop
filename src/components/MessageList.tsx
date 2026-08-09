@@ -21,6 +21,8 @@ export interface MessageRef {
   durationMs?: number;
   traces?: TraceEvent[];
   transcript?: TranscriptSegment[];
+  /** Keep the work fold open for a turn generated in this app lifecycle. */
+  autoExpandWork?: boolean;
   canUndo?: boolean;
   attachments?: Array<{
     id: string;
@@ -168,6 +170,7 @@ export function MessageList({ messages, focusId, focusNonce, onUndoAssistant }: 
               durationMs={msg.durationMs}
               fallbackTraces={msg.traces}
               fallbackTranscript={msg.transcript}
+              autoExpandWork={msg.autoExpandWork}
               canUndo={Boolean(msg.canUndo)}
               onUndo={
                 assistantId && onUndoAssistant ? () => onUndoAssistant(assistantId) : undefined

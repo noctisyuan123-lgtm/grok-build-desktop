@@ -82,6 +82,13 @@ export function ActivityGroup({ traces }: { traces: TraceEvent[] }) {
   const visible = traces.filter(isVisibleTrace);
   const [expanded, setExpanded] = useState(false);
   if (visible.length === 0) return null;
+  const singleEdit = visible.length === 1 && isEditTrace(visible[0]!) ? visible[0] : undefined;
+  const editStats = visible.map(displayEdit);
+  const additions = editStats.reduce((total, edit) => total + edit.additions, 0);
+  const deletions = editStats.reduce((total, edit) => total + edit.deletions, 0);
+  const summary = singleEdit
+    ? `Edited ${shortPath(singleEdit.path) || singleEdit.label.replace(/^Edit\s*/iu, '')}`
+    : summarizeTraces(visible);
   return (
     <section className={`transcript-tool-group${expanded ? ' is-expanded' : ''}`}>
       <button
@@ -90,7 +97,13 @@ export function ActivityGroup({ traces }: { traces: TraceEvent[] }) {
         onClick={() => setExpanded((value) => !value)}
         aria-expanded={expanded}
       >
-        <span>{summarizeTraces(visible)}</span>
+        <span>{summary}</span>
+        {additions > 0 || deletions > 0 ? (
+          <span className="activity-diff-stats">
+            {additions > 0 ? <span className="is-add">+{additions}</span> : null}{' '}
+            {deletions > 0 ? <span className="is-del">−{deletions}</span> : null}
+          </span>
+        ) : null}
         <ChevronDown size={14} strokeWidth={1.7} aria-hidden />
       </button>
       {expanded ? (
@@ -136,6 +149,7 @@ function ActivitySummary({
     : traces.length > 0
       ? summarizeTraces(traces)
       : liveLabel(snapshot);
+  const editTotals = sumEditStats(traces);
   const meta = summaryMeta(snapshot, elapsed);
   const content = (
     <>
@@ -143,6 +157,16 @@ function ActivitySummary({
       <span className="activity-label" aria-live={isLive(snapshot) ? 'polite' : undefined}>
         {label}
       </span>
+      {editTotals.additions > 0 || editTotals.deletions > 0 ? (
+        <span className="activity-diff-stats">
+          {editTotals.additions > 0 ? (
+            <span className="is-add">+{editTotals.additions}</span>
+          ) : null}{' '}
+          {editTotals.deletions > 0 ? (
+            <span className="is-del">−{editTotals.deletions}</span>
+          ) : null}
+        </span>
+      ) : null}
       {meta ? <span className="activity-meta">{meta}</span> : null}
       {expandable ? (
         <ChevronDown className="activity-chevron" size={13} strokeWidth={1.7} aria-hidden />
@@ -166,15 +190,16 @@ export function ActivityRow({ trace }: { trace: TraceEvent }) {
   const elapsed = useElapsed(trace.startedAt, trace.endedAt);
   const duration =
     trace.status === 'running' && elapsed != null ? formatDuration(Math.max(0, elapsed)) : null;
-  const isEdit = trace.diff != null || trace.additions != null || trace.deletions != null;
+  const isEdit = isEditTrace(trace);
+  const edit = displayEdit(trace);
   const label =
     trace.kind === 'subagent'
       ? `Subagent · ${trace.label}`
       : isEdit && trace.path
         ? `Edited ${trace.path}`
         : trace.label;
-  const hasBody = Boolean(trace.diff || trace.detail);
-  const diffLines = trace.diff ? parseDiff(trace.diff) : [];
+  const hasBody = Boolean(edit.diff || trace.detail);
+  const diffLines = edit.diff ? parseDiff(edit.diff) : [];
   const rowContent = (
     <>
       <span className={`activity-row-mark status-${trace.status}`} aria-hidden>
@@ -188,8 +213,8 @@ export function ActivityRow({ trace }: { trace: TraceEvent }) {
       </span>
       {isEdit ? (
         <span className="activity-diff-stats">
-          <span className="is-add">+{trace.additions ?? 0}</span>{' '}
-          <span className="is-del">−{trace.deletions ?? 0}</span>
+          {edit.additions > 0 ? <span className="is-add">+{edit.additions}</span> : null}{' '}
+          {edit.deletions > 0 ? <span className="is-del">−{edit.deletions}</span> : null}
         </span>
       ) : null}
       {trace.progress ? <span className="activity-row-progress">{trace.progress}</span> : null}
@@ -217,7 +242,7 @@ export function ActivityRow({ trace }: { trace: TraceEvent }) {
       )}
       {expanded && hasBody ? (
         <div className="activity-detail-surface">
-          {trace.diff ? (
+          {edit.diff ? (
             <pre className="activity-diff" aria-label={`Changes to ${trace.path || trace.label}`}>
               {diffLines.map((line, index) => (
                 <span
@@ -243,6 +268,49 @@ export function ActivityRow({ trace }: { trace: TraceEvent }) {
       ) : null}
     </div>
   );
+}
+
+function isEditTrace(trace: TraceEvent): boolean {
+  return trace.diff != null || trace.additions != null || trace.deletions != null;
+}
+
+function displayEdit(trace: TraceEvent): {
+  diff?: string;
+  additions: number;
+  deletions: number;
+} {
+  if (!trace.diff) {
+    return { additions: trace.additions ?? 0, deletions: trace.deletions ?? 0 };
+  }
+  const lines = trace.diff.split('\n');
+  const additions = lines.filter((line) => line.startsWith('+'));
+  const deletions = lines.filter((line) => line.startsWith('-'));
+  // Migration for the first transcript build: Grok repeated created-file
+  // content in direct + nested fields, while numeric new_line=1 was treated as
+  // deleted source. Repair those already-persisted traces at display time.
+  if (
+    additions.length > 0 &&
+    additions.length % 2 === 0 &&
+    deletions.length > 0 &&
+    deletions.every((line) => /^-\d+$/u.test(line))
+  ) {
+    const half = additions.length / 2;
+    const first = additions.slice(0, half);
+    const second = additions.slice(half);
+    if (first.every((line, index) => line === second[index])) {
+      return { diff: first.join('\n'), additions: half, deletions: 0 };
+    }
+  }
+  return {
+    diff: trace.diff,
+    additions: trace.additions ?? additions.length,
+    deletions: trace.deletions ?? deletions.length,
+  };
+}
+
+function shortPath(path: string | undefined): string | undefined {
+  if (!path) return undefined;
+  return path.split('/').filter(Boolean).at(-1) ?? path;
 }
 
 function parseDiff(diff: string): Array<{ kind: 'add' | 'del' | 'context'; text: string }> {
@@ -286,6 +354,10 @@ function summaryMeta(snapshot: RunSnapshot, elapsed: number | null): string {
 }
 
 function summarizeTraces(traces: TraceEvent[]): string {
+  if (traces.length === 1 && isEditTrace(traces[0]!)) {
+    const trace = traces[0]!;
+    return `Edited ${shortPath(trace.path) || trace.label.replace(/^Edit\s*/iu, '')}`;
+  }
   const counts = {
     reads: 0,
     searches: 0,
@@ -327,6 +399,18 @@ function summarizeTraces(traces: TraceEvent[]): string {
 
   const summary = parts.join(', ') || 'worked';
   return `${summary[0]!.toUpperCase()}${summary.slice(1)}`;
+}
+
+function sumEditStats(traces: TraceEvent[]): { additions: number; deletions: number } {
+  return traces.reduce(
+    (totals, trace) => {
+      const edit = displayEdit(trace);
+      totals.additions += edit.additions;
+      totals.deletions += edit.deletions;
+      return totals;
+    },
+    { additions: 0, deletions: 0 },
+  );
 }
 
 function countWithNoun(count: number, noun: string): string {

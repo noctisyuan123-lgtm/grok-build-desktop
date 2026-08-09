@@ -78,6 +78,29 @@ describe('classifyEvent', () => {
     });
   });
 
+  it('does not double-count a created file repeated in direct and nested edit fields', () => {
+    const edit = eventOf({
+      type: 'tool_call_update',
+      toolCallId: 'create_1',
+      title: 'Edit `/tmp/hello.py`',
+      status: 'completed',
+      rawOutput: {
+        EditsApplied: {
+          absolute_path: '/tmp/hello.py',
+          new_string: 'print("hello")\nmain()',
+          edits: {
+            details: [{ new_line: 1, new_string: 'print("hello")\nmain()' }],
+          },
+        },
+      },
+    });
+    expect(edit).toMatchObject({
+      diff: '+print("hello")\n+main()',
+      additions: 2,
+      deletions: 0,
+    });
+  });
+
   it('ignores nameless ACP bookkeeping updates instead of adding a fake Tool row', () => {
     expect(
       classifyEvent({ type: 'tool_call_update', status: 'completed', durationMs: 8_500 }).kind,

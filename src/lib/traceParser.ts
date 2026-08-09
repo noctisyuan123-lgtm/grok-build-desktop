@@ -290,14 +290,19 @@ function extractEdit(
   const directOld = asString(applied.old_string) ?? '';
   const directNew = asString(applied.new_string) ?? '';
   if (directOld || directNew) pairs.push({ oldText: directOld, newText: directNew });
-  const edits = readObj(applied, 'edits');
-  const details = edits && Array.isArray(edits.details) ? edits.details : [];
-  for (const value of details) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
-    const detail = value as Record<string, unknown>;
-    const oldText = readField(detail, 'old_string', 'old_line') ?? '';
-    const newText = readField(detail, 'new_string', 'new_line') ?? '';
-    if (oldText || newText) pairs.push({ oldText, newText });
+  // Grok can repeat the same edit in both the direct fields and
+  // edits.details. Prefer the direct form; otherwise a created file is counted
+  // twice. `new_line` / `old_line` are numeric locations, never code text.
+  if (pairs.length === 0) {
+    const edits = readObj(applied, 'edits');
+    const details = edits && Array.isArray(edits.details) ? edits.details : [];
+    for (const value of details) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+      const detail = value as Record<string, unknown>;
+      const oldText = readField(detail, 'old_string') ?? '';
+      const newText = readField(detail, 'new_string') ?? '';
+      if (oldText || newText) pairs.push({ oldText, newText });
+    }
   }
   if (pairs.length === 0) return undefined;
   const lines: string[] = [];

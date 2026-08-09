@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MessageItem } from '../MessageItem';
 import { applyRunEvent, applyStateChange, streamStore } from '../../lib/streamStore';
@@ -133,6 +133,59 @@ describe('MessageItem rendering states', () => {
     ).toBeTruthy();
   });
 
+  it('keeps the just-generated turn open but resets a different historical run to collapsed', async () => {
+    applyStateChange('live-turn', { state: 'Running', startedAt: Date.now() });
+    applyRunEvent('live-turn', { type: 'thought', data: 'checking' });
+    const { rerender } = render(<MessageItem runId="live-turn" autoExpandWork />);
+    const liveWork = screen.getByRole('button', { name: /Working for/ });
+    expect(liveWork).toHaveAttribute('aria-expanded', 'true');
+
+    await act(async () => {
+      applyRunEvent('live-turn', {
+        type: 'end',
+        stopReason: 'EndTurn',
+        sessionId: 'session',
+        requestId: 'request',
+      });
+    });
+    expect(screen.getByRole('button', { name: /Worked for/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+
+    rerender(
+      <MessageItem
+        runId="historical-turn"
+        durationMs={2_000}
+        fallbackText="done"
+        fallbackTranscript={[
+          {
+            key: 'thought:0',
+            kind: 'thought',
+            text: 'old thought',
+            startedAt: 1_000,
+            endedAt: 2_000,
+          },
+          { key: 'response:1', kind: 'response', text: 'done' },
+        ]}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Worked for 2s' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+  });
+
+  it('does not auto-open a stale live snapshot restored during app startup', () => {
+    applyStateChange('stale-live', { state: 'Running', startedAt: Date.now() - 60_000 });
+    applyRunEvent('stale-live', { type: 'thought', data: 'old thought' });
+    render(<MessageItem runId="stale-live" />);
+    expect(screen.getByRole('button', { name: /Working for/ })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+  });
+
   it('uses completed snapshot timestamps and hides worked time while running', () => {
     applyStateChange('r-timed', { state: 'Running', startedAt: 1_000 });
     const { rerender } = render(<MessageItem runId="r-timed" />);
@@ -161,10 +214,11 @@ describe('MessageItem rendering states', () => {
     expect(container.querySelector('.stream-caret')).toBeNull();
   });
 
-  it('uses the live activity line as the empty waiting state without a blank text block', () => {
+  it('uses a quiet starting state without a placeholder timer or blank text block', () => {
     applyStateChange('r-waiting', { state: 'Running', startedAt: Date.now() });
     const { container } = render(<MessageItem runId="r-waiting" />);
-    expect(screen.getByText('working…')).toBeInTheDocument();
+    expect(screen.getByText('Starting…')).toBeInTheDocument();
+    expect(screen.queryByText(/0(?:\.0)?s/)).toBeNull();
     expect(container.querySelector('pre.streaming-raw')).toBeNull();
     expect(container.querySelector('.stream-caret')).toBeNull();
   });

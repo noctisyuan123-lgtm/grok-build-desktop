@@ -38,6 +38,8 @@ describe('renderMarkdown extensions', () => {
     const html = renderMarkdown('```ts\nconst value = 1;\n```');
     expect(html).toContain('<pre><code class="language-ts"');
     expect(html).toContain('class="language-ts"');
+    expect(html).toContain('<span class="hljs-keyword">const</span>');
+    expect(html).toContain('<span class="hljs-number">1</span>');
     expect(html).not.toContain('code-block-shell');
     expect(html).not.toContain('code-block-head');
   });

@@ -725,6 +725,7 @@ function App() {
             durationMs: m.meta?.durationMs,
             traces: m.meta?.traces,
             transcript: m.meta?.transcript,
+            autoExpandWork: m.status === 'streaming',
             id: m.id,
             canUndo: index === latestIndex && m.status !== 'streaming' && !grokIsRunning,
           },

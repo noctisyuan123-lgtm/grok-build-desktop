@@ -132,7 +132,7 @@ describe('composer submit → queued run → streamed reply', () => {
       await tauri.emitQueue(runId, []);
       await tauri.emitRunState(runId, 'Running', { startedAt: Date.now() });
     });
-    expect(await screen.findByText(t('statusBar.working'))).toBeInTheDocument();
+    expect(await screen.findByText('Starting…')).toBeInTheDocument();
 
     // Streamed text chunks…
     await act(async () => {

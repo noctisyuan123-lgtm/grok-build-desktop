@@ -15,6 +15,7 @@ interface Props {
   durationMs?: number;
   fallbackTraces?: TraceEvent[];
   fallbackTranscript?: TranscriptSegment[];
+  autoExpandWork?: boolean;
   canUndo?: boolean;
   onUndo?: () => void;
 }
@@ -25,6 +26,7 @@ function MessageItemImpl({
   durationMs,
   fallbackTraces,
   fallbackTranscript,
+  autoExpandWork = false,
   canUndo = false,
   onUndo,
 }: Props) {
@@ -72,6 +74,7 @@ function MessageItemImpl({
     if (transcript?.length) {
       return (
         <TranscriptMessage
+          key={runId}
           runId={runId}
           transcript={transcript}
           traces={traces}
@@ -79,6 +82,7 @@ function MessageItemImpl({
           fallbackText={fallbackText}
           live={false}
           startedAt={null}
+          autoExpandWork={autoExpandWork}
           canUndo={canUndo}
           onUndo={onUndo}
         />
@@ -116,6 +120,7 @@ function MessageItemImpl({
     <>
       {transcript?.length ? (
         <TranscriptMessage
+          key={runId}
           runId={runId}
           transcript={transcript}
           traces={traces}
@@ -123,6 +128,7 @@ function MessageItemImpl({
           fallbackText={fallbackText}
           live={runIsLive}
           startedAt={snap.startedAt}
+          autoExpandWork={autoExpandWork}
           canUndo={canUndo && !runIsLive}
           onUndo={onUndo}
         />
@@ -134,7 +140,16 @@ function MessageItemImpl({
           complete, the same rail moves below the answer as a quiet, durable
           "Finished" disclosure — matching the reading order of Cursor's
           agent transcript without hiding the real-time workflow. */}
-          {runIsLive ? <TraceTimeline runId={runId} /> : null}
+          {runIsLive ? (
+            snap.traces.length > 0 || snap.lastEventType != null ? (
+              <TraceTimeline runId={runId} />
+            ) : (
+              <div className="agent-starting" role="status" aria-live="polite">
+                <span className="agent-starting-dot" aria-hidden />
+                <span>Starting…</span>
+              </div>
+            )
+          ) : null}
           {safeHtml ? (
             <div
               className="message-body markdown-body markdown-streaming"
@@ -179,6 +194,7 @@ function TranscriptMessage({
   fallbackText,
   live,
   startedAt,
+  autoExpandWork,
   canUndo,
   onUndo,
 }: {
@@ -189,10 +205,14 @@ function TranscriptMessage({
   fallbackText?: string;
   live: boolean;
   startedAt: number | null;
+  autoExpandWork: boolean;
   canUndo: boolean;
   onUndo?: () => void;
 }) {
-  const [expanded, setExpanded] = useState(live);
+  const [expanded, setExpanded] = useState(autoExpandWork);
+  useEffect(() => {
+    if (autoExpandWork) setExpanded(true);
+  }, [autoExpandWork]);
   const liveElapsed = useElapsed(live ? startedAt : null, null);
   const responseIndexes = transcript
     .map((segment, index) => (segment.kind === 'response' ? index : -1))
