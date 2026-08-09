@@ -3,6 +3,7 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { MessageItem } from './MessageItem';
 import { useActiveRun } from '../hooks/useActiveRun';
 import type { TraceEvent } from '../lib/traceParser';
+import type { TranscriptSegment } from '../lib/streamStore';
 
 export interface MessageRef {
   runId: string;
@@ -19,6 +20,7 @@ export interface MessageRef {
   fallbackText?: string;
   durationMs?: number;
   traces?: TraceEvent[];
+  transcript?: TranscriptSegment[];
   canUndo?: boolean;
   attachments?: Array<{
     id: string;
@@ -165,11 +167,10 @@ export function MessageList({ messages, focusId, focusNonce, onUndoAssistant }: 
               fallbackText={msg.fallbackText}
               durationMs={msg.durationMs}
               fallbackTraces={msg.traces}
+              fallbackTranscript={msg.transcript}
               canUndo={Boolean(msg.canUndo)}
               onUndo={
-                assistantId && onUndoAssistant
-                  ? () => onUndoAssistant(assistantId)
-                  : undefined
+                assistantId && onUndoAssistant ? () => onUndoAssistant(assistantId) : undefined
               }
             />
           </div>

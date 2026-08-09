@@ -83,7 +83,54 @@ describe('MessageItem rendering states', () => {
     expect(screen.queryByText('Read src/App.tsx')).toBeNull();
     await user.click(disclosure);
     expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+    await user.click(screen.getByRole('button', { name: 'Read 1 file' }));
     expect(screen.getByText('Read src/App.tsx')).toBeInTheDocument();
+  });
+
+  it('keeps Thought, Respond, Tool, Respond in transcript order', async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <MessageItem
+        runId="msg:ordered"
+        durationMs={4_000}
+        fallbackText="Final answer"
+        fallbackTranscript={[
+          {
+            key: 'thought:0',
+            kind: 'thought',
+            text: 'I should inspect it.',
+            startedAt: 1_000,
+            endedAt: 2_000,
+          },
+          { key: 'response:1', kind: 'response', text: "I'll inspect it." },
+          { key: 'tools:2', kind: 'tools', traceKeys: ['tool:read'] },
+          { key: 'response:3', kind: 'response', text: 'Final answer' },
+        ]}
+        fallbackTraces={[
+          {
+            key: 'tool:read',
+            kind: 'tool',
+            label: 'Read src/App.tsx',
+            status: 'done',
+            startedAt: 2_000,
+            endedAt: 3_000,
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText('Final answer')).toBeInTheDocument();
+    expect(screen.queryByText("I'll inspect it.")).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Worked for 4s' }));
+    const thought = screen.getByRole('button', { name: 'Thought for 1s' });
+    expect(thought).toBeInTheDocument();
+    expect(screen.getByText("I'll inspect it.")).toBeInTheDocument();
+    const thoughtNode = container.querySelector('.transcript-thought');
+    const responseNode = container.querySelector('.transcript-response');
+    expect(thoughtNode).not.toBeNull();
+    expect(responseNode).not.toBeNull();
+    expect(
+      thoughtNode!.compareDocumentPosition(responseNode!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('uses completed snapshot timestamps and hides worked time while running', () => {

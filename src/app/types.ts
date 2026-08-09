@@ -1,6 +1,7 @@
 // Shared app-level types and runtime type guards.
 import type { ToolRun } from '../lib/grok';
 import type { TraceEvent } from '../lib/traceParser';
+import type { TranscriptSegment } from '../lib/streamStore';
 
 export type Mode = 'standard' | 'coding';
 export type Runner =
@@ -97,6 +98,8 @@ export type ChatMessage = {
     durationMs?: number;
     /** Compact tool/subagent history used by the Worked disclosure after restart. */
     traces?: TraceEvent[];
+    /** Ordered Thought / Respond / Tool transcript for restored sessions. */
+    transcript?: TranscriptSegment[];
     exitCode?: number | null;
     workflow?: string;
     /** Grok session head after this assistant turn. */

@@ -1,16 +1,20 @@
-import { memo, useEffect, useMemo } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { useRunHtml, useRunSnapshot } from '../hooks/useRunSnapshot';
 import { sanitizeHtml } from '../lib/sanitizeHtml';
-import { TraceTimeline } from './TraceTimeline';
+import { ActivityGroup, TraceTimeline } from './TraceTimeline';
 import { MessageActions } from './MessageActions';
 import { t } from '../i18n';
+import { useElapsed } from '../hooks/useElapsed';
 import type { TraceEvent } from '../lib/traceParser';
+import type { TranscriptSegment } from '../lib/streamStore';
 
 interface Props {
   runId: string;
   fallbackText?: string;
   durationMs?: number;
   fallbackTraces?: TraceEvent[];
+  fallbackTranscript?: TranscriptSegment[];
   canUndo?: boolean;
   onUndo?: () => void;
 }
@@ -20,6 +24,7 @@ function MessageItemImpl({
   fallbackText,
   durationMs,
   fallbackTraces,
+  fallbackTranscript,
   canUndo = false,
   onUndo,
 }: Props) {
@@ -31,16 +36,19 @@ function MessageItemImpl({
       : durationMs;
   const workedLabel = workedMs != null ? formatWorkedDuration(workedMs) : null;
   const runIsLive = snap?.state === 'queued' || snap?.state === 'running';
+  const transcript = snap?.transcript.length ? snap.transcript : fallbackTranscript;
+  const traces = snap?.traces.length ? snap.traces : fallbackTraces || [];
 
   // markdown-it does not sanitize; strip scripts/handlers before injecting.
   const safeHtml = useMemo(() => (html ? sanitizeHtml(html) : html), [html]);
-  const workedRow = workedLabel ? (
-    <TraceTimeline
-      runId={runId}
-      workedLabel={t('message.workedFor', { duration: workedLabel })}
-      fallbackTraces={fallbackTraces}
-    />
-  ) : null;
+  const workedRow =
+    workedLabel && !transcript?.length ? (
+      <TraceTimeline
+        runId={runId}
+        workedLabel={t('message.workedFor', { duration: workedLabel })}
+        fallbackTraces={fallbackTraces}
+      />
+    ) : null;
 
   // Restored/legacy assistant messages (loaded from storage after a restart)
   // have stored text but no live run snapshot. Render them through the SAME
@@ -61,6 +69,21 @@ function MessageItemImpl({
   }, [snap, runId, fallbackText, html]);
 
   if (!snap) {
+    if (transcript?.length) {
+      return (
+        <TranscriptMessage
+          runId={runId}
+          transcript={transcript}
+          traces={traces}
+          workedLabel={workedLabel ? t('message.workedFor', { duration: workedLabel }) : undefined}
+          fallbackText={fallbackText}
+          live={false}
+          startedAt={null}
+          canUndo={canUndo}
+          onUndo={onUndo}
+        />
+      );
+    }
     if (safeHtml) {
       return (
         <>
@@ -91,21 +114,37 @@ function MessageItemImpl({
   // Before the first worker response, show the current raw text immediately.
   return (
     <>
-      {workedRow}
-      {/* While a run is live, keep its changing action at the top of the
+      {transcript?.length ? (
+        <TranscriptMessage
+          runId={runId}
+          transcript={transcript}
+          traces={traces}
+          workedLabel={workedLabel ? t('message.workedFor', { duration: workedLabel }) : undefined}
+          fallbackText={fallbackText}
+          live={runIsLive}
+          startedAt={snap.startedAt}
+          canUndo={canUndo && !runIsLive}
+          onUndo={onUndo}
+        />
+      ) : (
+        <>
+          {workedRow}
+          {/* While a run is live, keep its changing action at the top of the
           response so waiting/tool/subagent progress has one stable home. Once
           complete, the same rail moves below the answer as a quiet, durable
           "Finished" disclosure — matching the reading order of Cursor's
           agent transcript without hiding the real-time workflow. */}
-      {runIsLive ? <TraceTimeline runId={runId} /> : null}
-      {safeHtml ? (
-        <div
-          className="message-body markdown-body markdown-streaming"
-          dangerouslySetInnerHTML={{ __html: safeHtml }}
-        />
-      ) : snap.text || fallbackText ? (
-        <pre className="message-body streaming-raw">{snap.text || fallbackText || ''}</pre>
-      ) : null}
+          {runIsLive ? <TraceTimeline runId={runId} /> : null}
+          {safeHtml ? (
+            <div
+              className="message-body markdown-body markdown-streaming"
+              dangerouslySetInnerHTML={{ __html: safeHtml }}
+            />
+          ) : snap.text || fallbackText ? (
+            <pre className="message-body streaming-raw">{snap.text || fallbackText || ''}</pre>
+          ) : null}
+        </>
+      )}
       {/* A failed/cancelled run must say so in the message area — the only
           other surface (StatusBar suffix) resets to "idle" as soon as the
           queue moves on, leaving a silent empty bubble. */}
@@ -119,16 +158,168 @@ function MessageItemImpl({
       {snap.state === 'cancelled' ? (
         <div className="message-error message-cancelled">{t('message.stopped')}</div>
       ) : null}
-      <MessageActions
-        sourceText={snap.text || fallbackText || ''}
-        canUndo={canUndo && snap.state !== 'queued' && snap.state !== 'running'}
-        onUndo={onUndo}
-      />
+      {!transcript?.length ? (
+        <MessageActions
+          sourceText={snap.text || fallbackText || ''}
+          canUndo={canUndo && snap.state !== 'queued' && snap.state !== 'running'}
+          onUndo={onUndo}
+        />
+      ) : null}
     </>
   );
 }
 
 export const MessageItem = memo(MessageItemImpl);
+
+function TranscriptMessage({
+  runId,
+  transcript,
+  traces,
+  workedLabel,
+  fallbackText,
+  live,
+  startedAt,
+  canUndo,
+  onUndo,
+}: {
+  runId: string;
+  transcript: TranscriptSegment[];
+  traces: TraceEvent[];
+  workedLabel?: string;
+  fallbackText?: string;
+  live: boolean;
+  startedAt: number | null;
+  canUndo: boolean;
+  onUndo?: () => void;
+}) {
+  const [expanded, setExpanded] = useState(live);
+  const liveElapsed = useElapsed(live ? startedAt : null, null);
+  const responseIndexes = transcript
+    .map((segment, index) => (segment.kind === 'response' ? index : -1))
+    .filter((index) => index >= 0);
+  const finalIndex = responseIndexes.at(-1) ?? -1;
+  const finalSegment = finalIndex >= 0 ? transcript[finalIndex] : undefined;
+  const finalText = finalSegment?.kind === 'response' ? finalSegment.text : fallbackText || '';
+  const header = live ? `Working for ${formatWorkedDuration(liveElapsed ?? 0)}` : workedLabel;
+
+  return (
+    <>
+      {header ? (
+        <section className={`message-worked-rail transcript-work${expanded ? ' is-expanded' : ''}`}>
+          <button
+            type="button"
+            className="message-worked"
+            onClick={() => setExpanded((value) => !value)}
+            aria-expanded={expanded}
+          >
+            <span className="message-worked-summary">{header}</span>
+            <ChevronDown
+              className="message-worked-chevron"
+              size={17}
+              strokeWidth={1.8}
+              aria-hidden
+            />
+          </button>
+          {expanded ? (
+            <div className="transcript-segments">
+              {transcript.map((segment, index) => {
+                if (index === finalIndex) return null;
+                if (segment.kind === 'thought') {
+                  return (
+                    <ThoughtSegment
+                      key={segment.key}
+                      cacheKey={`${runId}:${segment.key}`}
+                      segment={segment}
+                      live={live}
+                    />
+                  );
+                }
+                if (segment.kind === 'response') {
+                  return (
+                    <MarkdownSegment
+                      key={segment.key}
+                      cacheKey={`${runId}:${segment.key}`}
+                      text={segment.text}
+                      className="transcript-response"
+                    />
+                  );
+                }
+                const groupTraces = segment.traceKeys
+                  .map((key) => traces.find((trace) => trace.key === key))
+                  .filter((trace): trace is TraceEvent => Boolean(trace));
+                return <ActivityGroup key={segment.key} traces={groupTraces} />;
+              })}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+      {finalText ? (
+        <MarkdownSegment cacheKey={runId} text={finalText} className="markdown-streaming" />
+      ) : null}
+      <MessageActions sourceText={finalText} canUndo={canUndo} onUndo={onUndo} />
+    </>
+  );
+}
+
+function ThoughtSegment({
+  cacheKey,
+  segment,
+  live,
+}: {
+  cacheKey: string;
+  segment: Extract<TranscriptSegment, { kind: 'thought' }>;
+  live: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const duration = Math.max(0, (segment.endedAt ?? Date.now()) - segment.startedAt);
+  const label =
+    live && segment.endedAt == null
+      ? 'Thinking…'
+      : duration < 500
+        ? 'Thought briefly'
+        : `Thought for ${formatWorkedDuration(duration)}`;
+  return (
+    <section className={`transcript-thought${expanded ? ' is-expanded' : ''}`}>
+      <button type="button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
+        <span>{label}</span>
+        <ChevronDown size={14} strokeWidth={1.7} aria-hidden />
+      </button>
+      {expanded && segment.text ? (
+        <MarkdownSegment
+          cacheKey={cacheKey}
+          text={segment.text}
+          className="transcript-thought-body"
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function MarkdownSegment({
+  cacheKey,
+  text,
+  className = '',
+}: {
+  cacheKey: string;
+  text: string;
+  className?: string;
+}) {
+  const html = useRunHtml(cacheKey);
+  const safeHtml = useMemo(() => (html ? sanitizeHtml(html) : html), [html]);
+  useEffect(() => {
+    import('../lib/markdownWorker')
+      .then(({ scheduleMarkdownParse }) => scheduleMarkdownParse(cacheKey, text))
+      .catch(() => {});
+  }, [cacheKey, text]);
+  return safeHtml ? (
+    <div
+      className={`message-body markdown-body ${className}`}
+      dangerouslySetInnerHTML={{ __html: safeHtml }}
+    />
+  ) : (
+    <pre className={`message-body streaming-raw ${className}`}>{text}</pre>
+  );
+}
 
 function formatWorkedDuration(ms: number): string {
   const seconds = Math.max(0, Math.round(ms / 1000));

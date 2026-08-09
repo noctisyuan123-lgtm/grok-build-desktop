@@ -315,6 +315,13 @@ function App() {
               : message.meta?.durationMs;
           // Persist the compact tool list, not potentially huge raw payloads.
           const traces = snap.traces.map(({ raw: _raw, ...trace }) => trace).slice(-100);
+          const transcript = snap.transcript
+            .slice(-100)
+            .map((segment) =>
+              segment.kind === 'thought'
+                ? { ...segment, text: segment.text.slice(-20_000) }
+                : segment,
+            );
           return {
             ...message,
             content: snap.text || message.content,
@@ -323,6 +330,7 @@ function App() {
               ...message.meta,
               ...(durationMs == null ? {} : { durationMs }),
               ...(traces.length === 0 ? {} : { traces }),
+              ...(transcript.length === 0 ? {} : { transcript }),
               ...(snap.sessionId ? { sessionId: snap.sessionId } : {}),
             },
           };
@@ -716,6 +724,7 @@ function App() {
             fallbackText: m.content,
             durationMs: m.meta?.durationMs,
             traces: m.meta?.traces,
+            transcript: m.meta?.transcript,
             id: m.id,
             canUndo: index === latestIndex && m.status !== 'streaming' && !grokIsRunning,
           },

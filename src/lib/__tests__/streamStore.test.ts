@@ -19,6 +19,38 @@ describe('streamStore', () => {
     expect(snap?.thoughtChars).toBe(8);
     expect(snap?.text).toBe('');
     expect(snap?.lastEventType).toBe('thought');
+    expect(snap?.transcript).toMatchObject([{ kind: 'thought', text: 'thinking' }]);
+  });
+
+  it('preserves Thought -> Respond -> Tool -> Respond order', () => {
+    applyRunEvent('ordered', { type: 'thought', data: 'considering' });
+    applyRunEvent('ordered', { type: 'text', data: "I'll inspect it." });
+    applyRunEvent(
+      'ordered',
+      { type: 'unknown' },
+      {
+        type: 'tool_call',
+        toolCallId: 'read-1',
+        title: 'Read src/App.tsx',
+        status: 'in_progress',
+      },
+    );
+    applyRunEvent(
+      'ordered',
+      { type: 'unknown' },
+      {
+        type: 'tool_call_update',
+        toolCallId: 'read-1',
+        title: 'Read src/App.tsx',
+        status: 'completed',
+      },
+    );
+    applyRunEvent('ordered', { type: 'text', data: 'Found it.' });
+    expect(
+      streamStore.getRunSnapshot('ordered')?.transcript.map((segment) => segment.kind),
+    ).toEqual(['thought', 'response', 'tools', 'response']);
+    const tools = streamStore.getRunSnapshot('ordered')?.transcript[2];
+    expect(tools).toMatchObject({ kind: 'tools', traceKeys: ['tool:read-1'] });
   });
 
   it('end event marks done and records stopReason', () => {

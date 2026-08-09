@@ -17,6 +17,17 @@ export type GrokEvent =
 
 export type RunState = 'queued' | 'running' | 'done' | 'cancelled' | 'failed';
 
+export type TranscriptSegment =
+  | {
+      key: string;
+      kind: 'thought';
+      text: string;
+      startedAt: number;
+      endedAt: number | null;
+    }
+  | { key: string; kind: 'response'; text: string }
+  | { key: string; kind: 'tools'; traceKeys: string[] };
+
 export interface RunSnapshot {
   id: string;
   state: RunState;
@@ -35,6 +46,8 @@ export interface RunSnapshot {
   usage: RunUsage | null;
   /** Tool / subagent / task trace cards, in order of first appearance. */
   traces: TraceEvent[];
+  /** Ordered ACP transcript. This keeps Thought -> Respond -> Tool -> Respond intact. */
+  transcript: TranscriptSegment[];
 }
 
 export interface QueuedRunMeta {
@@ -109,6 +122,7 @@ class StreamStore {
       error: null,
       usage: null,
       traces: [],
+      transcript: [],
     };
   }
 
@@ -128,8 +142,10 @@ export function applyRunEvent(runId: string, event: GrokEvent, raw?: unknown): v
   const usage = extractUsage(raw);
   if (event.type === 'thought') {
     const { data } = event as Extract<GrokEvent, { type: 'thought' }>;
+    const now = Date.now();
     streamStore.patchRun(runId, {
       thoughtChars: (cur?.thoughtChars ?? 0) + data.length,
+      transcript: appendThought(cur?.transcript ?? [], data, now),
       lastEventType: 'thought',
       state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
     });
@@ -139,6 +155,7 @@ export function applyRunEvent(runId: string, event: GrokEvent, raw?: unknown): v
     streamStore.patchRun(runId, {
       text: nextText,
       textChars: (cur?.textChars ?? 0) + data.length,
+      transcript: appendResponse(cur?.transcript ?? [], data),
       lastEventType: 'text',
       state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
     });
@@ -168,6 +185,7 @@ export function applyRunEvent(runId: string, event: GrokEvent, raw?: unknown): v
       endedAt: Date.now(),
       usage: usage ?? cur?.usage ?? null,
       traces: reconcileOpenTraces(cur?.traces ?? [], 'done'),
+      transcript: closeThought(cur?.transcript ?? [], Date.now()),
     });
   } else if (raw) {
     const runError = extractRunError(raw);
@@ -178,6 +196,7 @@ export function applyRunEvent(runId: string, event: GrokEvent, raw?: unknown): v
         error: runError,
         usage: usage ?? cur?.usage ?? null,
         traces: reconcileOpenTraces(cur?.traces ?? [], 'error'),
+        transcript: closeThought(cur?.transcript ?? [], Date.now()),
       });
       return;
     }
@@ -206,6 +225,10 @@ export function applyRunEvent(runId: string, event: GrokEvent, raw?: unknown): v
           detail: result.event.detail ?? updated[idx]!.detail,
           parentKey: result.event.parentKey ?? updated[idx]!.parentKey,
           progress: result.event.progress ?? updated[idx]!.progress,
+          path: result.event.path ?? updated[idx]!.path,
+          diff: result.event.diff ?? updated[idx]!.diff,
+          additions: result.event.additions ?? updated[idx]!.additions,
+          deletions: result.event.deletions ?? updated[idx]!.deletions,
         };
         streamStore.patchRun(runId, {
           traces: updated,
@@ -215,6 +238,7 @@ export function applyRunEvent(runId: string, event: GrokEvent, raw?: unknown): v
       } else {
         streamStore.patchRun(runId, {
           traces: [...existing, result.event],
+          transcript: appendTool(cur?.transcript ?? [], result.event.key),
           lastEventType: result.event.status === 'running' ? 'activity' : cur?.lastEventType,
           state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
         });
@@ -251,7 +275,63 @@ export function applyStateChange(
     traces: terminalStatus
       ? reconcileOpenTraces(current?.traces ?? [], terminalStatus)
       : (current?.traces ?? []),
+    transcript: terminalStatus
+      ? closeThought(current?.transcript ?? [], payload.endedAt ?? Date.now())
+      : (current?.transcript ?? []),
   });
+}
+
+const MAX_THOUGHT_CHARS = 20_000;
+
+function closeThought(segments: TranscriptSegment[], endedAt: number): TranscriptSegment[] {
+  const last = segments.at(-1);
+  if (!last || last.kind !== 'thought' || last.endedAt != null) return segments;
+  return [...segments.slice(0, -1), { ...last, endedAt }];
+}
+
+function appendThought(
+  segments: TranscriptSegment[],
+  text: string,
+  now: number,
+): TranscriptSegment[] {
+  const closed = closeThought(segments, now);
+  const last = segments.at(-1);
+  if (last?.kind === 'thought' && last.endedAt == null) {
+    return [
+      ...segments.slice(0, -1),
+      { ...last, text: (last.text + text).slice(-MAX_THOUGHT_CHARS) },
+    ];
+  }
+  return [
+    ...closed,
+    {
+      key: `thought:${segments.length}`,
+      kind: 'thought',
+      text: text.slice(-MAX_THOUGHT_CHARS),
+      startedAt: now,
+      endedAt: null,
+    },
+  ];
+}
+
+function appendResponse(segments: TranscriptSegment[], text: string): TranscriptSegment[] {
+  const closed = closeThought(segments, Date.now());
+  const last = closed.at(-1);
+  if (last?.kind === 'response') {
+    return [...closed.slice(0, -1), { ...last, text: last.text + text }];
+  }
+  return [...closed, { key: `response:${closed.length}`, kind: 'response', text }];
+}
+
+function appendTool(segments: TranscriptSegment[], traceKey: string): TranscriptSegment[] {
+  const closed = closeThought(segments, Date.now());
+  const last = closed.at(-1);
+  if (last?.kind === 'tools') {
+    return last.traceKeys.includes(traceKey)
+      ? closed
+      : [...closed.slice(0, -1), { ...last, traceKeys: [...last.traceKeys, traceKey] }];
+  }
+  return [...closed, { key: `tools:${closed.length}`, kind: 'tools', traceKeys: [traceKey] }];
 }
 
 function reconcileOpenTraces(traces: TraceEvent[], status: TraceStatus): TraceEvent[] {

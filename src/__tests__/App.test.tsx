@@ -147,7 +147,9 @@ describe('composer submit → queued run → streamed reply', () => {
       await tauri.emitRunEvent(runId, { type: 'text', data: 'Hello from mock grok. ' });
       await tauri.emitRunEvent(runId, { type: 'text', data: 'All systems streaming.' });
     });
-    expect(await screen.findByText(t('statusBar.writing'))).toBeInTheDocument();
+    expect(
+      await convo().findByText('Hello from mock grok. All systems streaming.'),
+    ).toBeInTheDocument();
 
     // …then the end of the stream.
     await act(async () => {

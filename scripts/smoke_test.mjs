@@ -410,16 +410,15 @@ assert.ok(
   css.includes('button.status-cluster.status-action'),
   'clickable status chips need a hover affordance',
 );
-// 8) MCP add must emit per-arg --args=VALUE (clap rejects a bare leading-dash
-//    value like npx's -y → "unexpected argument '-y'"). Verified against the
-//    real grok CLI.
+// 8) Grok 1.0 uses positional MCP command syntax after a `--` separator, so
+//    command flags such as npx's `-y` reach the MCP process unchanged.
 assert.ok(
-  libRs.includes('format!("--args={}"'),
-  'grok_mcp_add must emit per-arg --args=VALUE (bare -y is rejected by clap)',
+  libRs.includes('argv.push("--".into())'),
+  'grok_mcp_add must separate the positional MCP command with --',
 );
 assert.ok(
-  read('src/lib/mcp.ts').includes('--args=${a}'),
-  'MCP command preview must mirror the --args= form the backend runs',
+  read('src/lib/mcp.ts').includes("'--',\n    entry.command"),
+  'MCP command preview must mirror the positional syntax the backend runs',
 );
 // 9) Low-frequency run config (workflow/policy/effort/reasoning/best-of-n)
 //    lives in the compact composer's popover rather than stealing a permanent

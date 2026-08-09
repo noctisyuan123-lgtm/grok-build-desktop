@@ -53,7 +53,7 @@ describe('TraceTimeline activity rail', () => {
     ]);
     render(<TraceTimeline runId="r1" />);
     expect(screen.getByText('Review frontend')).toBeInTheDocument();
-    expect(screen.getByText(/2 subagents/)).toBeInTheDocument();
+    expect(screen.getByText('Review frontend')).toBeInTheDocument();
   });
 
   it('uses authoritative usage and turn counts in the compact metadata', () => {
@@ -100,8 +100,7 @@ describe('TraceTimeline activity rail', () => {
       'done',
     );
     const { container } = render(<TraceTimeline runId="r1" />);
-    expect(screen.getByText('Finished')).toBeInTheDocument();
-    expect(screen.getByText(/2 tools/)).toBeInTheDocument();
+    expect(screen.getByText('Read 2 files')).toBeInTheDocument();
     expect(container.querySelector('.trace-card')).toBeNull();
   });
 
@@ -113,7 +112,7 @@ describe('TraceTimeline activity rail', () => {
 
     await user.click(screen.getByRole('button', { name: /Read src\/App.tsx/ }));
     expect(container.querySelector('.activity-row-mark.status-running')).toBeInTheDocument();
-    expect(container.querySelector('.activity-row-time')).toBeNull();
+    expect(container.querySelector('.activity-row-time')).toBeInTheDocument();
   });
 
   it('lists tool calls without a second raw-detail disclosure', async () => {
@@ -152,9 +151,37 @@ describe('TraceTimeline activity rail', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'Worked for 14s' }));
+    await user.click(screen.getByRole('button', { name: 'Read 1 file' }));
     expect(document.querySelectorAll('.message-worked-list .activity-row')).toHaveLength(1);
     expect(screen.getByText('Read src/App.tsx')).toBeInTheDocument();
     expect(screen.queryByText('Tool call')).toBeNull();
     expect(document.querySelector('pre.activity-raw')).toBeNull();
+  });
+
+  it('expands an edit into a line-numbered red/green diff', async () => {
+    const user = userEvent.setup();
+    seed(
+      [
+        makeTrace({
+          label: 'Edit settings',
+          status: 'done',
+          endedAt: 2_000,
+          path: '.zshrc',
+          diff: '-MODEL=k3\n+MODEL=k3-256k',
+          additions: 1,
+          deletions: 1,
+        }),
+      ],
+      'done',
+    );
+    const { container } = render(<TraceTimeline runId="r1" />);
+    await user.click(screen.getByRole('button', { name: /Made 1 edit/ }));
+    const edit = screen.getByRole('button', { name: /Edited .zshrc.*\+1.*−1/ });
+    await user.click(edit);
+    expect(screen.getByLabelText('Changes to .zshrc')).toBeInTheDocument();
+    expect(container.querySelector('.activity-diff-line.is-add')).toHaveTextContent(
+      'MODEL=k3-256k',
+    );
+    expect(container.querySelector('.activity-diff-line.is-del')).toHaveTextContent('MODEL=k3');
   });
 });

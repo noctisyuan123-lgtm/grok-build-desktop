@@ -34,10 +34,11 @@ describe('renderMarkdown extensions', () => {
     expect(normalizeMathDelimiters(source)).toBe(source);
   });
 
-  it('keeps a compact language title above fenced code', () => {
+  it('uses the original compact native pre for fenced code', () => {
     const html = renderMarkdown('```ts\nconst value = 1;\n```');
-    expect(html).toContain('class="code-block-shell"');
-    expect(html).toContain('class="code-block-lang">ts</span>');
+    expect(html).toContain('<pre><code class="language-ts"');
     expect(html).toContain('class="language-ts"');
+    expect(html).not.toContain('code-block-shell');
+    expect(html).not.toContain('code-block-head');
   });
 });

@@ -458,7 +458,12 @@ fn emit_notification(run_id: &str, tx: &broadcast::Sender<QueueMessage>, message
                 .to_string(),
         },
         "agent_thought_chunk" => GrokEvent::Thought {
-            data: String::new(),
+            data: update
+                .pointer("/content/text")
+                .or_else(|| update.get("text"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
         },
         _ => GrokEvent::Unknown,
     };
@@ -558,6 +563,24 @@ mod tests {
         assert!(matches!(
             text.kind,
             QueueMessageKind::Event { event: GrokEvent::Text { ref data }, .. } if data == "hello"
+        ));
+
+        emit_notification(
+            "run-1",
+            &tx,
+            &json!({
+                "method": "session/update",
+                "params": { "update": {
+                    "sessionUpdate": "agent_thought_chunk",
+                    "content": { "type": "text", "text": "considering" }
+                }}
+            }),
+        );
+        let thought = rx.recv().await.expect("thought event");
+        assert!(matches!(
+            thought.kind,
+            QueueMessageKind::Event { event: GrokEvent::Thought { ref data }, .. }
+                if data == "considering"
         ));
 
         emit_notification(

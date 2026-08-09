@@ -20,6 +20,11 @@ export interface TraceEvent {
   detail?: string;
   parentKey?: string;
   progress?: string;
+  path?: string;
+  /** Compact unified diff retained after raw ACP payloads are discarded. */
+  diff?: string;
+  additions?: number;
+  deletions?: number;
   raw?: unknown;
 }
 
@@ -230,6 +235,29 @@ export function classifyEvent(raw: unknown, now = Date.now()): TraceParseResult 
           .filter(Boolean)
           .join(' · ') || undefined
       : readField(obj, 'progress', 'activity', 'current_activity');
+  const inputObj =
+    input && typeof input === 'object' && !Array.isArray(input)
+      ? (input as Record<string, unknown>)
+      : undefined;
+  const outputObj =
+    output && typeof output === 'object' && !Array.isArray(output)
+      ? (output as Record<string, unknown>)
+      : undefined;
+  const locations = Array.isArray(obj.locations) ? obj.locations : [];
+  const locationPath = locations
+    .map((location) =>
+      location && typeof location === 'object' && !Array.isArray(location)
+        ? readField(location as Record<string, unknown>, 'path')
+        : undefined,
+    )
+    .find(Boolean);
+  const path =
+    locationPath ??
+    (inputObj
+      ? readField(inputObj, 'file_path', 'path', 'target_file', 'filename', 'absolute_path')
+      : undefined) ??
+    (outputObj ? readField(outputObj, 'absolute_path', 'path', 'file_path') : undefined);
+  const edit = extractEdit(outputObj);
 
   return {
     kind: 'upsert',
@@ -243,9 +271,51 @@ export function classifyEvent(raw: unknown, now = Date.now()): TraceParseResult 
       detail,
       parentKey: parent ? `subagent:${parent}` : undefined,
       progress,
+      path,
+      diff: edit?.diff,
+      additions: edit?.additions,
+      deletions: edit?.deletions,
       raw,
     },
   };
+}
+
+function extractEdit(
+  output: Record<string, unknown> | undefined,
+): { diff: string; additions: number; deletions: number } | undefined {
+  if (!output) return undefined;
+  const applied = readObj(output, 'EditsApplied', 'editsApplied', 'edits_applied');
+  if (!applied) return undefined;
+  const pairs: Array<{ oldText: string; newText: string }> = [];
+  const directOld = asString(applied.old_string) ?? '';
+  const directNew = asString(applied.new_string) ?? '';
+  if (directOld || directNew) pairs.push({ oldText: directOld, newText: directNew });
+  const edits = readObj(applied, 'edits');
+  const details = edits && Array.isArray(edits.details) ? edits.details : [];
+  for (const value of details) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const detail = value as Record<string, unknown>;
+    const oldText = readField(detail, 'old_string', 'old_line') ?? '';
+    const newText = readField(detail, 'new_string', 'new_line') ?? '';
+    if (oldText || newText) pairs.push({ oldText, newText });
+  }
+  if (pairs.length === 0) return undefined;
+  const lines: string[] = [];
+  let additions = 0;
+  let deletions = 0;
+  for (const pair of pairs) {
+    for (const line of pair.oldText.split('\n')) {
+      if (!pair.oldText && line === '') continue;
+      lines.push(`-${line}`);
+      deletions += 1;
+    }
+    for (const line of pair.newText.split('\n')) {
+      if (!pair.newText && line === '') continue;
+      lines.push(`+${line}`);
+      additions += 1;
+    }
+  }
+  return lines.length ? { diff: lines.join('\n'), additions, deletions } : undefined;
 }
 
 /** Extract authoritative usage from `usage` and final `end` lines. */

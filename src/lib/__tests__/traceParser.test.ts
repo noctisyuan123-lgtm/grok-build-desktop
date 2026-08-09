@@ -59,6 +59,25 @@ describe('classifyEvent', () => {
     expect(failed.detail).toContain('permission denied');
   });
 
+  it('derives a persistent edit diff and file stats from ACP output', () => {
+    const edit = eventOf({
+      type: 'tool_call_update',
+      toolCallId: 'edit_1',
+      title: 'Edit settings',
+      status: 'completed',
+      locations: [{ path: '.zshrc' }],
+      rawOutput: {
+        EditsApplied: { old_string: 'MODEL=k3', new_string: 'MODEL=k3-256k' },
+      },
+    });
+    expect(edit).toMatchObject({
+      path: '.zshrc',
+      diff: '-MODEL=k3\n+MODEL=k3-256k',
+      additions: 1,
+      deletions: 1,
+    });
+  });
+
   it('ignores nameless ACP bookkeeping updates instead of adding a fake Tool row', () => {
     expect(
       classifyEvent({ type: 'tool_call_update', status: 'completed', durationMs: 8_500 }).kind,
