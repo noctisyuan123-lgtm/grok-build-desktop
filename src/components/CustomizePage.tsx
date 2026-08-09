@@ -6,8 +6,10 @@ import {
   Cable,
   FileCode2,
   FileText,
+  Eye,
   Loader2,
   Package,
+  Pencil,
   Plus,
   Power,
   RefreshCcw,
@@ -32,6 +34,7 @@ import {
   type CustomizeScope,
 } from '../lib/customize';
 import { addMcpServer, listMcpServers, removeMcpServer } from '../lib/mcp';
+import { sanitizeHtml } from '../lib/sanitizeHtml';
 
 type CustomizeTab = CustomizeKind | 'mcp' | 'plugin';
 
@@ -123,6 +126,32 @@ function recordScope(record: Record<string, unknown>): 'user' | 'project' | null
   return record.scope === 'user' || record.scope === 'project' ? record.scope : null;
 }
 
+function MarkdownPreview({ source }: { source: string }) {
+  const [html, setHtml] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setHtml('');
+    void import('../lib/markdown').then(({ renderMarkdown }) => {
+      if (!cancelled) setHtml(sanitizeHtml(renderMarkdown(source)));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [source]);
+
+  return html ? (
+    <div
+      className="customize-markdown-preview markdown-body"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  ) : (
+    <div className="customize-rendering">
+      <Loader2 className="spin" size={15} /> Rendering preview…
+    </div>
+  );
+}
+
 function FileCustomizePanel({
   kind,
   scope,
@@ -139,6 +168,7 @@ function FileCustomizePanel({
   const [enabled, setEnabled] = useState(true);
   const [baseline, setBaseline] = useState('');
   const [query, setQuery] = useState('');
+  const [editing, setEditing] = useState(kind === 'hook');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -157,12 +187,14 @@ function FileCustomizePanel({
         setContent(target.content);
         setBaseline(target.content);
         setEnabled(target.enabled);
+        setEditing(kind === 'hook');
       } else {
         setSelected(null);
         setName('');
         setContent('');
         setBaseline('');
         setEnabled(true);
+        setEditing(kind === 'hook');
       }
     } catch (error) {
       setNotice({ ok: false, text: errorText(error) });
@@ -183,6 +215,7 @@ function FileCustomizePanel({
     setContent(entry.content);
     setBaseline(entry.content);
     setEnabled(entry.enabled);
+    setEditing(kind === 'hook');
     setNotice(null);
   };
 
@@ -195,6 +228,7 @@ function FileCustomizePanel({
     setContent(template);
     setBaseline('');
     setEnabled(true);
+    setEditing(true);
     setNotice(null);
   };
 
@@ -205,6 +239,7 @@ function FileCustomizePanel({
       const entry = await saveCustomization({ kind, scope, name, content, enabled, cwd });
       setSelected(entry.name);
       setBaseline(entry.content);
+      setEditing(kind === 'hook');
       setNotice({ ok: true, text: `Saved and discoverable at ${entry.path}` });
       await load(entry.name, true);
     } catch (error) {
@@ -301,6 +336,12 @@ function FileCustomizePanel({
               <Power size={14} /> {enabled ? 'Disable' : 'Enable'}
             </button>
           ) : null}
+          {kind !== 'hook' ? (
+            <button type="button" onClick={() => setEditing((value) => !value)}>
+              {editing ? <Eye size={14} /> : <Pencil size={14} />}
+              {editing ? 'Preview' : 'Edit'}
+            </button>
+          ) : null}
           <button type="button" disabled={busy || !name.trim() || !content.trim()} onClick={save}>
             {busy ? <Loader2 className="spin" size={14} /> : <Save size={14} />} Save
           </button>
@@ -316,13 +357,17 @@ function FileCustomizePanel({
             then grant trust from Grok’s <code>/hooks-trust</code> flow.
           </div>
         ) : null}
-        <textarea
-          className="customize-source"
-          aria-label={`${kind} content`}
-          spellCheck={false}
-          value={content}
-          onChange={(event) => setContent(event.currentTarget.value)}
-        />
+        {editing || kind === 'hook' ? (
+          <textarea
+            className="customize-source"
+            aria-label={`${kind} content`}
+            spellCheck={false}
+            value={content}
+            onChange={(event) => setContent(event.currentTarget.value)}
+          />
+        ) : (
+          <MarkdownPreview source={content} />
+        )}
         <div className="customize-editor-status">
           <span>{dirty ? 'Unsaved changes' : selected ? 'Saved on disk' : 'New item'}</span>
           {notice ? <strong className={notice.ok ? 'ok' : 'err'}>{notice.text}</strong> : null}

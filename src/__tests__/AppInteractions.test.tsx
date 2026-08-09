@@ -132,6 +132,37 @@ describe('Customize control plane', () => {
     await user.click(customize.getByRole('button', { name: 'Plugins' }));
     await waitFor(() => expect(tauri.commands()).toContain('list_customize_plugins'));
   });
+
+  it('renders Markdown by default and keeps the source editable', async () => {
+    const { user } = await bootApp({
+      list_customizations: (args) =>
+        args.kind === 'rule'
+          ? [
+              {
+                kind: 'rule',
+                scope: 'user',
+                name: 'preview-rule',
+                path: '/mock/.grok/rules/preview-rule.md',
+                content: '# Preview rule\n\n- Keep changes readable.',
+                enabled: true,
+                modifiedAt: Date.now(),
+              },
+            ]
+          : [],
+    });
+
+    await user.click(screen.getByRole('button', { name: /Customize/i }));
+    const dialog = await screen.findByRole('dialog', { name: 'Customize Grok' });
+    const customize = within(dialog);
+    expect(await customize.findByRole('heading', { name: 'Preview rule' })).toBeInTheDocument();
+    expect(customize.queryByRole('textbox', { name: 'rule content' })).not.toBeInTheDocument();
+
+    await user.click(customize.getByRole('button', { name: 'Edit' }));
+    expect(customize.getByRole('textbox', { name: 'rule content' })).toHaveValue(
+      '# Preview rule\n\n- Keep changes readable.',
+    );
+    expect(customize.getByRole('button', { name: 'Preview' })).toBeInTheDocument();
+  });
 });
 
 describe('terminal dock and sidebar health', () => {
