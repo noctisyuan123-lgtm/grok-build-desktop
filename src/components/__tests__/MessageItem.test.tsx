@@ -146,6 +146,32 @@ describe('MessageItem rendering states', () => {
     ).toBeTruthy();
   });
 
+  it('labels a reasoning preview that Grok truncated upstream', async () => {
+    const user = userEvent.setup();
+    const clippedThought = `${'x'.repeat(200)}...`;
+    render(
+      <MessageItem
+        runId="msg:clipped-thought"
+        durationMs={1_000}
+        fallbackText="done"
+        fallbackTranscript={[
+          {
+            key: 'thought:0',
+            kind: 'thought',
+            text: clippedThought,
+            startedAt: 1_000,
+            endedAt: 2_000,
+          },
+          { key: 'response:1', kind: 'response', text: 'done' },
+        ]}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Worked for 1s' }));
+    await user.click(screen.getByRole('button', { name: 'Thought for 1s' }));
+    expect(screen.getByRole('note')).toHaveTextContent('Preview truncated upstream');
+  });
+
   it('keeps the just-generated turn open but resets a different historical run to collapsed', async () => {
     applyStateChange('live-turn', { state: 'Running', startedAt: Date.now() });
     applyRunEvent('live-turn', { type: 'thought', data: 'checking' });

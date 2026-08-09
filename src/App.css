@@ -7881,6 +7881,13 @@ body,
   margin-top: 5px !important;
 }
 
+.transcript-thought-truncated {
+  color: color-mix(in srgb, var(--conversation-text) 42%, transparent);
+  font-size: 11px;
+  line-height: 16px;
+  margin-top: 3px;
+}
+
 .transcript-tool-group .message-worked-list {
   margin: 4px 0 0;
   padding-left: 0;

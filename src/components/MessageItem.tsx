@@ -296,6 +296,7 @@ function ThoughtSegment({
 }) {
   const [expanded, setExpanded] = useState(false);
   const duration = Math.max(0, (segment.endedAt ?? Date.now()) - segment.startedAt);
+  const previewTruncated = isUpstreamTruncatedThought(segment.text);
   const label =
     live && segment.endedAt == null
       ? 'Thinking…'
@@ -311,14 +312,31 @@ function ThoughtSegment({
         <ChevronDown size={14} strokeWidth={1.7} aria-hidden />
       </button>
       {expanded && segment.text ? (
-        <MarkdownSegment
-          cacheKey={cacheKey}
-          text={segment.text}
-          className="transcript-thought-body"
-        />
+        <>
+          <MarkdownSegment
+            cacheKey={cacheKey}
+            text={segment.text}
+            className="transcript-thought-body"
+          />
+          {previewTruncated ? (
+            <div className="transcript-thought-truncated" role="note">
+              Preview truncated upstream
+            </div>
+          ) : null}
+        </>
       ) : null}
     </section>
   );
+}
+
+function isUpstreamTruncatedThought(text: string): boolean {
+  const trimmed = text.trimEnd();
+  // Grok Build currently caps visible reasoning summaries at 200 characters,
+  // then appends `...`. The full reasoning remains encrypted upstream, so the
+  // desktop client must identify the preview honestly instead of presenting a
+  // clipped sentence as complete. Keep the range narrow to avoid labelling a
+  // short, intentional ellipsis as truncation.
+  return trimmed.length >= 190 && trimmed.length <= 220 && /\.\.\.$/u.test(trimmed);
 }
 
 function MarkdownSegment({
