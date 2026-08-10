@@ -178,6 +178,7 @@ describe('TraceTimeline activity rail', () => {
     const summary = screen.getByRole('button', { name: /Edited .zshrc.*\+1.*−1/ });
     await user.click(summary);
     const edit = screen.getAllByRole('button', { name: /Edited .zshrc.*\+1.*−1/ })[1]!;
+    expect(edit.closest('.activity-item')).toHaveClass('activity-is-edit');
     await user.click(edit);
     expect(screen.getByLabelText('Changes to .zshrc')).toBeInTheDocument();
     expect(container.querySelector('.activity-diff-line.is-add')).toHaveTextContent(

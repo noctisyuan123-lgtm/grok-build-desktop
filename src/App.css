@@ -7829,14 +7829,14 @@ body,
 }
 
 .transcript-work > .message-worked {
-  margin-bottom: 7px;
+  margin-bottom: 5px;
 }
 
 .transcript-segments {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin: 0 0 10px;
+  gap: 3px;
+  margin: 0 0 8px;
 }
 
 .transcript-response.message-body,
@@ -7878,7 +7878,7 @@ body,
 
 .transcript-thought-body {
   color: color-mix(in srgb, var(--conversation-text) 64%, transparent) !important;
-  margin-top: 5px !important;
+  margin-top: 3px !important;
 }
 
 .transcript-thought-truncated {
@@ -7889,8 +7889,12 @@ body,
 }
 
 .transcript-tool-group .message-worked-list {
-  margin: 4px 0 0;
+  margin: 3px 0 0;
   padding-left: 0;
+}
+
+.activity-list .activity-item.activity-is-edit .activity-row-label {
+  flex: 0 1 auto;
 }
 
 .agent-starting {

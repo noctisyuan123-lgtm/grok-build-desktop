@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState, type MouseEvent } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useRunHtml, useRunSnapshot } from '../hooks/useRunSnapshot';
 import { sanitizeHtml } from '../lib/sanitizeHtml';
@@ -212,9 +212,15 @@ function TranscriptMessage({
   onUndo?: () => void;
 }) {
   const [expanded, setExpanded] = useState(autoExpandWork);
+  const wasLive = useRef(live);
   useEffect(() => {
-    if (autoExpandWork) setExpanded(true);
-  }, [autoExpandWork]);
+    if (wasLive.current && !live) {
+      setExpanded(false);
+    } else if (autoExpandWork && live) {
+      setExpanded(true);
+    }
+    wasLive.current = live;
+  }, [autoExpandWork, live]);
   const liveElapsed = useElapsed(live ? startedAt : null, null);
   const responseIndexes = transcript
     .map((segment, index) => (segment.kind === 'response' ? index : -1))

@@ -21,7 +21,7 @@ export interface MessageRef {
   durationMs?: number;
   traces?: TraceEvent[];
   transcript?: TranscriptSegment[];
-  /** Keep the work fold open for a turn generated in this app lifecycle. */
+  /** Keep the work fold open only while this turn is actively streaming. */
   autoExpandWork?: boolean;
   canUndo?: boolean;
   attachments?: Array<{

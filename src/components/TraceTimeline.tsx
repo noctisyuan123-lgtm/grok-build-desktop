@@ -225,7 +225,7 @@ export function ActivityRow({ trace }: { trace: TraceEvent }) {
 
   return (
     <div
-      className={`activity-item activity-kind-${trace.kind} activity-status-${trace.status}${expanded ? ' row-open' : ''}`}
+      className={`activity-item activity-kind-${trace.kind} activity-status-${trace.status}${isEdit ? ' activity-is-edit' : ''}${expanded ? ' row-open' : ''}`}
       data-parent={trace.parentKey || undefined}
     >
       {hasBody ? (
