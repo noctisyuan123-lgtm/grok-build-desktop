@@ -4589,7 +4589,7 @@ button.status-cluster.status-action:disabled {
   border-radius: 3px;
   margin: 0 0 16px;
   overflow: auto;
-  padding: 16px;
+  padding: 11px 16px;
   position: relative;
 }
 .message.message-assistant .markdown-body pre code {
