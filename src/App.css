@@ -6984,6 +6984,45 @@ body,
     14px 0 36px rgba(0, 0, 0, 0.2);
 }
 
+/* Light mode uses the same native macOS sidebar material. A translucent white
+   wash keeps text legible without covering the NSVisualEffectView with the
+   old solid #fbfbfa surface. */
+.app-shell.theme-light .app-sidebar {
+  position: relative;
+  isolation: isolate;
+  background: rgba(248, 248, 245, 0.46);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border-right-color: rgba(43, 43, 38, 0.12);
+  box-shadow:
+    inset -1px 0 0 rgba(255, 255, 255, 0.42),
+    14px 0 36px rgba(43, 43, 38, 0.09);
+}
+
+.app-shell.theme-light .app-sidebar::before {
+  background:
+    radial-gradient(ellipse 110% 46% at 0% 0%, rgba(255, 255, 255, 0.42), transparent 62%),
+    linear-gradient(110deg, rgba(255, 255, 255, 0.16), transparent 46%);
+  content: '';
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
+}
+
+.app-shell.theme-light .app-sidebar .search-box {
+  background: rgba(255, 255, 255, 0.34);
+  border-color: rgba(43, 43, 38, 0.1);
+}
+
+.app-shell.theme-light .app-sidebar .history-row.active {
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.app-shell.theme-light .app-sidebar .account-strip {
+  border-top-color: rgba(43, 43, 38, 0.09);
+}
+
 /* Keep the canvas, composer and fenced code in one neutral graphite family.
    Their contrast now comes from a small surface step instead of unrelated
    brown/near-black fills. */
