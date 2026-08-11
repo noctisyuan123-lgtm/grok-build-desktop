@@ -112,9 +112,9 @@ assert.ok(app.includes('parseAvailableModels'), 'Dynamic model parser missing');
 assert.ok(app.includes('togglePanel'), 'Panel mutual-exclusivity helper missing');
 assert.ok(app.includes('pickFolder'), 'Folder picker handler missing');
 assert.ok(app.includes('workspace-statusbar'), 'Workspace status bar missing');
-assert.ok(app.includes('starter-grid'), 'Empty-state starter cards missing');
-assert.ok(app.includes('starter-card'), 'Empty-state starter card buttons missing');
-assert.ok(app.includes('How can Grok help today'), 'Empty-state heading missing');
+assert.ok(app.includes('new-session-workspace'), 'New-session workspace control missing');
+const emptyStateSource = read('src/components/EmptyState.tsx');
+assert.ok(!emptyStateSource.includes('starter-card'), 'Removed starter cards must stay removed');
 // Scroll-follow lives in MessageList (Virtuoso owns the scroller); App's old
 // conversationScrollRef effects were dead code — the outer div never scrolls.
 const messageList = read('src/components/MessageList.tsx');

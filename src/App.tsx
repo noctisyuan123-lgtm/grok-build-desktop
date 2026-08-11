@@ -221,6 +221,7 @@ function App() {
     refreshStatuses,
     refreshStaticPreview,
     runDoctor,
+    folderPickerBusy,
     pickFolder,
   } = runners;
 
@@ -816,7 +817,10 @@ function App() {
           openPanelMenu={openPanelMenu}
         />
         <section className="workbench">
-          <div className="conversation-panel" onContextMenu={openConversationMenu}>
+          <div
+            className={`conversation-panel${messages.length === 0 ? ' is-empty' : ''}`}
+            onContextMenu={openConversationMenu}
+          >
             {/* Session tabs removed per request — Claude-Desktop-style single
                 conversation. New Session starts fresh; earlier conversations
                 stay reachable from the HISTORY sidebar (which aggregates
@@ -827,8 +831,11 @@ function App() {
             <div className="conversation-scroll">
               {messages.length === 0 ? (
                 <EmptyState
-                  activeModel={activeModel}
-                  onPickStarter={(prompt) => updatePrompt(prompt)}
+                  codingCwd={codingCwd}
+                  folderPickerBusy={folderPickerBusy}
+                  onPickWorkspace={() => {
+                    void pickFolder();
+                  }}
                 />
               ) : (
                 <MessageList messages={messageRefs} onUndoAssistant={undoAssistantResponse} />

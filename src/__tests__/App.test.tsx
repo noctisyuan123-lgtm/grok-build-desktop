@@ -56,7 +56,9 @@ function convo() {
 
 async function bootApp(overrides: Record<string, CommandHandler> = {}): Promise<Ctx> {
   const ctx = setup(overrides);
-  expect(await screen.findByText(t('emptyState.title'))).toBeInTheDocument();
+  expect(
+    await screen.findByRole('button', { name: t('emptyState.workspaceAria') }),
+  ).toBeInTheDocument();
   // Wait for the runner bootstrap so later assertions aren't racing it.
   await waitFor(() => expect(ctx.tauri.commands()).toContain('get_grok_auth_status'));
   return ctx;
@@ -77,8 +79,9 @@ describe('App boot', () => {
   it('renders the shell and bootstraps through the Tauri IPC surface', async () => {
     const { tauri } = await bootApp();
 
-    // Empty state + composer; idle no longer reserves a redundant status row.
-    expect(screen.getByText(t('emptyState.title'))).toBeInTheDocument();
+    // Cursor-style new-session workspace row + composer; no starter-card wall.
+    expect(screen.getByRole('button', { name: t('emptyState.workspaceAria') })).toBeInTheDocument();
+    expect(document.querySelector('.starter-card')).not.toBeInTheDocument();
     expect(composerTextarea()).toBeInTheDocument();
     expect(document.querySelector('.status-bar-idle')).not.toBeInTheDocument();
 
@@ -103,12 +106,13 @@ describe('App boot', () => {
     expect(tauri.unknownCommands).toEqual([]);
   });
 
-  it('seeds the composer from an empty-state starter card', async () => {
-    const { user } = await bootApp();
-    await user.click(
-      screen.getByRole('button', { name: new RegExp(t('emptyState.explainTitle')) }),
+  it('selects a workspace from the new-session project control', async () => {
+    const { tauri, user } = await bootApp();
+    await user.click(screen.getByRole('button', { name: t('emptyState.workspaceAria') }));
+    await waitFor(() => expect(tauri.commands()).toContain('pick_project_folder'));
+    expect(screen.getByRole('button', { name: t('emptyState.workspaceAria') })).toHaveTextContent(
+      'project',
     );
-    expect(composerTextarea().value).toMatch(/architecture tour/);
   });
 });
 
@@ -236,7 +240,9 @@ describe('composer submit → queued run → streamed reply', () => {
 
     await ctx.user.click(await convo().findByRole('button', { name: t('message.undoResponse') }));
 
-    expect(await convo().findByText(t('emptyState.title'))).toBeInTheDocument();
+    expect(
+      await convo().findByRole('button', { name: t('emptyState.workspaceAria') }),
+    ).toBeInTheDocument();
     expect(composerTextarea().value).toBe('Please revise this prompt');
     expect(convo().queryByText('A completed answer.')).not.toBeInTheDocument();
 
@@ -281,7 +287,9 @@ describe('session tabs and history', () => {
 
     // New Session → clean slate in the conversation panel.
     await user.click(screen.getByRole('button', { name: new RegExp(t('nav.newSession')) }));
-    expect(await convo().findByText(t('emptyState.title'))).toBeInTheDocument();
+    expect(
+      await convo().findByRole('button', { name: t('emptyState.workspaceAria') }),
+    ).toBeInTheDocument();
     expect(convo().queryByText('Fix the login flake')).not.toBeInTheDocument();
 
     // The old conversation shows up in HISTORY; clicking it restores it.
@@ -310,7 +318,9 @@ describe('session tabs and history', () => {
     await user.keyboard('clear current');
     await user.keyboard('{Enter}');
 
-    expect(await convo().findByText(t('emptyState.title'))).toBeInTheDocument();
+    expect(
+      await convo().findByRole('button', { name: t('emptyState.workspaceAria') }),
+    ).toBeInTheDocument();
     expect(convo().queryByText('Document the parser')).not.toBeInTheDocument();
     expect(screen.getByText(t('notices.cleared'))).toBeInTheDocument();
 

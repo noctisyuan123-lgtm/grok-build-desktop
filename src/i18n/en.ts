@@ -219,17 +219,9 @@ export const en = {
   'nav.searchMeta': 'Find work',
 
   // ── Empty state ───────────────────────────────────────────────────────────
-  'emptyState.title': 'How can Grok help today?',
-  'emptyState.subtitle': 'Code with you across this repository · {model}',
-  'emptyState.reviewTitle': 'Review this repository',
-  'emptyState.reviewBody':
-    'Surface the highest-impact risks and gaps you can verify in 30 seconds.',
-  'emptyState.explainTitle': 'Explain this codebase',
-  'emptyState.explainBody': 'Give me a tight architecture tour so I can start contributing today.',
-  'emptyState.testTitle': 'Add a failing test',
-  'emptyState.testBody': 'Pick a real bug or gap and write a failing test that pins it down.',
-  'emptyState.nextTitle': 'Suggest the next change',
-  'emptyState.nextBody': 'What is the single most useful next code action right now?',
+  'emptyState.chooseWorkspace': 'Choose workspace',
+  'emptyState.workspaceAria': 'Choose workspace folder',
+  'emptyState.thisMac': 'This Mac',
 
   // ── Status bar (Claude-Code-style) ────────────────────────────────────────
   'statusBar.thinking': 'thinking…',

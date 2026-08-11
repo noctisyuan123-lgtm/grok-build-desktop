@@ -133,7 +133,7 @@ try {
   await page.getByRole('button', { name: 'Code', exact: true }).waitFor({ timeout: 10_000 });
   const composer = page.locator('.composer textarea');
   await composer.waitFor({ timeout: 10_000 });
-  await page.getByText('How can Grok help today?').waitFor({ timeout: 10_000 });
+  await page.getByRole('button', { name: 'Choose workspace folder' }).waitFor({ timeout: 10_000 });
   console.log('e2e: boot ok (sidebar + composer + empty state)');
 
   // 2. Submit a prompt: the user bubble appears, then the mocked stream lands.
@@ -146,7 +146,7 @@ try {
 
   // 3. Conversation switching: New Session clears the transcript…
   await page.getByRole('button', { name: /New Session/ }).click();
-  await page.getByText('How can Grok help today?').waitFor({ timeout: 10_000 });
+  await page.getByRole('button', { name: 'Choose workspace folder' }).waitFor({ timeout: 10_000 });
   // …and the old conversation is one click away in HISTORY.
   const historyRow = page.locator('.history-row', { hasText: 'hello from the e2e test' });
   await historyRow.waitFor({ timeout: 10_000 });

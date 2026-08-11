@@ -44,7 +44,9 @@ function composerTextarea(): HTMLTextAreaElement {
 
 async function bootApp(overrides: Record<string, CommandHandler> = {}): Promise<Ctx> {
   const ctx = setup(overrides);
-  expect(await screen.findByText(t('emptyState.title'))).toBeInTheDocument();
+  expect(
+    await screen.findByRole('button', { name: t('emptyState.workspaceAria') }),
+  ).toBeInTheDocument();
   await waitFor(() => expect(ctx.tauri.commands()).toContain('get_grok_auth_status'));
   return ctx;
 }
@@ -136,7 +138,9 @@ describe('Customize control plane', () => {
     await waitFor(() => expect(tauri.commands()).toContain('list_customizations'));
 
     await user.click(customize.getByRole('button', { name: 'Commands' }));
-    expect(await customize.findByText('Nothing to preview yet. Click Edit to add Markdown.')).toBeInTheDocument();
+    expect(
+      await customize.findByText('Nothing to preview yet. Click Edit to add Markdown.'),
+    ).toBeInTheDocument();
     expect(customize.queryByText('Rendering preview…')).not.toBeInTheDocument();
 
     await user.click(customize.getByRole('button', { name: 'MCP' }));
