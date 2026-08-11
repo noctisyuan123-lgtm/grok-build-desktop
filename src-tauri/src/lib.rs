@@ -26,6 +26,7 @@ pub mod desktop {
         Err("desktop bridge is macOS-only".into())
     }
 }
+pub mod context_metrics;
 pub mod customize;
 pub mod prompts;
 pub mod runs;
@@ -2937,6 +2938,7 @@ pub fn run() {
             list_grok_skills,
             install_grok_skill,
             remove_grok_skill,
+            context_metrics::get_session_context_metrics,
             customize::list_customizations,
             customize::save_customization,
             customize::set_customization_enabled,

@@ -6,10 +6,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, SlidersHorizontal } from 'lucide-react';
 import { Composer, type ComposerHandle } from './Composer';
+import { ContextUsageRing } from './ContextUsageRing';
 import type { useModelConfig } from '../hooks/useModelConfig';
 import {
   isGrokModelId,
   type ActionPolicy,
+  type ChatMessage,
   type EffortLevel,
   type Mode,
   type ReasoningEffort,
@@ -28,6 +30,7 @@ import type { ComposerAttachment } from '../lib/attachments';
 export interface ComposerSectionProps {
   composerRef: React.RefObject<ComposerHandle | null>;
   codingCwd: string;
+  messages: readonly ChatMessage[];
   buildRunArgs: () => string[];
   drafts: Record<Mode, string>;
   mode: Mode;
@@ -54,6 +57,7 @@ export interface ComposerSectionProps {
 export function ComposerSection({
   composerRef,
   codingCwd,
+  messages,
   buildRunArgs,
   drafts,
   mode,
@@ -143,9 +147,7 @@ export function ComposerSection({
         }}
         onEnqueued={handleEnqueued}
         onError={(message) => setSessionNotice(t('composerSection.sendFailed', { message }))}
-        onStop={
-          grokIsRunning && activeRunId ? () => stopRun(activeRunId) : undefined
-        }
+        onStop={grokIsRunning && activeRunId ? () => stopRun(activeRunId) : undefined}
         controls={
           <div className="composer-compact-controls">
             <select
@@ -238,9 +240,7 @@ export function ComposerSection({
                     <select
                       aria-label={t('composerSection.agentEffort')}
                       value={effortLevel}
-                      onChange={(event) =>
-                        setEffortLevel(event.currentTarget.value as EffortLevel)
-                      }
+                      onChange={(event) => setEffortLevel(event.currentTarget.value as EffortLevel)}
                     >
                       {(Object.keys(effortLevels) as EffortLevel[]).map((key) => (
                         <option key={key} value={key}>
@@ -285,6 +285,9 @@ export function ComposerSection({
           </div>
         }
       />
+      <div className="composer-context-footer">
+        <ContextUsageRing messages={messages} cwd={codingCwd} />
+      </div>
     </div>
   );
 }

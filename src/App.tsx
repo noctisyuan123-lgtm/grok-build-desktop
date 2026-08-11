@@ -876,6 +876,7 @@ function App() {
             <ComposerSection
               composerRef={composerRef}
               codingCwd={codingCwd}
+              messages={messages}
               buildRunArgs={buildRunArgs}
               drafts={drafts}
               mode={mode}

@@ -123,6 +123,21 @@
     cancel_pending_runs: () => 0,
     pick_project_folder: () => '/mock/project',
     list_prompts: () => [],
+    get_session_context_metrics: (args) => ({
+      available: false,
+      sessionId: String(args.sessionId ?? ''),
+      contextTokensUsed: null,
+      contextWindowTokens: null,
+      contextWindowUsage: null,
+      compactionCount: null,
+      totalTokensBeforeCompaction: null,
+      turnCount: null,
+      primaryModelId: null,
+      autoCompactThresholdPercent: null,
+      breakdown: null,
+      breakdownApproximate: false,
+      detail: 'No signals file for this session yet',
+    }),
   };
 
   window.__TAURI_INTERNALS__ = {

@@ -137,8 +137,7 @@ export const en = {
   'settings.actionPolicy': 'Tool permissions',
   'settings.actionPolicyHint': 'What Grok may inspect, change, or run.',
   'settings.permissionMode': 'Permission mode',
-  'settings.permissionModeHint':
-    'Legacy runtime only. Core mode uses Tool permissions above.',
+  'settings.permissionModeHint': 'Legacy runtime only. Core mode uses Tool permissions above.',
   'settings.webSearch': 'Web search',
   'settings.webSearchHint': 'Allow Grok to fetch current docs / version-sensitive facts.',
   'settings.subagents': 'Subagents',
@@ -211,6 +210,26 @@ export const en = {
   'sidebar.menu.unarchive': 'Unarchive',
   'sidebar.menu.archive': 'Archive',
   'sidebar.menu.deleteConversation': 'Delete conversation',
+
+  // ── Context usage ring ────────────────────────────────────────────────────
+  'context.popoverTitle': 'Context Usage',
+  'context.closePanel': 'Close context usage',
+  'context.percentFull': '{percent} Full',
+  'context.tokensSummary': '{used} / {window} Tokens',
+  'context.systemPrompt': 'System prompt',
+  'context.rules': 'Rules',
+  'context.toolsRuntime': 'Tools & runtime',
+  'context.conversation': 'Conversation',
+  'context.estimatedBreakdown': 'Estimated breakdown',
+  'context.loading': 'Loading context metrics…',
+  'context.emptyNoSession': 'Context usage appears after the first Grok reply.',
+  'context.emptyUnavailable': 'Context metrics unavailable for this session.',
+  'context.streamingHint': 'Updating while Grok is running.',
+  'context.ringAriaReady': 'Context usage {percent}: {used} of {window} tokens',
+  'context.ringAriaLoading': 'Loading context usage',
+  'context.ringAriaError': 'Context usage unavailable',
+  'context.ringAriaEmpty': 'No active Grok session yet',
+  'context.ringAriaUnavailable': 'Context metrics unavailable',
 
   // ── Primary navigation (constants) ────────────────────────────────────────
   'nav.newSession': 'New Session',
@@ -429,9 +448,11 @@ export const en = {
   'preset.refactor': 'Refactor',
   'preset.refactorDesc': 'Behavior-preserving cleanup',
   'policy.review': 'Plan',
-  'policy.reviewDetail': 'Inspect the workspace and produce a plan. Edits and mutating commands are blocked.',
+  'policy.reviewDetail':
+    'Inspect the workspace and produce a plan. Edits and mutating commands are blocked.',
   'policy.patch': 'Default',
-  'policy.patchDetail': 'Low-risk tools run; protected actions stay blocked until approval UI is available.',
+  'policy.patchDetail':
+    'Low-risk tools run; protected actions stay blocked until approval UI is available.',
   'policy.autopilot': 'Auto mode',
   'policy.autopilotDetail':
     'Runs every tool action without confirmation. Use only in a trusted workspace.',

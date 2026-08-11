@@ -2974,7 +2974,6 @@ button.status-cluster.status-action:disabled {
 
 /* ── End VSCode-inspired markdown ── */
 
-
 /* Cursor-style new-session stage: workspace context sits directly above the
    shared composer. Once the first message exists, the normal transcript +
    bottom composer layout takes over without remounting a second input. */
@@ -5114,6 +5113,280 @@ body[data-theme='light'] .hljs-comment {
   height: 17px;
   flex-shrink: 0;
   min-width: 17px;
+}
+
+/* Cursor-style live context ring below the input's lower-right edge. */
+.composer-row {
+  position: relative;
+}
+.composer-context-footer {
+  align-items: center;
+  display: flex;
+  justify-content: flex-end;
+  min-height: 16px;
+  padding: 0;
+  pointer-events: none;
+  position: fixed;
+  /* Keep the indicator just below the composer, never inside its hit area. */
+  bottom: 3px;
+  /* Match the composer shell's 18px workspace + 14px composer inset. */
+  right: 32px;
+  z-index: 5;
+}
+.composer-context-footer .context-usage {
+  pointer-events: auto;
+}
+.context-usage {
+  position: relative;
+  flex: 0 0 auto;
+}
+.context-usage-ring {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--text-3);
+  cursor: pointer;
+  display: inline-grid;
+  /* Keep the button chrome close to the 13px ring itself. */
+  height: 16px;
+  justify-items: center;
+  padding: 0;
+  place-items: center;
+  position: relative;
+  width: 16px;
+}
+.context-usage-ring:hover,
+.context-usage-ring.is-open {
+  background: var(--bg-3);
+}
+.context-usage-ring:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 2px;
+}
+.context-usage-svg {
+  display: block;
+  grid-area: 1 / 1;
+}
+.context-usage-track {
+  stroke: var(--border-2);
+}
+.context-usage-progress {
+  stroke: var(--text-3);
+  transition:
+    stroke-dashoffset 280ms var(--ease-out),
+    stroke 180ms ease;
+}
+.context-usage-ring.tone-neutral .context-usage-progress {
+  stroke: var(--text-1);
+}
+.context-usage-ring.tone-amber .context-usage-progress {
+  stroke: var(--warn);
+}
+.context-usage-ring.tone-orange .context-usage-progress {
+  stroke: #c4894a;
+}
+.context-usage-ring.tone-red .context-usage-progress {
+  stroke: var(--error);
+}
+.context-usage-ring.tone-empty .context-usage-progress,
+.context-usage-ring.tone-loading .context-usage-progress,
+.context-usage-ring.tone-error .context-usage-progress {
+  stroke: var(--border-strong);
+  opacity: 0.55;
+}
+.context-usage-ring.is-streaming .context-usage-track {
+  opacity: 0.85;
+}
+.context-usage-ring.is-streaming .context-usage-progress {
+  animation: context-usage-pulse 1.6s var(--ease-in-out) infinite;
+}
+@keyframes context-usage-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+.context-usage-popover {
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: 12px;
+  bottom: calc(100% + 8px);
+  box-shadow: var(--shadow-pop, 0 16px 40px -8px rgba(0, 0, 0, 0.55));
+  left: auto;
+  max-width: min(560px, calc(100vw - 24px));
+  min-width: min(280px, calc(100vw - 24px));
+  padding: 14px 16px 12px;
+  position: absolute;
+  right: 0;
+  width: min(540px, calc(100vw - 24px));
+  z-index: 140;
+}
+.context-usage-header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.context-usage-header > strong {
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.context-usage-close {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-3);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 18px;
+  font-weight: 300;
+  height: 20px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  width: 20px;
+}
+.context-usage-close:hover {
+  background: transparent;
+  color: var(--text-1);
+}
+.context-usage-close:focus-visible {
+  outline: 0;
+}
+.context-usage-summary {
+  align-items: baseline;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.context-usage-full {
+  color: var(--text-1);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.context-usage-tokens {
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.context-usage-bar {
+  background: var(--bg-3);
+  border-radius: 4px;
+  display: flex;
+  height: 8px;
+  margin-bottom: 12px;
+  overflow: hidden;
+  width: 100%;
+}
+.context-usage-bar-seg {
+  display: block;
+  flex: 0 0 auto;
+  height: 100%;
+  min-width: 0;
+}
+.context-usage-bar-seg.seg-system,
+.context-usage-swatch.seg-system {
+  background: #6b8cae;
+}
+.context-usage-bar-seg.seg-rules,
+.context-usage-swatch.seg-rules {
+  background: #8b7ec8;
+}
+.context-usage-bar-seg.seg-tools,
+.context-usage-swatch.seg-tools {
+  background: #c4a35a;
+}
+.context-usage-bar-seg.seg-conversation,
+.context-usage-swatch.seg-conversation {
+  background: #5faf8d;
+}
+.context-usage-legend {
+  display: grid;
+  gap: 7px;
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+}
+.context-usage-legend > li {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+}
+.context-usage-swatch {
+  border-radius: 2px;
+  display: block;
+  height: 8px;
+  width: 8px;
+}
+.context-usage-legend-label {
+  color: var(--text-2);
+  font-size: 11.5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.context-usage-legend-value {
+  color: var(--text-1);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.context-usage-estimate-hint {
+  color: var(--text-3);
+  font-size: 10.5px;
+  line-height: 1.35;
+  margin: 0;
+  opacity: 0.85;
+}
+.context-usage-muted,
+.context-usage-live {
+  color: var(--text-3);
+  font-size: 10.5px;
+  line-height: 1.4;
+  margin: 0;
+}
+.context-usage-live {
+  margin-top: 8px;
+}
+.app-shell.theme-light .context-usage-popover {
+  background: var(--bg-3);
+  border-color: var(--border-2);
+  box-shadow: 0 14px 42px rgba(31, 29, 25, 0.18);
+}
+.app-shell.theme-light .context-usage-ring:hover,
+.app-shell.theme-light .context-usage-ring.is-open {
+  background: rgba(31, 29, 25, 0.05);
+}
+.app-shell.theme-light .context-usage-bar-seg.seg-system,
+.app-shell.theme-light .context-usage-swatch.seg-system {
+  background: #5a7a9e;
+}
+.app-shell.theme-light .context-usage-bar-seg.seg-rules,
+.app-shell.theme-light .context-usage-swatch.seg-rules {
+  background: #7a6bb8;
+}
+.app-shell.theme-light .context-usage-bar-seg.seg-tools,
+.app-shell.theme-light .context-usage-swatch.seg-tools {
+  background: #b8923f;
+}
+.app-shell.theme-light .context-usage-bar-seg.seg-conversation,
+.app-shell.theme-light .context-usage-swatch.seg-conversation {
+  background: #4a9a78;
 }
 
 /* Bottom-left account strip is a full-width Settings button now. */
@@ -7542,6 +7815,15 @@ body,
   border-radius: 13px;
   overflow: visible;
   position: relative;
+}
+.conversation-panel:not(.is-empty) .composer-input-shell {
+  /* Shorten from the bottom only: reduced textarea height + this offset
+     preserve the shell's top edge while lifting its lower edge by 8px. */
+  margin-bottom: 8px;
+}
+.conversation-panel:not(.is-empty) .composer-input-shell > textarea,
+.theme-dark .conversation-panel:not(.is-empty) .composer-input-shell > textarea {
+  min-height: 58px;
 }
 .theme-dark .composer-input-shell:focus-within {
   border-color: #555;
