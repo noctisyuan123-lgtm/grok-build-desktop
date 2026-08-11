@@ -113,6 +113,8 @@ function Harness() {
         isGrokReady
         sidebarCollapsed={sidebarCollapsed}
         setSidebarCollapsed={setSidebarCollapsed}
+        mode="coding"
+        switchMode={() => {}}
       />
     </>
   );

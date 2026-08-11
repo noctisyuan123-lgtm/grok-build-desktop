@@ -129,7 +129,8 @@ try {
   console.log('e2e: production CSP enforced on the document');
 
   // 1. Boot: sidebar brand + composer visible, empty state showing.
-  await page.getByText('Grok Build Desktop').first().waitFor({ timeout: 10_000 });
+  await page.locator('.brand-wordmark').waitFor({ timeout: 10_000 });
+  await page.getByRole('button', { name: 'Code', exact: true }).waitFor({ timeout: 10_000 });
   const composer = page.locator('.composer textarea');
   await composer.waitFor({ timeout: 10_000 });
   await page.getByText('How can Grok help today?').waitFor({ timeout: 10_000 });

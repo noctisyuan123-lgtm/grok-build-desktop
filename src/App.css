@@ -269,21 +269,79 @@ pre {
 }
 
 .brand {
-  align-items: center;
   display: grid;
-  gap: 12px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
   min-width: 0;
   padding: 4px 2px;
+}
+
+.brand-top {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+/* The wordmark replaces the old icon + title/subtitle stack — one word, no
+   chrome. Geist Variable at display weight with tight tracking is the
+   in-app Grok mark. */
+.brand-wordmark {
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+  padding-left: 2px;
+  user-select: none;
+}
+
+/* Chat/Code segment — moved up from the composer footer. Translucent so the
+   frosted rail stays glassy; the light theme re-skins it below. */
+.mode-segment {
+  align-items: center;
+  background: rgba(8, 10, 12, 0.34);
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 8px;
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  padding: 2px;
+}
+
+.mode-segment button {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex: 1;
+  font-size: 11px;
+  font-weight: 560;
+  height: 24px;
+  letter-spacing: 0.01em;
+  min-width: 0;
+  padding: 0;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.mode-segment button:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+}
+
+.mode-segment button.active {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
 }
 
 .brand-mark,
 .avatar {
   align-items: center;
-  background: #f6fafc;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: #0e1013;
+  border: 1px solid rgba(236, 233, 226, 0.82);
   border-radius: 8px;
-  color: #071018;
+  color: #ece9e2;
   display: flex;
   font-weight: 850;
   height: 34px;
@@ -291,13 +349,6 @@ pre {
   width: 34px;
 }
 
-.brand h1 {
-  font-size: 1rem;
-  line-height: 1.2;
-  margin: 0;
-}
-
-.brand span,
 .account-strip span,
 .nav-list small,
 .history-list small,
@@ -1811,12 +1862,11 @@ pre {
 
 .brand-mark,
 .avatar {
-  background: var(--button-primary);
-  border-color: var(--line);
-  color: var(--button-primary-text);
+  background: #0e1013;
+  border-color: rgba(236, 233, 226, 0.82);
+  color: #ece9e2;
 }
 
-.brand h1,
 .account-strip strong,
 .title-center,
 .title-center span,
@@ -1829,7 +1879,6 @@ pre {
   color: var(--text);
 }
 
-.brand span,
 .account-strip span,
 .nav-list small,
 .history-list small,
@@ -2192,11 +2241,6 @@ select:focus {
   width: 30px;
 }
 
-.brand h1 {
-  font-size: 0.96rem;
-}
-
-.brand span,
 .account-strip span,
 .nav-list small,
 .history-list small,
@@ -2630,10 +2674,6 @@ button.status-cluster.status-action:disabled {
 .composer-footer {
   min-height: 36px;
   padding: 5px 12px 7px;
-}
-
-.composer-footer select.mode-select {
-  max-width: 132px;
 }
 
 .composer-footer select.workflow-select {
@@ -7489,6 +7529,20 @@ body,
    #202020/#252525 fills that stayed black in light mode (including a
    dark-on-dark user bubble). Re-skin them with the flipping tokens here;
    the dark rules above are deliberately left untouched. */
+/* Light re-skin of the sidebar Chat/Code segment: neutral grey track with a
+   raised white thumb, the classic segmented-control read. */
+.app-shell.theme-light .mode-segment {
+  background: rgba(21, 21, 21, 0.05);
+  border-color: rgba(21, 21, 21, 0.09);
+}
+.app-shell.theme-light .mode-segment button:hover:not(.active) {
+  background: rgba(21, 21, 21, 0.05);
+}
+.app-shell.theme-light .mode-segment button.active {
+  background: #ffffff;
+  box-shadow: var(--shadow);
+  color: var(--text);
+}
 .theme-light .composer-input-shell {
   background: var(--bg-3);
   border-color: var(--border-2);

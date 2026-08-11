@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event';
 import { VirtuosoMockContext } from 'react-virtuoso';
 import App from '../App';
 import { detachTauriListeners, streamStore } from '../lib/streamStore';
-import { codingPresets, defaultDrafts } from '../app/constants';
+import { codingPresets } from '../app/constants';
 import { t } from '../i18n';
 import { installTauriAppMock, type CommandHandler, type TauriAppMock } from '../test/tauriAppMock';
 
@@ -72,16 +72,15 @@ describe('keyboard shortcuts', () => {
     expect(await screen.findByRole('dialog', { name: t('settings.title') })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: t('settings.close') }));
 
-    // Mode switch seeds the other mode's default draft into the composer.
-    const modeSelect = screen.getByLabelText(
-      t('composerSection.interactionMode'),
-    ) as HTMLSelectElement;
-    expect(modeSelect.value).toBe('coding');
+    // Mode switch leaves the composer empty — no seeded default prompt.
+    const chatButton = screen.getByRole('button', { name: t('sidebar.mode.standard') });
+    const codeButton = screen.getByRole('button', { name: t('sidebar.mode.coding') });
+    expect(codeButton).toHaveAttribute('aria-pressed', 'true');
     await user.keyboard('{Meta>}1{/Meta}');
-    await waitFor(() => expect(modeSelect.value).toBe('standard'));
-    expect(composerTextarea().value).toBe(defaultDrafts.standard);
+    await waitFor(() => expect(chatButton).toHaveAttribute('aria-pressed', 'true'));
+    expect(composerTextarea().value).toBe('');
     await user.keyboard('{Meta>}2{/Meta}');
-    await waitFor(() => expect(modeSelect.value).toBe('coding'));
+    await waitFor(() => expect(codeButton).toHaveAttribute('aria-pressed', 'true'));
   });
 });
 
@@ -96,14 +95,23 @@ describe('compact composer controls', () => {
     expect(composerTextarea().value).toBe(preset.prompt);
   });
 
-  it('switches mode from the footer select and preserves drafts', async () => {
+  it('switches mode from the sidebar segment and preserves typed drafts', async () => {
     const { user } = await bootApp();
-    const modeSelect = screen.getByLabelText(t('composerSection.interactionMode'));
+    const chatButton = screen.getByRole('button', { name: t('sidebar.mode.standard') });
+    const codeButton = screen.getByRole('button', { name: t('sidebar.mode.coding') });
 
-    await user.selectOptions(modeSelect, 'standard');
-    expect(composerTextarea().value).toBe(defaultDrafts.standard);
-    await user.selectOptions(modeSelect, 'coding');
-    expect(composerTextarea().value).toBe(defaultDrafts.coding);
+    // Fresh modes start EMPTY — the old seeded default prompt is gone.
+    expect(composerTextarea().value).toBe('');
+    await user.click(chatButton);
+    expect(composerTextarea().value).toBe('');
+
+    // Typed text is stashed per-mode and restored on return.
+    await user.click(codeButton);
+    await user.type(composerTextarea(), 'fix the flaky test');
+    await user.click(chatButton);
+    expect(composerTextarea().value).toBe('');
+    await user.click(codeButton);
+    expect(composerTextarea().value).toBe('fix the flaky test');
   });
 });
 

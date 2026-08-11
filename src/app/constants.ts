@@ -12,24 +12,18 @@ import type {
   ToolStatus,
 } from './types';
 
-// The `defaultPrompt` bodies are model-facing prompt text (seeded into the
-// composer), not UI chrome — they stay hardcoded by design.
 export const modeCopy = {
   standard: {
     title: t('mode.standard.title'),
     subtitle: t('mode.standard.subtitle'),
     shortcut: '⌘1',
     placeholder: t('mode.standard.placeholder'),
-    defaultPrompt:
-      'Answer clearly, keep the response practical, and suggest when this should move into Coding Mode.',
   },
   coding: {
     title: t('mode.coding.title'),
     subtitle: t('mode.coding.subtitle'),
     shortcut: '⌘2',
     placeholder: t('mode.coding.placeholder'),
-    defaultPrompt:
-      'Inspect the current repository like a senior engineer. Identify the most useful next code action and include exact commands to verify it.',
   },
 } satisfies Record<Mode, ModeMeta>;
 
@@ -67,9 +61,12 @@ export const storageKeys = {
   historyDeleted: 'grok-desktop-history-deleted-v1',
 };
 
+// No seeded prompt text: a fresh mode starts with an EMPTY composer (the
+// grey placeholder hint carries the guidance instead). Only text the user
+// actually typed ever occupies a draft slot.
 export const defaultDrafts: Record<Mode, string> = {
-  standard: modeCopy.standard.defaultPrompt,
-  coding: modeCopy.coding.defaultPrompt,
+  standard: '',
+  coding: '',
 };
 
 // Preset `prompt` bodies are model-facing prompt text — hardcoded by design.

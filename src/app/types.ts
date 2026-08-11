@@ -47,7 +47,6 @@ export type ModeMeta = {
   subtitle: string;
   shortcut: string;
   placeholder: string;
-  defaultPrompt: string;
 };
 
 export type StaticPreviewFile = {

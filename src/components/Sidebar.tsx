@@ -31,8 +31,8 @@ import {
 import { BrandGlyph } from './BrandGlyph';
 import type { ContextMenuItem, ContextMenuState } from './ContextMenu';
 import type { useHistoryOrganization } from '../hooks/useHistoryOrganization';
-import type { HistoryPreview, HistoryRow, ToolStatus } from '../app/types';
-import { primaryNavItems } from '../app/constants';
+import type { HistoryPreview, HistoryRow, Mode, ToolStatus } from '../app/types';
+import { modeCopy, primaryNavItems } from '../app/constants';
 import { statusTone } from '../app/format';
 import { t } from '../i18n';
 
@@ -56,6 +56,9 @@ export interface SidebarProps {
   isGrokReady: boolean;
   sidebarCollapsed: boolean;
   setSidebarCollapsed: (collapsed: boolean) => void;
+  /** Active interaction mode; the Chat/Code segment lives in the brand block. */
+  mode: Mode;
+  switchMode: (mode: Mode) => void;
 }
 
 export function Sidebar({
@@ -78,6 +81,8 @@ export function Sidebar({
   isGrokReady,
   sidebarCollapsed,
   setSidebarCollapsed,
+  mode,
+  switchMode,
 }: SidebarProps) {
   const {
     pinnedPromptIds,
@@ -99,6 +104,13 @@ export function Sidebar({
     commitRowEdit,
     savePromptToLibrary,
   } = history;
+
+  // Segment labels need static keys — t() is typed via keyof typeof en, so a
+  // computed `sidebar.mode.${item}` key would not type-check.
+  const modeSegmentLabels: Record<Mode, string> = {
+    standard: t('sidebar.mode.standard'),
+    coding: t('sidebar.mode.coding'),
+  };
 
   // Claude-class right-click menu for a history row. Section header, icons,
   // shortcut accelerators, two flyout submenus (Open with / Move to group).
@@ -276,26 +288,41 @@ export function Sidebar({
     <>
       <aside className="app-sidebar">
       <div className="brand">
-        <div className="brand-mark">
-          <BrandGlyph size={18} />
+        <div className="brand-top">
+          {/* Wordmark only — the icon + title/subtitle stack read as clutter.
+              Geist (the bundled display face) carries the Grok wordmark here;
+              BrandGlyph still serves as the account avatar below. */}
+          <span className="brand-wordmark">Grok</span>
+          <div className="brand-actions">
+            {!sidebarCollapsed ? (
+              <button
+                className="sidebar-collapse-button"
+                type="button"
+                aria-label={t('palette.action.collapseSidebar')}
+                title={`${t('palette.action.collapseSidebar')} (⌘B)`}
+                aria-pressed="false"
+                onClick={() => setSidebarCollapsed(true)}
+              >
+                <PanelLeftClose size={16} />
+              </button>
+            ) : null}
+          </div>
         </div>
-        <div>
-          <h1>{t('sidebar.brandTitle')}</h1>
-          <span>{t('sidebar.brandSubtitle')}</span>
-        </div>
-        <div className="brand-actions">
-          {!sidebarCollapsed ? (
+        {/* Chat/Code switch, moved up from the composer footer so the input
+            card stays clean. Same state, same ⌘1/⌘2 shortcuts. */}
+        <div className="mode-segment" role="group" aria-label={t('sidebar.modeSwitchAria')}>
+          {(Object.keys(modeCopy) as Mode[]).map((item) => (
             <button
-              className="sidebar-collapse-button"
+              aria-pressed={mode === item}
+              className={mode === item ? 'active' : ''}
+              key={item}
+              onClick={() => switchMode(item)}
+              title={`${modeSegmentLabels[item]} (${modeCopy[item].shortcut})`}
               type="button"
-              aria-label={t('palette.action.collapseSidebar')}
-              title={`${t('palette.action.collapseSidebar')} (⌘B)`}
-              aria-pressed="false"
-              onClick={() => setSidebarCollapsed(true)}
             >
-              <PanelLeftClose size={16} />
+              {modeSegmentLabels[item]}
             </button>
-          ) : null}
+          ))}
         </div>
       </div>
 

@@ -32,7 +32,6 @@ export interface ComposerSectionProps {
   drafts: Record<Mode, string>;
   mode: Mode;
   setDrafts: React.Dispatch<React.SetStateAction<Record<Mode, string>>>;
-  switchMode: (mode: Mode) => void;
   handleEnqueued: (info: {
     runId: string;
     position: number;
@@ -59,7 +58,6 @@ export function ComposerSection({
   drafts,
   mode,
   setDrafts,
-  switchMode,
   handleEnqueued,
   setSessionNotice,
   modelConfig,
@@ -150,18 +148,6 @@ export function ComposerSection({
         }
         controls={
           <div className="composer-compact-controls">
-            <select
-              aria-label={t('composerSection.interactionMode')}
-              className="mode-select"
-              onChange={(event) => switchMode(event.currentTarget.value as Mode)}
-              value={mode}
-            >
-              {(Object.keys(modeCopy) as Mode[]).map((item) => (
-                <option key={item} value={item}>
-                  {modeCopy[item].title}
-                </option>
-              ))}
-            </select>
             <select
               aria-label={t('composerSection.grokModel')}
               className="model-select-footer"

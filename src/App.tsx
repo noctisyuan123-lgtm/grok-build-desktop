@@ -791,6 +791,8 @@ function App() {
         isGrokReady={isGrokReady}
         sidebarCollapsed={sidebarCollapsed}
         setSidebarCollapsed={setSidebarCollapsed}
+        mode={mode}
+        switchMode={switchMode}
       />
       <div
         className="sidebar-resizer"
@@ -851,7 +853,6 @@ function App() {
               drafts={drafts}
               mode={mode}
               setDrafts={setDrafts}
-              switchMode={switchMode}
               handleEnqueued={handleEnqueued}
               setSessionNotice={setSessionNotice}
               modelConfig={modelConfig}

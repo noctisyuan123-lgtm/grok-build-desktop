@@ -87,7 +87,6 @@ export const en = {
   'composerSection.autopilotSwitchTitle': 'Switch back to Default',
   'composerSection.autopilotSwitch': 'Switch to Default',
   'composerSection.sendFailed': 'Send failed: {message}',
-  'composerSection.interactionMode': 'Interaction mode',
   'composerSection.grokModel': 'Grok model',
   'composerSection.modelTitle': 'Model: {model}',
   'composerSection.modelUnverifiedTitle': '{model} — not in grok CLI list, may fall back',
@@ -173,8 +172,9 @@ export const en = {
   'tools.adding': 'Adding…',
 
   // ── Sidebar ───────────────────────────────────────────────────────────────
-  'sidebar.brandTitle': 'Grok Build Desktop',
-  'sidebar.brandSubtitle': 'Grok Build for engineers',
+  'sidebar.modeSwitchAria': 'Switch between Chat and Code mode',
+  'sidebar.mode.standard': 'Chat',
+  'sidebar.mode.coding': 'Code',
   'sidebar.primaryNav': 'Primary navigation',
   'sidebar.conversations': 'Conversations',
   'sidebar.emptyHistory': 'Your conversations will show up here.',

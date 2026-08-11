@@ -83,7 +83,7 @@ describe('App boot', () => {
     expect(document.querySelector('.status-bar-idle')).not.toBeInTheDocument();
 
     // Connection labels are intentionally omitted from the minimal chrome.
-    expect(screen.getByText(t('sidebar.brandTitle'))).toBeInTheDocument();
+    expect(document.querySelector('.brand-wordmark')).toHaveTextContent('Grok');
     expect(document.querySelector('.account-text')).not.toBeInTheDocument();
     expect(document.querySelector('.conn-pill')).not.toBeInTheDocument();
 
