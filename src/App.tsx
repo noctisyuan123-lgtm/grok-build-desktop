@@ -53,13 +53,21 @@ import { buildGrokArgs } from './app/grokArgs';
 import type { ComposerAttachment } from './lib/attachments';
 
 const SIDEBAR_WIDTH_KEY = 'grok-desktop-sidebar-width';
-const SIDEBAR_DEFAULT_WIDTH = 272;
+// Keep the default comfortably wide enough for history titles and the larger
+// sidebar type ramp. A drag is still the user's preferred default and is
+// persisted below.
+const SIDEBAR_DEFAULT_WIDTH = 304;
 const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 440;
 
 function storedSidebarWidth(): number {
   const parsed = Number.parseInt(window.localStorage.getItem(SIDEBAR_WIDTH_KEY) ?? '', 10);
-  if (!Number.isFinite(parsed) || parsed === 260) return SIDEBAR_DEFAULT_WIDTH;
+  // 260 and 272 were shipped defaults in earlier builds. Treat them as
+  // migrations rather than an intentional preference so existing installs get
+  // the new baseline once; every other dragged width remains untouched.
+  if (!Number.isFinite(parsed) || parsed === 260 || parsed === 272) {
+    return SIDEBAR_DEFAULT_WIDTH;
+  }
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, parsed));
 }
 
