@@ -188,7 +188,6 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
         // A blank New Session is an ephemeral compose surface, not history.
         // It becomes a conversation row only after its first user message.
         if (!fp) return [];
-        const promptCount = msgs.filter((m) => m.role === 'user').length;
         const lastTs = msgs.length
           ? Math.max(...msgs.map((m) => (m as { ts?: number }).ts ?? 0))
           : t.createdAt;
@@ -196,7 +195,7 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
         return [{
           id: t.id,
           title: promptLabels[t.id] ?? fallback,
-          detail: promptCount > 0 ? `${promptCount} message${promptCount > 1 ? 's' : ''}` : 'empty',
+          detail: '',
           time: timeLabel(lastTs),
           pinned: pinnedPromptIds.has(t.id),
           group: promptGroups[t.id] ?? null,

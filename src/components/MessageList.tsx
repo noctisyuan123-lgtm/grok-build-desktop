@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { MessageItem } from './MessageItem';
+import { LongTextMessage } from './LongTextMessage';
+import { isLongUserText } from '../lib/longText';
 import { useActiveRun } from '../hooks/useActiveRun';
 import type { TraceEvent } from '../lib/traceParser';
 import type { TranscriptSegment } from '../lib/streamStore';
@@ -154,7 +156,13 @@ export function MessageList({ messages, focusId, focusNonce, onUndoAssistant }: 
                   )}
                 </div>
               ) : null}
-              {msg.userText ? <pre className="message-body">{msg.userText}</pre> : null}
+              {msg.userText ? (
+                isLongUserText(msg.userText) ? (
+                  <LongTextMessage text={msg.userText} />
+                ) : (
+                  <pre className="message-body">{msg.userText}</pre>
+                )
+              ) : null}
             </div>
           );
         }

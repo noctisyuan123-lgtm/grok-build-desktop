@@ -79,6 +79,11 @@ export const en = {
   'composer.attachmentTooLarge': '{name} is larger than 10 MB.',
   'composer.tooManyAttachments': 'You can attach up to {count} files.',
   'composer.attachmentsTotalTooLarge': 'Attachments must total less than 25 MB.',
+  'message.longTextName': 'pasted-text.txt',
+  'message.longTextOpen': 'Open pasted text',
+  'message.longTextClose': 'Close pasted text',
+  'message.longTextDialog': 'Pasted text preview',
+  'message.longTextLines': '{count} lines',
   'composer.attachmentOnlyPrompt': 'Please review the attached file(s).',
 
   // ── Composer footer / autopilot banner ────────────────────────────────────

@@ -235,7 +235,7 @@ pre {
 .app-shell {
   background: #edf1f3;
   display: grid;
-  grid-template-columns: var(--sidebar-width, 260px) minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width, 272px) minmax(0, 1fr);
   height: 100vh;
   overflow: hidden;
   position: relative;
@@ -2225,7 +2225,7 @@ select:focus {
 
 /* Clean workspace pass: keep Claude/Codex-style clarity without cloning their trade dress. */
 .app-shell {
-  grid-template-columns: var(--sidebar-width, 260px) minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width, 272px) minmax(0, 1fr);
 }
 
 .app-sidebar {
@@ -2284,8 +2284,16 @@ select:focus {
 }
 
 .history-list button {
-  min-height: 46px;
-  padding: 6px 9px;
+  min-height: 35px;
+  padding: 5px 9px;
+}
+
+.history-list button.history-row strong {
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, Ubuntu, 'Droid Sans',
+    sans-serif;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .history-nav .search-box {
@@ -6117,7 +6125,7 @@ button.history-section-head.toggle:hover {
 .sidebar-resizer {
   bottom: 0;
   cursor: col-resize;
-  left: calc(var(--sidebar-width, 260px) - 3px);
+  left: calc(var(--sidebar-width, 272px) - 3px);
   position: absolute;
   top: 0;
   touch-action: none;
@@ -6937,6 +6945,191 @@ select:focus-visible {
   white-space: pre-wrap;
 }
 
+/* Codex-style long paste disclosure: keep the transcript compact, then open
+   the original text in an editor-like, line-numbered surface on demand. */
+.long-text-pill {
+  align-items: center;
+  background: #292929;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 22px;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.16);
+  color: var(--conversation-text);
+  display: flex;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, Ubuntu, 'Droid Sans',
+    sans-serif;
+  font-size: 13px;
+  font-weight: 400;
+  gap: 9px;
+  justify-content: flex-start;
+  max-width: min(74%, 640px);
+  min-height: 42px;
+  padding: 0 16px;
+}
+
+.long-text-pill:hover {
+  background: #303030;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.long-text-pill span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.long-text-pill svg {
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.long-text-overlay {
+  align-items: center;
+  animation: palette-fade 120ms ease-out;
+  background: rgba(0, 0, 0, 0.56);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 22px;
+  position: fixed;
+  z-index: 320;
+}
+
+.long-text-viewer {
+  background: #181818;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 15px;
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.52);
+  display: grid;
+  grid-template-rows: 54px minmax(0, 1fr);
+  height: min(84vh, 900px);
+  max-width: 1180px;
+  min-height: 280px;
+  overflow: hidden;
+  width: min(92vw, 1180px);
+}
+
+.long-text-head {
+  align-items: center;
+  background: #171717;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding: 8px 12px 0 16px;
+}
+
+.long-text-tab {
+  align-items: center;
+  align-self: stretch;
+  background: #222;
+  border-radius: 10px 10px 0 0;
+  color: var(--conversation-text);
+  display: inline-flex;
+  gap: 9px;
+  justify-self: start;
+  min-width: 210px;
+  padding: 0 16px;
+}
+
+.long-text-count {
+  color: var(--text-soft);
+  font-size: 11px;
+  padding: 0 12px;
+}
+
+.long-text-close {
+  background: transparent;
+  border-radius: 7px;
+  color: var(--text-muted);
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  width: 32px;
+}
+
+.long-text-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--conversation-text);
+}
+
+.long-text-code {
+  display: grid;
+  font-family:
+    'JetBrains Mono Variable', 'SF Mono', Monaco, Menlo, Consolas, 'Liberation Mono', monospace;
+  font-size: 13px;
+  grid-template-columns: auto minmax(max-content, 1fr);
+  line-height: 1.65;
+  min-height: 0;
+  overflow: auto;
+}
+
+.long-text-line-numbers,
+.long-text-content {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: #f0f0f0;
+  margin: 0;
+  min-height: 100%;
+  padding: 12px 20px;
+  white-space: pre;
+}
+
+.long-text-line-numbers {
+  background: #181818;
+  color: #858585;
+  padding-left: 18px;
+  padding-right: 14px;
+  position: sticky;
+  left: 0;
+  text-align: right;
+  user-select: none;
+  z-index: 1;
+}
+
+.long-text-content {
+  padding-left: 10px;
+}
+
+.theme-light .long-text-pill {
+  background: rgba(31, 29, 25, 0.055);
+  border-color: rgba(31, 29, 25, 0.14);
+}
+
+.theme-light .long-text-pill:hover {
+  background: rgba(31, 29, 25, 0.09);
+  border-color: rgba(31, 29, 25, 0.2);
+}
+
+.theme-light .long-text-viewer,
+.theme-light .long-text-line-numbers,
+:root[data-theme='light'] .long-text-viewer,
+:root[data-theme='light'] .long-text-line-numbers {
+  background: #fbfaf7;
+}
+
+.theme-light .long-text-head,
+:root[data-theme='light'] .long-text-head {
+  background: #f4f1e9;
+  border-bottom-color: rgba(31, 29, 25, 0.12);
+}
+
+.theme-light .long-text-tab,
+:root[data-theme='light'] .long-text-tab {
+  background: #fbfaf7;
+}
+
+.theme-light .long-text-content,
+:root[data-theme='light'] .long-text-content {
+  color: #24221e;
+}
+
+.theme-light .long-text-line-numbers,
+:root[data-theme='light'] .long-text-line-numbers {
+  color: #8d8981;
+}
+
 .message.message-assistant {
   background: transparent;
   padding: 26px 28px 24px;
@@ -6994,6 +7187,14 @@ button.message-worked:hover {
 
   .message.message-user .message-body {
     max-width: 90%;
+  }
+
+  .long-text-pill {
+    max-width: 90%;
+  }
+
+  .long-text-overlay {
+    padding: 10px;
   }
 }
 

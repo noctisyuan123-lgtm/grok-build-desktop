@@ -53,12 +53,13 @@ import { buildGrokArgs } from './app/grokArgs';
 import type { ComposerAttachment } from './lib/attachments';
 
 const SIDEBAR_WIDTH_KEY = 'grok-desktop-sidebar-width';
+const SIDEBAR_DEFAULT_WIDTH = 272;
 const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 440;
 
 function storedSidebarWidth(): number {
   const parsed = Number.parseInt(window.localStorage.getItem(SIDEBAR_WIDTH_KEY) ?? '', 10);
-  if (!Number.isFinite(parsed)) return 260;
+  if (!Number.isFinite(parsed) || parsed === 260) return SIDEBAR_DEFAULT_WIDTH;
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, parsed));
 }
 

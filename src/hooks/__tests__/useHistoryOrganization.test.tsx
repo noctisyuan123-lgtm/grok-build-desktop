@@ -66,7 +66,7 @@ describe('recentPrompts derivation', () => {
     // Empty draft tabs are compose surfaces and do not enter HISTORY.
     expect(rows.map((r) => r.id)).toEqual(['t2', 't1', 't4']);
     expect(rows.find((r) => r.id === 't1')!.title).toBe('fix the flaky login test');
-    expect(rows.find((r) => r.id === 't2')!.detail).toBe('2 messages');
+    expect(rows.find((r) => r.id === 't2')!.detail).toBe('');
     expect(rows.find((r) => r.id === 't3')).toBeUndefined();
     expect(rows.find((r) => r.id === 't1')!.active).toBe(true);
   });

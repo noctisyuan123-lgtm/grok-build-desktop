@@ -277,7 +277,6 @@ export function Sidebar({
             {item.pinned ? <Pin size={11} className="pin-dot" /> : null}
             {item.title}
           </strong>
-          <small>{item.detail}</small>
         </span>
         <time>{item.time || ''}</time>
       </button>
