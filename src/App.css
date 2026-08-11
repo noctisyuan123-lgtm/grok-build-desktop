@@ -6094,7 +6094,7 @@ button.history-section-head.toggle:hover {
 }
 
 /* ===== Sidebar collapse (⌘B) ===== */
-.app-shell {
+.app-shell.sidebar-transition-ready {
   transition: grid-template-columns 180ms var(--ease-in-out);
 }
 .app-shell.sidebar-collapsed {

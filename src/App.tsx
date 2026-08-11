@@ -173,6 +173,10 @@ function App() {
     return window.localStorage.getItem('grok-desktop-sidebar-collapsed') === '1';
   });
   const sidebarWidthRef = useRef(storedSidebarWidth());
+  // WebKit paints the CSS fallback before passive effects restore the saved
+  // width. Keep the grid transition off for that one hydration frame so the
+  // sidebar doesn't visibly shrink on every app launch.
+  const [sidebarTransitionReady, setSidebarTransitionReady] = useState(false);
   const [dockPosition, setDockPosition] = useState<DockPosition>(() => {
     const stored = window.localStorage.getItem(storageKeys.dockPosition);
     return isDockPosition(stored) ? stored : 'right';
@@ -573,6 +577,11 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setSidebarTransitionReady(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
   function startSidebarResize(event: ReactPointerEvent<HTMLDivElement>) {
     if (sidebarCollapsed || event.button !== 0) return;
     event.preventDefault();
@@ -742,7 +751,9 @@ function App() {
     );
   }, [grokIsRunning, messageAttachments, messages]);
   return (
-    <main className={`app-shell theme-${themeMode}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
+    <main
+      className={`app-shell theme-${themeMode}${sidebarCollapsed ? ' sidebar-collapsed' : ''}${sidebarTransitionReady ? ' sidebar-transition-ready' : ''}`}
+    >
       <CommandPalette
         open={paletteOpen}
         actions={allPaletteActions}
