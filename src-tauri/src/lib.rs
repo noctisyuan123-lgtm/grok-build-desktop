@@ -2763,10 +2763,19 @@ pub fn run() {
                 let state_path_for_close = window_state_path.clone();
                 let window_for_close = window.clone();
                 window.on_window_event(move |event| {
-                    if let WindowEvent::CloseRequested { .. } = event {
-                        if let Ok(size) = window_for_close.outer_size() {
-                            save_window_state(&state_path_for_close, size);
+                    match event {
+                        // Persist as the user drags rather than waiting for a
+                        // quit event: macOS app termination can bypass a
+                        // per-window CloseRequested notification.
+                        WindowEvent::Resized(size) => {
+                            save_window_state(&state_path_for_close, *size);
                         }
+                        WindowEvent::CloseRequested { .. } => {
+                            if let Ok(size) = window_for_close.outer_size() {
+                                save_window_state(&state_path_for_close, size);
+                            }
+                        }
+                        _ => {}
                     }
                 });
                 let _ = window.show();
@@ -2975,6 +2984,15 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn window_state_round_trips_saved_size() {
+        let path = env::temp_dir().join(format!("grok-window-state-{}.json", uuid::Uuid::now_v7()));
+        save_window_state(&path, PhysicalSize::new(1440, 920));
+        let restored = read_window_state(&path).expect("saved window state should load");
+        assert_eq!((restored.width, restored.height), (1440, 920));
+        fs::remove_file(path).ok();
+    }
 
     #[test]
     fn command_line_redacts_prompt_and_env_values() {
