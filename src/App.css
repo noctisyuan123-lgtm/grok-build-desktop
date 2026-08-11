@@ -471,7 +471,11 @@ pre {
 .history-list {
   overflow: auto;
   flex: 1 1 auto;
+  /* Let the native scrollbar sit on the sidebar's outer edge while keeping
+     conversation rows aligned with the rest of the rail. */
+  margin-right: -12px;
   min-height: 0;
+  padding-right: 8px;
 }
 
 .history-list button {

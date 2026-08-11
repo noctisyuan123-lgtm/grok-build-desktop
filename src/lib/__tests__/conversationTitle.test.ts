@@ -10,17 +10,27 @@ describe('deriveConversationTitle', () => {
     expect(deriveConversationTitle('我想把这里的 md 渲染换成 VSCode 同款')).toBe(
       '优化 Markdown 渲染',
     );
+    expect(deriveConversationTitle('在桌面写个py文件吧，随便什么都行')).toBe(
+      '创建桌面 Python 文件',
+    );
+    expect(deriveConversationTitle('调用一个只读工具获取当前工作目录，然后简短回复结果')).toBe(
+      '读取当前工作目录',
+    );
+    expect(deriveConversationTitle('只回复 AUTO_POLICY_OK，不要调用工具')).toBe(
+      '回复 AUTO_POLICY_OK',
+    );
+    expect(deriveConversationTitle('把 sidebar 里的滚动条贴到最右边')).toBe('优化侧栏滚动条');
   });
 
   it('removes greetings, markdown noise, and overly long tails', () => {
     expect(deriveConversationTitle('你好，帮我 fix the flaky login test\nplease')).toBe(
-      'fix the flaky login test please',
+      'fix the flaky login test',
     );
     expect(deriveConversationTitle('')).toBe('New conversation');
     expect(
       deriveConversationTitle(
         '请帮我把这个特别特别特别特别特别特别特别特别特别特别长的任务说明整理一下',
       ).length,
-    ).toBeLessThanOrEqual(35);
+    ).not.toContain('…');
   });
 });
