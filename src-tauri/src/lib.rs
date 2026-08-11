@@ -45,7 +45,44 @@ use std::{
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tauri::Manager;
+use tauri::{Manager, PhysicalSize, Size, WindowEvent};
+
+const WINDOW_STATE_FILE: &str = "window-state.json";
+const DEFAULT_WINDOW_WIDTH: u32 = 1120;
+const DEFAULT_WINDOW_HEIGHT: u32 = 780;
+const MIN_WINDOW_WIDTH: u32 = 480;
+const MIN_WINDOW_HEIGHT: u32 = 600;
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedWindowState {
+    width: u32,
+    height: u32,
+}
+
+fn read_window_state(path: &Path) -> Option<PersistedWindowState> {
+    let state = serde_json::from_slice::<PersistedWindowState>(&fs::read(path).ok()?).ok()?;
+    if state.width < MIN_WINDOW_WIDTH || state.height < MIN_WINDOW_HEIGHT {
+        return None;
+    }
+    Some(state)
+}
+
+fn save_window_state(path: &Path, size: PhysicalSize<u32>) {
+    if size.width < MIN_WINDOW_WIDTH || size.height < MIN_WINDOW_HEIGHT {
+        return;
+    }
+    let Ok(json) = serde_json::to_vec(&PersistedWindowState {
+        width: size.width,
+        height: size.height,
+    }) else {
+        return;
+    };
+    let temporary = path.with_extension("json.tmp");
+    if fs::write(&temporary, json).is_ok() {
+        let _ = fs::rename(temporary, path);
+    }
+}
 
 struct TerminalProcess {
     master: Box<dyn portable_pty::MasterPty + Send>,
@@ -2710,6 +2747,30 @@ pub fn run() {
                 .app_data_dir()
                 .unwrap_or_else(|_| app_support_dir());
             std::fs::create_dir_all(&resource_dir).ok();
+            // Restore the user's manually resized window before showing it.
+            // Starting hidden avoids the same first-frame resize flash we
+            // explicitly avoid for the sidebar in the frontend.
+            let window_state_path = resource_dir.join(WINDOW_STATE_FILE);
+            if let Some(window) = app.get_webview_window("main") {
+                if let Some(state) = read_window_state(&window_state_path) {
+                    let _ = window.set_size(Size::Physical(PhysicalSize::new(state.width, state.height)));
+                } else {
+                    let _ = window.set_size(Size::Physical(PhysicalSize::new(
+                        DEFAULT_WINDOW_WIDTH,
+                        DEFAULT_WINDOW_HEIGHT,
+                    )));
+                }
+                let state_path_for_close = window_state_path.clone();
+                let window_for_close = window.clone();
+                window.on_window_event(move |event| {
+                    if let WindowEvent::CloseRequested { .. } = event {
+                        if let Ok(size) = window_for_close.outer_size() {
+                            save_window_state(&state_path_for_close, size);
+                        }
+                    }
+                });
+                let _ = window.show();
+            }
             let db_path = resource_dir.join("runs.sqlite");
 
             tauri::async_runtime::block_on(async {
@@ -2891,8 +2952,24 @@ pub fn run() {
             desktop::desktop_query,
             desktop::desktop_activate
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // App-level quit (including Cmd-Q / `tell application … to quit`)
+            // does not necessarily produce a per-window CloseRequested event
+            // on macOS, so persist here as the reliable final checkpoint.
+            if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    if let Ok(size) = window.outer_size() {
+                        let resource_dir = app_handle
+                            .path()
+                            .app_data_dir()
+                            .unwrap_or_else(|_| app_support_dir());
+                        save_window_state(&resource_dir.join(WINDOW_STATE_FILE), size);
+                    }
+                }
+            }
+        });
 }
 
 #[cfg(test)]
