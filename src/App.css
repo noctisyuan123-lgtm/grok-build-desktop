@@ -235,7 +235,7 @@ pre {
 .app-shell {
   background: #edf1f3;
   display: grid;
-  grid-template-columns: var(--sidebar-width, 272px) minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width, 336px) minmax(0, 1fr);
   height: 100vh;
   overflow: hidden;
   position: relative;
@@ -2225,7 +2225,7 @@ select:focus {
 
 /* Clean workspace pass: keep Claude/Codex-style clarity without cloning their trade dress. */
 .app-shell {
-  grid-template-columns: var(--sidebar-width, 272px) minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width, 336px) minmax(0, 1fr);
 }
 
 .app-sidebar {
@@ -2980,7 +2980,10 @@ button.status-cluster.status-action:disabled {
    bottom composer layout takes over without remounting a second input. */
 .conversation-panel.is-empty {
   justify-content: center;
-  padding-bottom: clamp(36px, 10vh, 110px);
+  /* A little more top weight puts the compact prompt just below visual
+     centre, matching the quieter Cursor-style empty stage. */
+  padding-bottom: clamp(20px, 4vh, 48px);
+  padding-top: clamp(68px, 13vh, 136px);
 }
 
 .conversation-panel.is-empty .conversation-scroll {
@@ -2994,7 +2997,7 @@ button.status-cluster.status-action:disabled {
 .conversation-panel.is-empty .composer-row {
   flex: 0 0 auto;
   margin: 0 auto;
-  max-width: 760px;
+  max-width: 640px;
   width: 100%;
 }
 
@@ -3015,7 +3018,7 @@ button.status-cluster.status-action:disabled {
   gap: 0;
   justify-content: flex-start;
   margin: 0 auto;
-  max-width: 760px;
+  max-width: 640px;
   min-height: 0;
   padding: 0 24px 8px;
   width: 100%;
@@ -3337,7 +3340,7 @@ button.status-cluster.status-action:disabled {
 
 @media (max-width: 1280px) {
   .app-shell {
-    grid-template-columns: var(--sidebar-width, 248px) minmax(0, 1fr);
+    grid-template-columns: var(--sidebar-width, 336px) minmax(0, 1fr);
   }
 
   .window-titlebar {
@@ -6101,7 +6104,7 @@ button.history-section-head.toggle:hover {
 .sidebar-resizer {
   bottom: 0;
   cursor: col-resize;
-  left: calc(var(--sidebar-width, 272px) - 3px);
+  left: calc(var(--sidebar-width, 336px) - 3px);
   position: absolute;
   top: 0;
   touch-action: none;
