@@ -8710,7 +8710,14 @@ body,
 
 /* Ordered Cursor-style agent transcript. The outer work disclosure owns the
    entire process; thought, response and tool groups keep their real order. */
+/* Workflow motion tokens (buffered B-lite: longer ease, tiny travel). */
 .transcript-work {
+  --workflow-enter-ms: 340ms;
+  --workflow-settle-ms: 320ms;
+  --workflow-fade-ms: 280ms;
+  /* Smooth decelerate in / soft ease-out for exit — less snap than linear-ish curves. */
+  --workflow-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --workflow-ease-exit: cubic-bezier(0.33, 0, 0.2, 1);
   margin-bottom: 8px;
 }
 
@@ -8728,8 +8735,23 @@ body,
 /* Do not narrow normal/transcript assistant responses — they share the full
    message column. Thought bodies stay compact for denser workflow reading. */
 .transcript-response.message-body {
+  animation: workflow-fade-in var(--workflow-fade-ms, 280ms) var(--workflow-ease-enter, ease-out) both;
   margin: 0;
   max-width: none;
+}
+
+/* Mid-respond nested under a phase disclosure: separate from muted thought body. */
+.transcript-phase-body > .transcript-response.message-body,
+.transcript-phase-block > .transcript-response.message-body {
+  border-top: 1px solid color-mix(in srgb, var(--conversation-text) 10%, transparent);
+  color: var(--conversation-text);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+/* Exterior final body: fade once on mount (stable key = no re-fire per token). */
+.message-body.markdown-streaming:not(.transcript-response):not(.transcript-thought-body) {
+  animation: workflow-fade-in var(--workflow-fade-ms, 280ms) var(--workflow-ease-enter, ease-out) both;
 }
 
 .transcript-thought-body.message-body {
@@ -8774,9 +8796,16 @@ body,
 
 /* Closed workflow phase: one neutral summary above an intermediate response. */
 .transcript-phase-block {
+  animation: workflow-soft-enter var(--workflow-enter-ms, 340ms) var(--workflow-ease-enter, ease-out)
+    both;
   display: flex;
   flex-direction: column;
   gap: 1px;
+}
+
+.transcript-thought {
+  animation: workflow-soft-enter var(--workflow-enter-ms, 340ms) var(--workflow-ease-enter, ease-out)
+    both;
 }
 
 .transcript-phase-body {
@@ -8804,22 +8833,23 @@ body,
 }
 
 /* A tool group stays compact by default, but its one current call gets a
-   brief stage while it runs. It enters from below; on completion it glides
-   upward and fades into the collapsed summary, leaving the next call room to
-   take over without moving the rest of the transcript. */
+   brief stage while it runs. Soft enter from below; on completion it settles
+   upward slightly and fades into the collapsed summary. */
 .transcript-tool-group .activity-motion-enter {
-  animation: activity-row-enter 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: activity-row-enter var(--workflow-enter-ms, 220ms) var(--workflow-ease-enter, ease-out)
+    both;
 }
 
 .transcript-tool-group .activity-motion-settle {
-  animation: activity-row-settle 420ms cubic-bezier(0.4, 0, 0.7, 0.2) both;
+  animation: activity-row-settle var(--workflow-settle-ms, 260ms) var(--workflow-ease-exit, ease-in)
+    both;
   pointer-events: none;
 }
 
 @keyframes activity-row-enter {
   from {
     opacity: 0;
-    transform: translateY(7px);
+    transform: translateY(2px);
   }
   to {
     opacity: 1;
@@ -8829,12 +8859,32 @@ body,
 
 @keyframes activity-row-settle {
   from {
-    opacity: 0.8;
+    opacity: 1;
     transform: translateY(0);
   }
   to {
     opacity: 0;
-    transform: translateY(-6px);
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes workflow-soft-enter {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes workflow-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
 
@@ -8860,33 +8910,21 @@ body,
   width: 5px;
 }
 
-/* Cursor/Codex-style live shimmer: a restrained highlight crosses only the
-   currently active label. Completed transcript rows remain static. */
+/* Live labels: low-contrast breathe only (no white sweep / heading shimmer). */
 .transcript-thought.is-running > button > span,
 .activity-list .activity-item.activity-status-running .activity-row-label,
 .agent-starting > span:last-child {
-  animation: activity-text-shimmer 2.2s linear infinite;
-  background: linear-gradient(
-    100deg,
-    color-mix(in srgb, var(--conversation-text) 48%, transparent) 20%,
-    color-mix(in srgb, var(--conversation-text) 48%, transparent) 38%,
-    rgba(255, 255, 255, 0.86) 49%,
-    color-mix(in srgb, var(--conversation-text) 48%, transparent) 58%,
-    color-mix(in srgb, var(--conversation-text) 48%, transparent) 80%
-  );
-  background-clip: text;
-  background-size: 240% 100%;
-  color: transparent;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  animation: activity-label-breathe 1.8s ease-in-out infinite;
+  color: color-mix(in srgb, var(--conversation-text) 72%, transparent);
 }
 
-@keyframes activity-text-shimmer {
-  from {
-    background-position: 140% 0;
+@keyframes activity-label-breathe {
+  0%,
+  100% {
+    opacity: 0.62;
   }
-  to {
-    background-position: -140% 0;
+  50% {
+    opacity: 0.82;
   }
 }
 
@@ -8895,7 +8933,11 @@ body,
   .activity-list .activity-item.activity-status-running .activity-row-label,
   .agent-starting > span:last-child,
   .transcript-tool-group .activity-motion-enter,
-  .transcript-tool-group .activity-motion-settle {
+  .transcript-tool-group .activity-motion-settle,
+  .transcript-phase-block,
+  .transcript-thought,
+  .transcript-response.message-body,
+  .message-body.markdown-streaming:not(.transcript-response):not(.transcript-thought-body) {
     animation: none;
     background: none;
     color: color-mix(in srgb, var(--conversation-text) 72%, transparent);

@@ -1,12 +1,4 @@
-import {
-  memo,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type MouseEvent,
-  type ReactNode,
-} from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useRunHtml, useRunSnapshot } from '../hooks/useRunSnapshot';
 import { sanitizeHtml } from '../lib/sanitizeHtml';
@@ -17,7 +9,7 @@ import { t } from '../i18n';
 import { useElapsed } from '../hooks/useElapsed';
 import { sumEditStats, type EditStats } from '../lib/editStats';
 import type { PlanEntry, TraceEvent } from '../lib/traceParser';
-import type { TranscriptSegment } from '../lib/streamStore';
+import { exteriorMarkdownKey, type TranscriptSegment } from '../lib/streamStore';
 
 interface Props {
   runId: string;
@@ -65,8 +57,7 @@ function MessageItemImpl({
   // Keep the transcript in its live/intermediate shape until that event has
   // actually arrived, otherwise the last intermediate response briefly gets
   // promoted into the final answer and then jumps back into the work rail.
-  const responseTerminalReady =
-    !snap || snap.lastEventType === 'end' || snap.stopReason != null;
+  const responseTerminalReady = !snap || snap.lastEventType === 'end' || snap.stopReason != null;
 
   // markdown-it does not sanitize; strip scripts/handlers before injecting.
   const safeHtml = useMemo(() => (html ? sanitizeHtml(html) : html), [html]);
@@ -300,21 +291,28 @@ function TranscriptMessage({
             <div className="transcript-segments">
               {phases.map((phase, phaseIndex) => {
                 const hasClosedResponse = phase.response?.kind === 'response';
-                // Exterior final answer sits outside the work rail. Any other
-                // closed response (including live intermediates while tools
-                // continue) folds its preceding activity once it exists.
+                // Exterior final answer sits outside the work rail (finalText).
                 const isExteriorFinal =
+                  hasClosedResponse && finalIndex >= 0 && phase.responseIndex === finalIndex;
+                // Three independent gates (do not collapse them into one):
+                // 1) collapseActivity — a respond closes the phase, so fold the
+                //    preceding thought/tools into a disclosure (live or settled).
+                // 2) foldResponseIntoPhase — only when the run is *settled* with a
+                //    real final, bury prior mid-responds inside that disclosure.
+                //    While live, a trailing respond is only a *provisional*
+                //    exterior (`finalIndex >= 0`); earlier mids must stay
+                //    readable in the rail — otherwise each new mid hides all
+                //    previous ones until the next tool/thought lands.
+                // 3) showResponseInRail — mid-respond beside folded process.
+                const collapseActivity =
+                  phase.activity.length > 0 && hasClosedResponse;
+                const foldResponseIntoPhase =
+                  !live &&
                   hasClosedResponse &&
-                  finalIndex >= 0 &&
-                  phase.responseIndex === finalIndex;
-                const foldResponseIntoPhase = hasClosedResponse && !isExteriorFinal;
-                // Fold only after a response closes the phase. Before that,
-                // thought/tool/thought stays live and chronological.
-                // A response closes *all* prior activity, including the
-                // very first thought before the final response. The final
-                // response itself stays outside Worked for, but its leading
-                // thought/tools still become one disclosure.
-                const collapsePhase = phase.activity.length > 0 && hasClosedResponse;
+                  !isExteriorFinal &&
+                  finalIndex >= 0;
+                const showResponseInRail =
+                  hasClosedResponse && !isExteriorFinal && !foldResponseIntoPhase;
                 const responseNode =
                   phase.response?.kind === 'response' ? (
                     <MarkdownSegment
@@ -325,30 +323,33 @@ function TranscriptMessage({
                     />
                   ) : null;
                 // Phase-local edit totals only — never outer Work for / global run sums.
-                const phaseEditStats = collapsePhase
+                const phaseEditStats = collapseActivity
                   ? sumEditStats(tracesForPhase(phase, traces))
                   : null;
                 const phaseKey = `phase:${phaseIndex}:${phase.activity[0]?.segment.key ?? phase.response?.key ?? phaseIndex}`;
                 return (
                   <div key={phaseKey} className="transcript-phase-block">
-                    {collapsePhase ? (
-                      renderCollapsedPhase({
-                        runId,
-                        phase,
-                        traces,
-                        live,
-                        foldResponseIntoPhase,
-                        responseNode,
-                        phaseEditStats,
-                      })
+                    {collapseActivity ? (
+                      <>
+                        {renderCollapsedPhase({
+                          runId,
+                          phase,
+                          traces,
+                          live,
+                          foldResponseIntoPhase,
+                          responseNode: foldResponseIntoPhase ? responseNode : null,
+                          phaseEditStats,
+                        })}
+                        {/* Live / pre-final: process folded, mid-respond stays readable. */}
+                        {showResponseInRail ? responseNode : null}
+                      </>
                     ) : (
                       <>
                         {phase.activity.map(({ segment }) =>
                           renderWorkflowSegment(runId, segment, traces, live),
                         )}
-                        {/* Intermediate responses with no preceding activity
-                            (or while still open) stay visible in the work rail. */}
-                        {foldResponseIntoPhase ? responseNode : null}
+                        {/* Intermediate response with no preceding activity. */}
+                        {showResponseInRail || foldResponseIntoPhase ? responseNode : null}
                       </>
                     )}
                   </div>
@@ -359,7 +360,16 @@ function TranscriptMessage({
         </section>
       ) : null}
       {finalText ? (
-        <MarkdownSegment cacheKey={runId} text={finalText} className="markdown-streaming" />
+        // Never use bare `runId` here: streamStore schedules full accumulated
+        // `snap.text` (mid + final) under that key. Exterior must use the
+        // trailing-response-only key from `exteriorMarkdownKey`.
+        <MarkdownSegment
+          cacheKey={
+            finalIndex >= 0 ? exteriorMarkdownKey(runId, finalIndex) : `${runId}:exterior:fallback`
+          }
+          text={finalText}
+          className="markdown-streaming"
+        />
       ) : null}
       {planNode}
       <MessageActions sourceText={finalText} canUndo={canUndo} onUndo={onUndo} />
@@ -440,15 +450,16 @@ function renderCollapsedPhase({
   if (isSingleThoughtPhase(phase)) {
     const thought = phase.activity[0]!.segment;
     if (thought.kind !== 'thought') return null;
-    return (
-      <ThoughtSegment
-        cacheKey={`${runId}:${thought.key}`}
-        segment={thought}
-        live={live}
-      >
-        {foldResponseIntoPhase ? responseNode : null}
-      </ThoughtSegment>
-    );
+    if (foldResponseIntoPhase) {
+      // Title must not read as "only thought" when a mid-respond is nested as sibling.
+      return (
+        <WorkflowPhaseSummary title={`${thoughtLabel(thought, live)} · Responded`}>
+          <ThoughtContent cacheKey={`${runId}:${thought.key}`} segment={thought} />
+          {responseNode}
+        </WorkflowPhaseSummary>
+      );
+    }
+    return <ThoughtSegment cacheKey={`${runId}:${thought.key}`} segment={thought} live={live} />;
   }
 
   // Tools-only with no intermediate response to fold: ActivityGroup already
@@ -503,13 +514,7 @@ function renderWorkflowSegment(
   const groupTraces = segment.traceKeys
     .map((key) => traces.find((trace) => trace.key === key))
     .filter((trace): trace is TraceEvent => Boolean(trace));
-  return (
-    <ActivityGroup
-      key={segment.key}
-      traces={groupTraces}
-      embedded={options.embedded}
-    />
-  );
+  return <ActivityGroup key={segment.key} traces={groupTraces} embedded={options.embedded} />;
 }
 
 /** Resolve tool traces that belong to one workflow phase (scoped, not global). */
@@ -534,8 +539,7 @@ function WorkflowPhaseSummary({
   children: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const showStats =
-    editStats != null && (editStats.additions > 0 || editStats.deletions > 0);
+  const showStats = editStats != null && (editStats.additions > 0 || editStats.deletions > 0);
   return (
     <section className={`transcript-phase${expanded ? ' is-expanded' : ''}`}>
       <button type="button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
@@ -594,23 +598,13 @@ function ThoughtSegment({
   cacheKey,
   segment,
   live,
-  children,
 }: {
   cacheKey: string;
   segment: Extract<TranscriptSegment, { kind: 'thought' }>;
   live: boolean;
-  /** Optional trailing content (e.g. folded intermediate response) shown when expanded. */
-  children?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const duration = Math.max(0, (segment.endedAt ?? Date.now()) - segment.startedAt);
-  const previewTruncated = isUpstreamTruncatedThought(segment.text);
-  const label =
-    live && segment.endedAt == null
-      ? 'Thinking…'
-      : duration < 500
-        ? 'Thought briefly'
-        : `Thought for ${formatWorkedDuration(duration)}`;
+  const label = thoughtLabel(segment, live);
   return (
     <section
       className={`transcript-thought${expanded ? ' is-expanded' : ''}${live && segment.endedAt == null ? ' is-running' : ''}`}
@@ -619,22 +613,44 @@ function ThoughtSegment({
         <span>{label}</span>
         <ChevronDown size={14} strokeWidth={1.7} aria-hidden />
       </button>
-      {expanded ? (
-        <>
-          {segment.text ? (
-            <MarkdownSegment
-              cacheKey={cacheKey}
-              text={segment.text}
-              className="transcript-thought-body"
-            />
-          ) : null}
-          {previewTruncated ? (
-            <div className="transcript-thought-truncated" role="note">
-              Preview truncated upstream
-            </div>
-          ) : null}
-          {children}
-        </>
+      {expanded ? <ThoughtContent cacheKey={cacheKey} segment={segment} /> : null}
+    </section>
+  );
+}
+
+function thoughtLabel(
+  segment: Extract<TranscriptSegment, { kind: 'thought' }>,
+  live: boolean,
+): string {
+  const duration = Math.max(0, (segment.endedAt ?? Date.now()) - segment.startedAt);
+  return live && segment.endedAt == null
+    ? 'Thinking…'
+    : duration < 500
+      ? 'Thought briefly'
+      : `Thought for ${formatWorkedDuration(duration)}`;
+}
+
+function ThoughtContent({
+  cacheKey,
+  segment,
+}: {
+  cacheKey: string;
+  segment: Extract<TranscriptSegment, { kind: 'thought' }>;
+}) {
+  const previewTruncated = isUpstreamTruncatedThought(segment.text);
+  return (
+    <section className="transcript-thought transcript-thought-content-only">
+      {segment.text ? (
+        <MarkdownSegment
+          cacheKey={cacheKey}
+          text={segment.text}
+          className="transcript-thought-body"
+        />
+      ) : null}
+      {previewTruncated ? (
+        <div className="transcript-thought-truncated" role="note">
+          Preview truncated upstream
+        </div>
       ) : null}
     </section>
   );

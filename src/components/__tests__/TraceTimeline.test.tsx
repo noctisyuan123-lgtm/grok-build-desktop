@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ActivityGroup, TraceTimeline } from '../TraceTimeline';
+import { ACTIVITY_SETTLE_MS, ActivityGroup, TraceTimeline } from '../TraceTimeline';
 import { streamStore } from '../../lib/streamStore';
 import type { TraceEvent } from '../../lib/traceParser';
 
@@ -109,7 +109,7 @@ describe('ActivityGroup staged tool motion', () => {
     expect(screen.getByText('Download dependencies')).toBeInTheDocument();
 
     act(() => {
-      vi.advanceTimersByTime(420);
+      vi.advanceTimersByTime(ACTIVITY_SETTLE_MS);
     });
     expect(container.querySelector('.activity-motion-settle')).toBeNull();
     expect(screen.queryByText('Download dependencies')).toBeNull();

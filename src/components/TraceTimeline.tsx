@@ -7,6 +7,9 @@ import { displayEdit, isEditTrace, sumEditStats } from '../lib/editStats';
 import type { TraceEvent, TraceStatus } from '../lib/traceParser';
 import { t } from '../i18n';
 
+/** Must match `--workflow-settle-ms` / `activity-row-settle` in App.css. */
+export const ACTIVITY_SETTLE_MS = 320;
+
 interface Props {
   runId: string;
   workedLabel?: string;
@@ -130,7 +133,8 @@ export function ActivityGroup({
           settleTimer.current = window.setTimeout(() => {
             setSettlingTrace(null);
             settleTimer.current = null;
-          }, 420);
+            // Keep in sync with --workflow-settle-ms / activity-row-settle.
+          }, ACTIVITY_SETTLE_MS);
         }
       }
       previousActiveKeyRef.current = activeKey;
@@ -148,7 +152,7 @@ export function ActivityGroup({
     settleTimer.current = window.setTimeout(() => {
       setSettlingTrace(null);
       settleTimer.current = null;
-    }, 420);
+    }, ACTIVITY_SETTLE_MS);
 
     return;
     // visible is read via tracesFingerprint; listing it would churn on every parent render.

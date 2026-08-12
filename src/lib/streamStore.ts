@@ -177,27 +177,53 @@ export function applyRunEvent(runId: string, event: GrokEvent, raw?: unknown): v
   } else if (event.type === 'text') {
     const { data } = event as Extract<GrokEvent, { type: 'text' }>;
     const nextText = (cur?.text ?? '') + data;
+    const nextTranscript = appendResponse(cur?.transcript ?? [], data);
     streamStore.patchRun(runId, {
       text: nextText,
       textChars: (cur?.textChars ?? 0) + data.length,
-      transcript: appendResponse(cur?.transcript ?? [], data),
+      transcript: nextTranscript,
       lastEventType: 'text',
       state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
     });
     // Lazy-import to keep the worker out of unit-test bundles (vitest jsdom).
     import('./markdownWorker')
       .then(({ scheduleMarkdownParse }) => {
+        // Full accumulated text under bare runId (legacy / non-transcript paths).
         scheduleMarkdownParse(runId, nextText);
+        // Exterior final body is only the trailing response segment — never mid
+        // + final stitched together. MessageItem reads `${runId}:exterior:i`.
+        const last = nextTranscript.at(-1);
+        if (last?.kind === 'response') {
+          scheduleMarkdownParse(
+            exteriorMarkdownKey(runId, nextTranscript.length - 1),
+            last.text,
+          );
+        }
       })
       .catch(() => {
         /* worker unavailable; MessageItem will render raw text */
       });
   } else if (event.type === 'end') {
-    // Also schedule a final parse so the post-stream HTML matches the last text.
-    if (cur?.text) {
+    // Final parse: bare runId keeps full text; exterior key is last respond only.
+    const lastResponseIndex = (() => {
+      const transcript = cur?.transcript ?? [];
+      for (let i = transcript.length - 1; i >= 0; i -= 1) {
+        if (transcript[i]?.kind === 'response') return i;
+      }
+      return -1;
+    })();
+    const lastResponse =
+      lastResponseIndex >= 0 ? cur?.transcript[lastResponseIndex] : null;
+    if (cur?.text || (lastResponse?.kind === 'response' && lastResponse.text)) {
       import('./markdownWorker')
         .then(({ scheduleMarkdownParse }) => {
-          scheduleMarkdownParse(runId, cur.text);
+          if (cur?.text) scheduleMarkdownParse(runId, cur.text);
+          if (lastResponse?.kind === 'response') {
+            scheduleMarkdownParse(
+              exteriorMarkdownKey(runId, lastResponseIndex),
+              lastResponse.text,
+            );
+          }
         })
         .catch(() => {});
     }
@@ -304,6 +330,11 @@ export function applyStateChange(
       ? closeThought(current?.transcript ?? [], payload.endedAt ?? Date.now())
       : (current?.transcript ?? []),
   });
+}
+
+/** Markdown cache key for the exterior final body (last respond segment only). */
+export function exteriorMarkdownKey(runId: string, responseIndex: number): string {
+  return `${runId}:exterior:${responseIndex}`;
 }
 
 const MAX_THOUGHT_CHARS = 20_000;

@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MessageItem } from '../MessageItem';
-import { applyRunEvent, applyStateChange, streamStore } from '../../lib/streamStore';
+import {
+  applyRunEvent,
+  applyStateChange,
+  exteriorMarkdownKey,
+  streamStore,
+} from '../../lib/streamStore';
 import { renderMarkdown } from '../../lib/markdown';
 
 beforeEach(() => {
@@ -14,8 +19,9 @@ describe('MessageItem sanitization', () => {
   it('renders hostile worker HTML without scripts, handlers, or javascript: URLs', () => {
     applyRunEvent('r1', { type: 'text', data: 'hi' });
     applyRunEvent('r1', { type: 'end', stopReason: 'EndTurn', sessionId: 's', requestId: 'q' });
+    // Exterior final reads the trailing-response markdown key, not bare runId.
     streamStore.setHtml(
-      'r1',
+      exteriorMarkdownKey('r1', 0),
       '<p>hello</p>' +
         '<script>window.__pwned = 1;</script>' +
         '<img src="x" onerror="window.__pwned = 1" alt="evil">' +
@@ -45,7 +51,10 @@ describe('MessageItem sanitization', () => {
   it('copies a fenced code block through the VS Code preview control', async () => {
     const user = userEvent.setup();
     applyRunEvent('copy-code', { type: 'text', data: 'code' });
-    streamStore.setHtml('copy-code', renderMarkdown('```sh\necho ok\n```'));
+    streamStore.setHtml(
+      exteriorMarkdownKey('copy-code', 0),
+      renderMarkdown('```sh\necho ok\n```'),
+    );
     render(<MessageItem runId="copy-code" />);
 
     await user.click(screen.getByRole('button', { name: 'Copy code block' }));
@@ -134,16 +143,15 @@ describe('MessageItem rendering states', () => {
     expect(screen.getByText('Final answer')).toBeInTheDocument();
     expect(screen.queryByText("I'll inspect it.")).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Worked for 4s' }));
-    // Thought-only intermediate phase: one "Thought for Ns" row (no nested
-    // "Thought" summary + second Thought disclosure).
+    // Thought + mid-respond phase: one summary (not a nested Thought wrapper).
     expect(screen.queryByRole('button', { name: /^Thought$/ })).toBeNull();
-    const thought = screen.getByRole('button', { name: 'Thought for 1s' });
+    const thought = screen.getByRole('button', { name: 'Thought for 1s · Responded' });
     expect(screen.queryByText("I'll inspect it.")).toBeNull();
     await user.click(thought);
     expect(screen.getByText('I should inspect it.')).toBeInTheDocument();
     expect(screen.getByText("I'll inspect it.")).toBeInTheDocument();
-    // Still only one thought disclosure after expand.
-    expect(screen.getAllByRole('button', { name: 'Thought for 1s' })).toHaveLength(1);
+    // Still only one phase disclosure after expand.
+    expect(screen.getAllByRole('button', { name: 'Thought for 1s · Responded' })).toHaveLength(1);
     const thoughtNode = container.querySelector('.transcript-thought');
     const responseNode = container.querySelector('.transcript-response');
     expect(thoughtNode).not.toBeNull();
@@ -269,11 +277,11 @@ describe('MessageItem rendering states', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'Worked for 3s' }));
-    // Single thought disclosure — not a "Thought" summary wrapping another row.
+    // Single thought + mid-respond — one "… · Responded" row, not nested Thought.
     expect(screen.queryByRole('button', { name: /^Thought$/ })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Thought for 1s' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Thought for 1s · Responded' })).toBeInTheDocument();
     expect(screen.queryByText('I will dig deeper.')).toBeNull();
-    await user.click(screen.getByRole('button', { name: 'Thought for 1s' }));
+    await user.click(screen.getByRole('button', { name: 'Thought for 1s · Responded' }));
     expect(screen.getByText('Opening look.')).toBeInTheDocument();
     expect(screen.getByText('I will dig deeper.')).toBeInTheDocument();
   });
@@ -308,7 +316,7 @@ describe('MessageItem rendering states', () => {
     expect(screen.getAllByText('Final answer')).toHaveLength(1);
   });
 
-  it('folds a closed intermediate phase while later tools are still running', async () => {
+  it('keeps a closed intermediate response visible while later tools are still running', async () => {
     applyStateChange('live-after-intermediate', { state: 'Running', startedAt: Date.now() });
     render(
       <MessageItem
@@ -338,13 +346,185 @@ describe('MessageItem rendering states', () => {
       />,
     );
 
-    // Intermediate response closed the first phase even though finalIndex is
-    // still -1 (tools are running after it).
+    // Process before the mid-respond folds; the mid-respond itself stays
+    // independently readable (not nested under thought). Later tools continue.
     expect(screen.getByRole('button', { name: 'Thought for 1s' })).toBeInTheDocument();
-    expect(screen.queryByText("I'll inspect next.")).toBeNull();
-    expect(screen.getByText('Read src/App.tsx')).toBeInTheDocument();
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Thought for 1s' }));
+    expect(screen.queryByText('First look.')).toBeNull();
     expect(screen.getByText("I'll inspect next.")).toBeInTheDocument();
+    expect(screen.getByText('Read src/App.tsx')).toBeInTheDocument();
+  });
+
+  it('folds thought/tools between intermediate responds while the mid-respond stays readable (live)', async () => {
+    applyStateChange('live-phase-between-responds', { state: 'Running', startedAt: Date.now() });
+    render(
+      <MessageItem
+        runId="live-phase-between-responds"
+        autoExpandWork
+        fallbackTranscript={[
+          {
+            key: 'thought:0',
+            kind: 'thought',
+            text: 'First look.',
+            startedAt: 1_000,
+            endedAt: 1_500,
+          },
+          { key: 'tools:1', kind: 'tools', traceKeys: ['tool:read', 'tool:search'] },
+          {
+            key: 'thought:2',
+            kind: 'thought',
+            text: 'Then reconsider.',
+            startedAt: 2_000,
+            endedAt: 2_500,
+          },
+          { key: 'response:3', kind: 'response', text: 'I will inspect next.' },
+          { key: 'tools:4', kind: 'tools', traceKeys: ['tool:write'] },
+        ]}
+        fallbackTraces={[
+          {
+            key: 'tool:read',
+            kind: 'tool',
+            label: 'Read src/App.tsx',
+            status: 'done',
+            startedAt: 1_500,
+            endedAt: 1_800,
+          },
+          {
+            key: 'tool:search',
+            kind: 'tool',
+            label: 'Search MessageItem',
+            status: 'done',
+            startedAt: 1_800,
+            endedAt: 2_000,
+          },
+          {
+            key: 'tool:write',
+            kind: 'tool',
+            label: 'Record usage',
+            status: 'running',
+            startedAt: 3_000,
+            endedAt: null,
+          },
+        ]}
+      />,
+    );
+
+    // Closed phase process is one summary; mid-respond is outside that summary.
+    const phaseSummary = screen.getByRole('button', { name: 'Thought and used 2 tools' });
+    expect(phaseSummary).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('First look.')).toBeNull();
+    expect(screen.queryByText('Read src/App.tsx')).toBeNull();
+    expect(screen.getByText('I will inspect next.')).toBeInTheDocument();
+    // Open tools after the mid-respond stay live.
+    expect(screen.getByText('Record usage')).toBeInTheDocument();
+
+    await userEvent.setup().click(phaseSummary);
+    // Embedded tool rows appear; thought bodies stay behind nested Thought rows.
+    expect(screen.getByText('Read src/App.tsx')).toBeInTheDocument();
+    expect(screen.getByText('Search MessageItem')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Thought for 1s' })).toHaveLength(2);
+    // Mid-respond stays a sibling of the process pack, never a thought child.
+    expect(screen.getByText('I will inspect next.').closest('.transcript-thought')).toBeNull();
+    expect(screen.getByText('I will inspect next.').closest('.transcript-phase-body')).toBeNull();
+  });
+
+  it('does not paint mid-respond text into the exterior final via runId html cache', async () => {
+    const user = userEvent.setup();
+    // streamStore / markdown worker keys full accumulated text under bare runId.
+    // Exterior final must use a separate cache key so polluted run html cannot
+    // re-surface intermediate responds below Worked for.
+    streamStore.setHtml(
+      'msg:mid-as-final',
+      '<p>快速复核 weclaw 现状。能用 weclaw，但半残。</p>',
+    );
+    const { container } = render(
+      <MessageItem
+        runId="msg:mid-as-final"
+        durationMs={20_000}
+        fallbackText="快速复核 weclaw 现状。能用 weclaw，但半残。"
+        fallbackTranscript={[
+          {
+            key: 'thought:0',
+            kind: 'thought',
+            text: 'The user is asking about weclaw.',
+            startedAt: 1_000,
+            endedAt: 1_200,
+          },
+          { key: 'response:1', kind: 'response', text: '快速复核 weclaw 现状。' },
+          { key: 'tools:2', kind: 'tools', traceKeys: ['tool:1'] },
+          {
+            key: 'thought:3',
+            kind: 'thought',
+            text: 'Confirm residual issues.',
+            startedAt: 3_000,
+            endedAt: 3_400,
+          },
+          { key: 'response:4', kind: 'response', text: '能用 weclaw，但半残。' },
+        ]}
+        fallbackTraces={[
+          {
+            key: 'tool:1',
+            kind: 'tool',
+            label: 'Read weclaw notes',
+            status: 'done',
+            startedAt: 2_000,
+            endedAt: 2_500,
+          },
+        ]}
+      />,
+    );
+
+    const exterior = container.querySelector('.markdown-streaming');
+    expect(exterior).toHaveTextContent('能用 weclaw，但半残。');
+    expect(exterior).not.toHaveTextContent('快速复核');
+    // Mid stays under Work for until expanded — not duplicated outside.
+    expect(screen.queryByText('快速复核 weclaw 现状。')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Worked for 20s' }));
+    await user.click(screen.getByRole('button', { name: 'Thought briefly · Responded' }));
+    expect(screen.getByText('快速复核 weclaw 现状。')).toBeInTheDocument();
+    // Still only one exterior final, and it did not grow mid text.
+    expect(container.querySelector('.markdown-streaming')).toHaveTextContent('能用 weclaw，但半残。');
+    expect(container.querySelector('.markdown-streaming')).not.toHaveTextContent('快速复核');
+  });
+
+  it('keeps a folded intermediate response as a sibling of thought content', async () => {
+    const user = userEvent.setup();
+    render(
+      <MessageItem
+        runId="msg:response-sibling"
+        durationMs={3_000}
+        fallbackText="Final answer"
+        fallbackTranscript={[
+          {
+            key: 'thought:0',
+            kind: 'thought',
+            text: 'Inspect first.',
+            startedAt: 1_000,
+            endedAt: 2_000,
+          },
+          { key: 'response:1', kind: 'response', text: 'I will inspect next.' },
+          { key: 'tools:2', kind: 'tools', traceKeys: ['tool:1'] },
+          { key: 'response:3', kind: 'response', text: 'Final answer' },
+        ]}
+        fallbackTraces={[
+          {
+            key: 'tool:1',
+            kind: 'tool',
+            label: 'Read src/App.tsx',
+            status: 'done',
+            startedAt: 2_000,
+            endedAt: 2_100,
+          },
+        ]}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Worked for 3s' }));
+    const thought = screen.getByRole('button', { name: 'Thought for 1s · Responded' });
+    expect(screen.queryByText('I will inspect next.')).toBeNull();
+    await user.click(thought);
+    const response = screen.getByText('I will inspect next.');
+    screen.getByText('Inspect first.');
+    expect(response.closest('.transcript-thought')).toBeNull();
   });
 
   it('shows phase-scoped +/− on a collapsed intermediate-response heading (+2/-1 + +3/-4 => +5/-5)', async () => {
@@ -532,9 +712,7 @@ describe('MessageItem rendering states', () => {
   it('does not promote an intermediate response while Done arrives before end', async () => {
     applyStateChange('done-before-end', { state: 'Running', startedAt: Date.now() });
     applyRunEvent('done-before-end', { type: 'text', data: 'I am still working.' });
-    const { container, rerender } = render(
-      <MessageItem runId="done-before-end" autoExpandWork />,
-    );
+    const { container, rerender } = render(<MessageItem runId="done-before-end" autoExpandWork />);
 
     await act(async () => {
       applyStateChange('done-before-end', { state: 'Done' });
@@ -556,6 +734,56 @@ describe('MessageItem rendering states', () => {
     });
     expect(container.querySelector('.markdown-streaming')).toHaveTextContent('I am still working.');
     expect(container.querySelector('.transcript-response')).toBeNull();
+  });
+
+  it('keeps prior mid-responds visible while a later mid-respond is streaming (live multi-mid)', async () => {
+    applyStateChange('live-multi-mid', { state: 'Running', startedAt: Date.now() });
+    render(
+      <MessageItem
+        runId="live-multi-mid"
+        autoExpandWork
+        fallbackTranscript={[
+          {
+            key: 'thought:0',
+            kind: 'thought',
+            text: 'Look first.',
+            startedAt: 1_000,
+            endedAt: 1_400,
+          },
+          { key: 'response:1', kind: 'response', text: 'Mid one: checking weclaw.' },
+          { key: 'tools:2', kind: 'tools', traceKeys: ['tool:a'] },
+          {
+            key: 'thought:3',
+            kind: 'thought',
+            text: 'Then reconsider.',
+            startedAt: 3_000,
+            endedAt: 3_300,
+          },
+          // Trailing respond is provisional exterior while live — prior mids
+          // must remain in the work rail, not disappear into folded phases.
+          { key: 'response:4', kind: 'response', text: 'Mid two: still residual.' },
+        ]}
+        fallbackTraces={[
+          {
+            key: 'tool:a',
+            kind: 'tool',
+            label: 'Read weclaw notes',
+            status: 'done',
+            startedAt: 2_000,
+            endedAt: 2_400,
+          },
+        ]}
+      />,
+    );
+
+    // Current trailing mid is exterior; earlier mid stays readable in the rail.
+    expect(screen.getByText('Mid one: checking weclaw.')).toBeInTheDocument();
+    expect(screen.getByText('Mid two: still residual.')).toBeInTheDocument();
+    // Process before each closed mid still folds.
+    expect(screen.getByRole('button', { name: 'Thought briefly' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Thought and used 1 tool' })).toBeInTheDocument();
+    // Prior mid is not buried inside a collapsed phase body.
+    expect(screen.getByText('Mid one: checking weclaw.').closest('.transcript-phase-body')).toBeNull();
   });
 
   it('moves an intermediate response back into the work rail when a tool starts', async () => {
@@ -822,7 +1050,7 @@ describe('MessageItem rendering states', () => {
 
   it('renders parsed markdown while the run is still streaming', () => {
     applyRunEvent('r3', { type: 'text', data: '# heading' });
-    streamStore.setHtml('r3', '<h1>heading</h1>');
+    streamStore.setHtml(exteriorMarkdownKey('r3', 0), '<h1>heading</h1>');
     const { container } = render(<MessageItem runId="r3" />);
     expect(container.querySelector('h1')).toHaveTextContent('heading');
     expect(container.querySelector('pre.streaming-raw')).toBeNull();
