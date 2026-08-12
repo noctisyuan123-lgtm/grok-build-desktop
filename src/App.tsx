@@ -12,6 +12,7 @@ import './App.css';
 import { cancelRun, ensureStreamListenersAttached } from './lib/grok';
 import { hasTauriRuntime } from './lib/runtime';
 import { streamStore } from './lib/streamStore';
+import { resolvePlanEntriesFromTraces, shouldShowPlan } from './components/PlanTodoList';
 import { MessageList, type MessageRef } from './components/MessageList';
 import type { ComposerHandle } from './components/Composer';
 import { QueueDock } from './components/QueueDock';
@@ -75,6 +76,12 @@ function App() {
   // The textarea lives inside Composer (uncontrolled ref). We hold a
   // ComposerHandle so starter cards / history clicks / drafts can seed it.
   const composerRef = useRef<ComposerHandle | null>(null);
+  // After Undo, ACP cannot rewind the loaded session (session/load keeps the
+  // undone turn). The next submit starts a fresh session and re-seeds only
+  // the still-visible pre-undo messages as model context.
+  const undoSessionPlanRef = useRef<{
+    replayMessages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  } | null>(null);
   const setComposerValue = useCallback((value: string) => {
     composerRef.current?.setValue(value);
   }, []);
@@ -261,6 +268,8 @@ function App() {
   // arrays) and restoring it re-mirrors into the active tab automatically.
   function clearRunHistory() {
     const snapshot = { lastRun, history, messages, terminalLines, totalRuns };
+    const priorUndoPlan = undoSessionPlanRef.current;
+    undoSessionPlanRef.current = null;
     setLastRun(null);
     setHistory([]);
     setMessages([]);
@@ -270,6 +279,7 @@ function App() {
     showUndoToast({
       text: t('notices.cleared'),
       undo: () => {
+        undoSessionPlanRef.current = priorUndoPlan;
         setLastRun(snapshot.lastRun);
         setHistory(snapshot.history);
         setMessages(snapshot.messages);
@@ -336,6 +346,9 @@ function App() {
                 ? { ...segment, text: segment.text.slice(-20_000) }
                 : segment,
             );
+          // Extract compact plan checklist while task traces still carry `raw`.
+          const planEntries =
+            resolvePlanEntriesFromTraces(snap.traces) ?? message.meta?.planEntries;
           return {
             ...message,
             content: snap.text || message.content,
@@ -345,6 +358,7 @@ function App() {
               ...(durationMs == null ? {} : { durationMs }),
               ...(traces.length === 0 ? {} : { traces }),
               ...(transcript.length === 0 ? {} : { transcript }),
+              ...(planEntries?.length ? { planEntries } : {}),
               ...(snap.sessionId ? { sessionId: snap.sessionId } : {}),
             },
           };
@@ -386,8 +400,14 @@ function App() {
         disabled: messages.length === 0,
         onClick: () => clearRunHistory(),
       },
-      ...(grokIsRunning && activeRunId
-        ? [{ label: 'Stop current run', danger: true, onClick: () => stopRun(activeRunId) }]
+      ...(activeSessionIsRunning && activeSessionRunId
+        ? [
+            {
+              label: 'Stop current run',
+              danger: true,
+              onClick: () => stopRun(activeSessionRunId),
+            },
+          ]
         : []),
       { label: 'Settings…', separator: true, onClick: () => setSettingsOpen(true) },
     );
@@ -408,9 +428,30 @@ function App() {
   // buildGrokArgs/buildGrokRules are pure functions in app/grokArgs.ts; this
   // closure snapshots the current run config for the Composer's submit path.
   function buildRunArgs(): string[] {
-    const resumeSessionId = [...messages]
+    // Run state is global because the Rust queue is global, but session
+    // continuation is not. Only the assistant turn in the currently visible
+    // session may parent a queued follow-up. A script in another session must
+    // not force a new session through `-c`, nor make its reply look like it
+    // belongs to the current tab.
+    const activeSessionHasInflightRun = messages.some((message) => {
+      if (message.role !== 'assistant' || !message.runId) return false;
+      const state = streamStore.getRunSnapshot(message.runId)?.state;
+      return state === 'queued' || state === 'running';
+    });
+    const previousSessionId = [...messages]
       .reverse()
       .find((message) => message.role === 'assistant' && message.meta?.sessionId)?.meta?.sessionId;
+    // A turn currently running is the parent of anything newly queued. Its
+    // session id does not exist yet, so do not accidentally fork from the
+    // older completed turn found above.
+    const undoPlan = undoSessionPlanRef.current;
+    // After Undo: never resume the old ACP head (it still holds the undone
+    // turn). Otherwise continue from the visible conversation's latest id.
+    const resumeSessionId = undoPlan
+      ? null
+      : activeSessionHasInflightRun
+        ? null
+        : previousSessionId;
     return buildGrokArgs({
       mode,
       activeModel,
@@ -425,11 +466,12 @@ function App() {
       selfCheck,
       codingCwd,
       resumeSessionId,
-      // Never guess with cwd-global `-c`: on legacy conversations (or a
-      // queued turn whose parent has not ended) it could select an undone or
-      // entirely different tab's session. A missing explicit head starts a
-      // clean branch; once this release records a head, follow-ups are exact.
+      // ACP intentionally does not interpret the CLI's cwd-global `-c`.
+      // Composer sends the active run id separately; the queue resolves that
+      // exact run's emitted session id just before launching this follow-up.
       continueLatestSession: false,
+      forceNewSession: Boolean(undoPlan),
+      replayMessages: undoPlan?.replayMessages,
     });
   }
 
@@ -440,6 +482,8 @@ function App() {
     rawText?: string;
     attachments: ComposerAttachment[];
   }) {
+    // Post-Undo re-seed has been consumed. Later turns resume the new session.
+    undoSessionPlanRef.current = null;
     const now = Date.now();
     const userMessageId = makeId('u');
     const assistantMessageId = makeId('a');
@@ -670,7 +714,16 @@ function App() {
   const workspacePath = codingCwd.trim() || 'No project selected';
   const activeRun = useActiveRun();
   const grokIsRunning = Boolean(activeRun && activeRun.state === 'running');
-  const activeRunId = activeRun?.id ?? null;
+  const activeSessionRunId = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message?.role !== 'assistant' || !message.runId) continue;
+      const state = streamStore.getRunSnapshot(message.runId)?.state;
+      if (state === 'queued' || state === 'running') return message.runId;
+    }
+    return null;
+  }, [messages, activeRun?.id, activeRun?.state]);
+  const activeSessionIsRunning = activeSessionRunId != null;
 
   // Refresh the static preview when a streaming grok run finishes. The main
   // chat path (enqueue_run) never touches lastRun, so keying only on it left
@@ -688,7 +741,7 @@ function App() {
   // no longer visible. The prompt is restored verbatim to the composer, and
   // the existing undo toast makes this destructive operation recoverable.
   function undoAssistantResponse(messageId: string) {
-    if (grokIsRunning) return;
+    if (activeSessionIsRunning) return;
     const assistantIndex = messages.findIndex((message) => message.id === messageId);
     if (assistantIndex !== messages.length - 1) return;
     const assistant = messages[assistantIndex];
@@ -705,12 +758,24 @@ function App() {
 
     const snapshot = messages;
     const previousDraft = composerRef.current?.getValue() ?? '';
-    setMessages(messages.slice(0, assistantIndex - 1));
+    const preserved = messages.slice(0, assistantIndex - 1);
+    // Keep still-visible turns as replay context; exclude the undone pair.
+    // ACP cannot rewind, so the next submit starts fresh and re-seeds these.
+    undoSessionPlanRef.current = {
+      replayMessages: preserved
+        .filter((message) => message.role === 'user' || message.role === 'assistant')
+        .map((message) => ({
+          role: message.role as 'user' | 'assistant',
+          content: message.content,
+        })),
+    };
+    setMessages(preserved);
     updatePrompt(user.content);
     composerRef.current?.focus();
     showUndoToast({
       text: t('message.turnUndone'),
       undo: () => {
+        undoSessionPlanRef.current = null;
         setMessages(snapshot);
         updatePrompt(previousDraft);
       },
@@ -744,12 +809,14 @@ function App() {
             durationMs: m.meta?.durationMs,
             traces: m.meta?.traces,
             transcript: m.meta?.transcript,
+            planEntries: m.meta?.planEntries,
+            showPlan: shouldShowPlan(messages, index),
             autoExpandWork: m.status === 'streaming',
             id: m.id,
-            canUndo: index === latestIndex && m.status !== 'streaming' && !grokIsRunning,
+            canUndo: index === latestIndex && m.status !== 'streaming' && !activeSessionIsRunning,
           },
     );
-  }, [grokIsRunning, messageAttachments, messages]);
+  }, [activeSessionIsRunning, messageAttachments, messages]);
   return (
     <main
       className={`app-shell theme-${themeMode}${sidebarCollapsed ? ' sidebar-collapsed' : ''}${sidebarTransitionReady ? ' sidebar-transition-ready' : ''}`}
@@ -889,8 +956,9 @@ function App() {
               setActionPolicy={setActionPolicy}
               codingWorkflow={codingWorkflow}
               applyCodingPreset={applyCodingPreset}
-              grokIsRunning={grokIsRunning}
-              activeRunId={activeRunId}
+              grokIsRunning={activeSessionIsRunning}
+              activeRunId={activeSessionRunId}
+              laneId={activeTabId}
               stopRun={stopRun}
             />
           </div>

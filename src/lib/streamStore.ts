@@ -56,10 +56,14 @@ export interface QueuedRunMeta {
   cwd?: string;
   state: 'Queued' | 'Running' | 'Done' | 'Cancelled' | 'Failed';
   enqueuedAt: number;
+  laneId?: string;
 }
 
 interface QueueSnapshot {
+  /** First concurrent active for backward compatibility. Prefer `activeIds`. */
   active: string | null;
+  /** Every run currently executing (one per busy lane). */
+  activeIds: string[];
   items: QueuedRunMeta[];
 }
 
@@ -68,7 +72,7 @@ type Listener = () => void;
 class StreamStore {
   private runs = new Map<string, RunSnapshot>();
   private html = new Map<string, string>();
-  private queue: QueueSnapshot = { active: null, items: [] };
+  private queue: QueueSnapshot = { active: null, activeIds: [], items: [] };
   private listeners = new Set<Listener>();
 
   subscribe = (l: Listener): (() => void) => {
@@ -83,8 +87,18 @@ class StreamStore {
   getRunSnapshot = (id: string): RunSnapshot | undefined => this.runs.get(id);
   getHtml = (id: string): string | undefined => this.html.get(id);
   getQueueSnapshot = (): QueueSnapshot => this.queue;
-  getActiveRunSnapshot = (): RunSnapshot | undefined =>
-    this.queue.active ? this.runs.get(this.queue.active) : undefined;
+  /**
+   * Snapshot for a single concurrent active. Prefers `activeIds[0]`, then the
+   * legacy `active` field. Session-scoped UI should look up runs by message
+   * `runId` instead of this global head.
+   */
+  getActiveRunSnapshot = (): RunSnapshot | undefined => {
+    for (const id of this.queue.activeIds) {
+      const snap = this.runs.get(id);
+      if (snap) return snap;
+    }
+    return this.queue.active ? this.runs.get(this.queue.active) : undefined;
+  };
 
   patchRun = (id: string, patch: Partial<RunSnapshot>): void => {
     const cur = this.runs.get(id) ?? this.makeEmpty(id);
@@ -101,8 +115,19 @@ class StreamStore {
     this.notify();
   };
 
-  setQueue = (q: QueueSnapshot): void => {
-    this.queue = q;
+  setQueue = (q: {
+    active?: string | null;
+    activeIds?: string[];
+    items?: QueuedRunMeta[];
+  }): void => {
+    const activeIds =
+      q.activeIds ??
+      (q.active ? [q.active] : []);
+    this.queue = {
+      active: q.active ?? activeIds[0] ?? null,
+      activeIds,
+      items: q.items ?? [],
+    };
     this.notify();
   };
 
@@ -130,7 +155,7 @@ class StreamStore {
   __reset = (): void => {
     this.runs.clear();
     this.html.clear();
-    this.queue = { active: null, items: [] };
+    this.queue = { active: null, activeIds: [], items: [] };
     this.listeners.clear();
   };
 }
@@ -341,8 +366,17 @@ function reconcileOpenTraces(traces: TraceEvent[], status: TraceStatus): TraceEv
   );
 }
 
-export function replaceQueue(q: QueueSnapshot): void {
-  streamStore.setQueue(q);
+export function replaceQueue(
+  q: Partial<QueueSnapshot> & { items: QueuedRunMeta[] },
+): void {
+  const activeIds =
+    q.activeIds ??
+    (q.active ? [q.active] : streamStore.getQueueSnapshot().activeIds);
+  streamStore.setQueue({
+    active: q.active ?? activeIds[0] ?? null,
+    activeIds,
+    items: q.items,
+  });
 }
 
 /**
@@ -407,9 +441,16 @@ export async function attachTauriListeners(): Promise<void> {
         }>('grok-desktop://run-state-changed', (e) => applyStateChange(e.payload.runId, e.payload)),
       );
       attached.push(
-        await listen<{ active: string | null; queue: QueuedRunMeta[] }>(
-          'grok-desktop://queue-changed',
-          (e) => replaceQueue({ active: e.payload.active, items: e.payload.queue }),
+        await listen<{
+          active: string | null;
+          activeIds?: string[];
+          queue: QueuedRunMeta[];
+        }>('grok-desktop://queue-changed', (e) =>
+          replaceQueue({
+            active: e.payload.active,
+            activeIds: e.payload.activeIds,
+            items: e.payload.queue,
+          }),
         ),
       );
       unlistenFns = attached;

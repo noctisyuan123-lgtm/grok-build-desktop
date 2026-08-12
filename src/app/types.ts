@@ -1,6 +1,6 @@
 // Shared app-level types and runtime type guards.
 import type { ToolRun } from '../lib/grok';
-import type { TraceEvent } from '../lib/traceParser';
+import type { PlanEntry, TraceEvent } from '../lib/traceParser';
 import type { TranscriptSegment } from '../lib/streamStore';
 
 export type Mode = 'standard' | 'coding';
@@ -99,6 +99,11 @@ export type ChatMessage = {
     traces?: TraceEvent[];
     /** Ordered Thought / Respond / Tool transcript for restored sessions. */
     transcript?: TranscriptSegment[];
+    /**
+     * Latest structured plan checklist for this assistant turn. Persisted so
+     * unfinished (and just-finished) plans remain after the live run ends.
+     */
+    planEntries?: PlanEntry[];
     exitCode?: number | null;
     workflow?: string;
     /** Grok session head after this assistant turn. */

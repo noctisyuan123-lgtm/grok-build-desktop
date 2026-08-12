@@ -27,7 +27,7 @@ function renderComposer(overrides: Partial<Parameters<typeof Composer>[0]> = {})
       {...overrides}
     />,
   );
-  const textarea = screen.getByPlaceholderText('Ask Grok…') as HTMLTextAreaElement;
+  const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
   return { ...utils, onEnqueued, onError, textarea };
 }
 
@@ -36,14 +36,58 @@ describe('Composer submit', () => {
     mockIPC(() => undefined);
     const onStop = vi.fn();
     const user = userEvent.setup();
+    streamStore.patchRun('active-run', { state: 'running' });
+    streamStore.setQueue({ active: 'active-run', activeIds: ['active-run'], items: [] });
     const { container } = renderComposer({ onStop });
 
+    // Icon-only Stop occupies the send slot; no separate text Stop control.
     expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Enqueue' })).not.toBeInTheDocument();
     const stop = screen.getByRole('button', { name: 'Stop run' });
     expect(stop).toHaveClass('composer-send', 'composer-stop');
     expect(container.querySelector('.composer-stop-square')).toBeInTheDocument();
+    expect(stop).not.toHaveTextContent('Stop');
     await user.click(stop);
     expect(onStop).toHaveBeenCalledTimes(1);
+  });
+
+  it('submits (enqueues) on Enter while Stop occupies the send slot', async () => {
+    const calls: Array<{ cmd: string; payload: unknown }> = [];
+    mockIPC((cmd, payload) => {
+      calls.push({ cmd, payload });
+      return cmd === 'enqueue_run' ? { runId: 'queued-1', position: 1 } : undefined;
+    });
+    const onStop = vi.fn();
+    const user = userEvent.setup();
+    streamStore.patchRun('active-run', { state: 'running' });
+    streamStore.setQueue({ active: 'active-run', activeIds: ['active-run'], items: [] });
+    const { onEnqueued, textarea } = renderComposer({
+      onStop,
+      parentRunId: 'parent-run',
+      laneId: 'tab-session-1',
+    });
+
+    await user.type(textarea, 'follow-up after long script');
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(onEnqueued).toHaveBeenCalledTimes(1));
+    expect(onEnqueued.mock.calls[0][0].prompt).toBe('follow-up after long script');
+    expect(calls.find((call) => call.cmd === 'enqueue_run')?.payload).toMatchObject({
+      parentRunId: 'parent-run',
+      laneId: 'tab-session-1',
+    });
+    expect(onStop).not.toHaveBeenCalled();
+  });
+
+  it('keeps the ArrowUp Send button when no onStop is provided even if another session is inflight', async () => {
+    // Other-session runs must not replace this session's send control, and
+    // concurrent lanes must not flip this free session to Enqueue either.
+    mockIPC(() => undefined);
+    streamStore.patchRun('other-run', { state: 'running' });
+    streamStore.setQueue({ active: 'other-run', activeIds: ['other-run'], items: [] });
+    renderComposer({ sessionRunIds: [], laneId: 'this-session' });
+
+    expect(screen.getByRole('button', { name: 'Send' })).toHaveClass('composer-send');
+    expect(screen.queryByRole('button', { name: 'Stop run' })).not.toBeInTheDocument();
   });
 
   it('enqueues the typed prompt with the built args plus -p, then clears the box', async () => {
@@ -102,6 +146,31 @@ describe('Composer submit', () => {
     await user.keyboard('{Enter}');
     expect(onEnqueued).not.toHaveBeenCalled();
     expect(invokeSpy).not.toHaveBeenCalledWith('enqueue_run', expect.anything());
+  });
+
+  it('restores a locally deleted draft with Cmd/Ctrl+Z without a server round trip', async () => {
+    mockIPC(() => undefined);
+    const user = userEvent.setup();
+    const { textarea } = renderComposer();
+
+    await user.type(textarea, 'keep this draft');
+    expect(textarea.value).toBe('keep this draft');
+
+    // Accidental select-all + delete.
+    textarea.setSelectionRange(0, textarea.value.length);
+    await user.keyboard('{Backspace}');
+    expect(textarea.value).toBe('');
+
+    // Textarea-scoped undo — not message undo, not a global window listener.
+    await user.keyboard('{Meta>}z{/Meta}');
+    expect(textarea.value).toBe('keep this draft');
+
+    // Ctrl+Z path (non-mac / same handler).
+    textarea.setSelectionRange(0, textarea.value.length);
+    await user.keyboard('{Backspace}');
+    expect(textarea.value).toBe('');
+    await user.keyboard('{Control>}z{/Control}');
+    expect(textarea.value).toBe('keep this draft');
   });
 
   it('surfaces an enqueue failure via onError and keeps the prompt for retry', async () => {

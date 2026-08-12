@@ -17,11 +17,14 @@ async fn insert_and_fetch_run() {
         ended_at: None,
         stop_reason: None,
         error: None,
+        lane_id: "tab-a".into(),
+        parent_run_id: None,
     };
 
     db.insert_run(&rec).await.expect("insert");
     let got = db.fetch_run(&id).await.expect("fetch").expect("not none");
     assert_eq!(got.prompt, "hello");
+    assert_eq!(got.lane_id, "tab-a");
     assert!(matches!(got.state, RunState::Queued));
 }
 
@@ -40,6 +43,8 @@ async fn update_state_persists() {
         ended_at: None,
         stop_reason: None,
         error: None,
+        lane_id: String::new(),
+        parent_run_id: Some("parent-1".into()),
     };
     db.insert_run(&rec).await.unwrap();
 
@@ -57,6 +62,7 @@ async fn update_state_persists() {
     let got = db.fetch_run(&id).await.unwrap().unwrap();
     assert!(matches!(got.state, RunState::Running));
     assert!(got.started_at.is_some());
+    assert_eq!(got.parent_run_id.as_deref(), Some("parent-1"));
 }
 
 #[tokio::test]
@@ -78,6 +84,8 @@ async fn vacuum_drops_old_finished_runs() {
             ended_at: Some(ended),
             stop_reason: Some("EndTurn".into()),
             error: None,
+            lane_id: String::new(),
+            parent_run_id: None,
         })
         .await
         .unwrap();

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildGrokArgs, buildGrokRules, type GrokRunConfig } from '../grokArgs';
+import {
+  buildConversationReplayBlock,
+  buildGrokArgs,
+  buildGrokRules,
+  type GrokRunConfig,
+} from '../grokArgs';
 
 function config(overrides: Partial<GrokRunConfig> = {}): GrokRunConfig {
   return {
@@ -133,5 +138,78 @@ describe('buildGrokArgs', () => {
     const queued = buildGrokArgs(config({ continueLatestSession: true }));
     expect(queued).toContain('-c');
     expect(queued).toContain('--fork-session');
+  });
+
+  it('never combines explicit resume with queue-time -c', () => {
+    // resumeSessionId wins; continueLatest is only the pre-session-id fallback.
+    const args = buildGrokArgs(
+      config({ resumeSessionId: 's-explicit', continueLatestSession: true }),
+    );
+    expect(flagValue(args, '--resume')).toBe('s-explicit');
+    expect(args).not.toContain('-c');
+  });
+
+  it('starts a clean branch when neither resume nor continue is set', () => {
+    const args = buildGrokArgs(config());
+    expect(args).not.toContain('--resume');
+    expect(args).not.toContain('-c');
+    expect(args).not.toContain('--fork-session');
+  });
+
+  it('forceNewSession drops resume/continue so the undone turn cannot remain in context', () => {
+    const args = buildGrokArgs(
+      config({
+        forceNewSession: true,
+        resumeSessionId: 'session-with-undone-turn',
+        continueLatestSession: true,
+      }),
+    );
+    expect(args).not.toContain('--resume');
+    expect(args).not.toContain('-c');
+    expect(args).not.toContain('--fork-session');
+  });
+
+  it('re-seeds only visible pre-undo turns into --rules when forcing a fresh session', () => {
+    const args = buildGrokArgs(
+      config({
+        forceNewSession: true,
+        resumeSessionId: 'session-with-undone-turn',
+        replayMessages: [
+          { role: 'user', content: 'First question' },
+          { role: 'assistant', content: 'First answer' },
+          { role: 'user', content: '  ' }, // blank → omitted
+        ],
+      }),
+    );
+    expect(args).not.toContain('--resume');
+    const rules = flagValue(args, '--rules')!;
+    expect(rules).toContain('re-seeded into a fresh session after Undo');
+    expect(rules).toContain('First question');
+    expect(rules).toContain('First answer');
+    // Coding rules still present alongside the replay block.
+    expect(rules).toContain('senior engineer');
+  });
+
+  it('does not inject a replay block when forceNewSession has no prior turns', () => {
+    const args = buildGrokArgs(config({ forceNewSession: true, replayMessages: [] }));
+    const rules = flagValue(args, '--rules');
+    expect(rules ?? '').not.toContain('re-seeded into a fresh session after Undo');
+  });
+});
+
+describe('buildConversationReplayBlock', () => {
+  it('returns null for empty or blank-only messages', () => {
+    expect(buildConversationReplayBlock([])).toBeNull();
+    expect(buildConversationReplayBlock([{ role: 'user', content: '   ' }])).toBeNull();
+  });
+
+  it('formats visible turns without inventing the undone pair', () => {
+    const block = buildConversationReplayBlock([
+      { role: 'user', content: 'Keep me' },
+      { role: 'assistant', content: 'Visible reply' },
+    ])!;
+    expect(block).toContain('User:\nKeep me');
+    expect(block).toContain('Assistant:\nVisible reply');
+    expect(block).toContain('intentionally absent');
   });
 });

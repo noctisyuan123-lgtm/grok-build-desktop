@@ -124,6 +124,46 @@ function typeOf(obj: Record<string, unknown>): string {
     .trim();
 }
 
+export type PlanEntryStatus = 'completed' | 'in_progress' | 'pending';
+
+export interface PlanEntry {
+  text: string;
+  status: PlanEntryStatus;
+}
+
+function planEntryStatus(value: string | undefined): PlanEntryStatus {
+  const status = (value ?? '').toLowerCase();
+  if (status === 'completed' || status === 'done') return 'completed';
+  if (status === 'in_progress' || status === 'running') return 'in_progress';
+  return 'pending';
+}
+
+/**
+ * Parse structured ACP/Grok plan steps from a raw plan / plan_update event.
+ * Returns null when the payload is not a plan event or has no usable entries.
+ * Does not infer steps from prose.
+ */
+export function extractPlanEntries(raw: unknown): PlanEntry[] | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const obj = raw as Record<string, unknown>;
+  const type = typeOf(obj);
+  if (type !== 'plan' && type !== 'plan_update') return null;
+  const entries = obj.entries;
+  if (!Array.isArray(entries) || entries.length === 0) return null;
+  const parsed: PlanEntry[] = [];
+  for (const item of entries) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const entry = item as Record<string, unknown>;
+    const text = readField(entry, 'content', 'title', 'description', 'label')?.trim();
+    if (!text) continue;
+    parsed.push({
+      text,
+      status: planEntryStatus(readField(entry, 'status')),
+    });
+  }
+  return parsed.length > 0 ? parsed : null;
+}
+
 function planSummary(entries: unknown): string | undefined {
   if (!Array.isArray(entries)) return shorten(entries);
   let completed = 0;

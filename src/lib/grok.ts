@@ -39,6 +39,13 @@ export async function enqueueRun(opts: {
   prompt: string;
   cwd: string;
   args: string[];
+  /** The current UI session's running turn, if this is a follow-up. */
+  parentRunId?: string;
+  /**
+   * UI session / tab id. Independent lanes run concurrently; same lane stays
+   * serial. Never inferred from cwd.
+   */
+  laneId?: string;
 }): Promise<{ runId: string; position: number }> {
   return invoke('enqueue_run', opts);
 }
@@ -48,8 +55,18 @@ export async function cancelRun(runId: string): Promise<boolean> {
 }
 
 export async function getQueue(): Promise<{
+  /** First concurrent active (compat). Prefer `activeIds`. */
   active: string | null;
-  queue: Array<{ id: string; prompt: string; cwd: string; state: string; enqueuedAt: number }>;
+  /** Every run currently executing (one per busy lane). */
+  activeIds: string[];
+  queue: Array<{
+    id: string;
+    prompt: string;
+    cwd: string;
+    state: string;
+    enqueuedAt: number;
+    laneId?: string;
+  }>;
 }> {
   return invoke('get_queue');
 }

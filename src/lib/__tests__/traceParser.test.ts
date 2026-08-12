@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { classifyEvent, extractRunError, extractUsage } from '../traceParser';
+import {
+  classifyEvent,
+  extractPlanEntries,
+  extractRunError,
+  extractUsage,
+} from '../traceParser';
 
 function eventOf(raw: unknown) {
   const result = classifyEvent(raw, 1_000);
@@ -164,6 +169,42 @@ describe('classifyEvent', () => {
       label: 'Plan',
       detail: '1/3 · Implement',
     });
+  });
+});
+
+describe('extractPlanEntries', () => {
+  it('maps common text and status fields from plan / plan_update payloads', () => {
+    expect(
+      extractPlanEntries({
+        type: 'plan',
+        entries: [
+          { content: 'Inspect', status: 'completed' },
+          { title: 'Implement', status: 'running' },
+          { description: 'Verify', status: 'todo' },
+          { label: 'Ship', status: 'done' },
+        ],
+      }),
+    ).toEqual([
+      { text: 'Inspect', status: 'completed' },
+      { text: 'Implement', status: 'in_progress' },
+      { text: 'Verify', status: 'pending' },
+      { text: 'Ship', status: 'completed' },
+    ]);
+
+    expect(
+      extractPlanEntries({
+        type: 'plan_update',
+        entries: [{ content: 'Almost done', status: 'in_progress' }],
+      }),
+    ).toEqual([{ text: 'Almost done', status: 'in_progress' }]);
+  });
+
+  it('returns null for non-plan events or empty entries', () => {
+    expect(extractPlanEntries({ type: 'tool_call', entries: [{ content: 'x' }] })).toBeNull();
+    expect(extractPlanEntries({ type: 'plan' })).toBeNull();
+    expect(extractPlanEntries({ type: 'plan', entries: [] })).toBeNull();
+    expect(extractPlanEntries({ type: 'plan', entries: [{ status: 'pending' }] })).toBeNull();
+    expect(extractPlanEntries(null)).toBeNull();
   });
 });
 

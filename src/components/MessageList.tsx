@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { MessageItem } from './MessageItem';
 import { LongTextMessage } from './LongTextMessage';
 import { isLongUserText } from '../lib/longText';
-import { useActiveRun } from '../hooks/useActiveRun';
-import type { TraceEvent } from '../lib/traceParser';
+import { useSessionActiveRun } from '../hooks/useActiveRun';
+import type { PlanEntry, TraceEvent } from '../lib/traceParser';
 import type { TranscriptSegment } from '../lib/streamStore';
 
 export interface MessageRef {
@@ -23,6 +23,10 @@ export interface MessageRef {
   durationMs?: number;
   traces?: TraceEvent[];
   transcript?: TranscriptSegment[];
+  /** Persisted plan checklist for this assistant turn (session-scoped). */
+  planEntries?: PlanEntry[];
+  /** Lifecycle gate from {@link shouldShowPlan}; live runs may still show plans. */
+  showPlan?: boolean;
   /** Keep the work fold open only while this turn is actively streaming. */
   autoExpandWork?: boolean;
   canUndo?: boolean;
@@ -52,7 +56,14 @@ export function MessageList({ messages, focusId, focusNonce, onUndoAssistant }: 
   // history is never yanked back down.
   const atBottomRef = useRef(true);
   const prevLenRef = useRef(messages.length);
-  const active = useActiveRun();
+  // Session-scoped active only. Concurrent runs in other tabs must not drive
+  // auto-scroll (or appear to own) this transcript.
+  const sessionRunIds = useMemo(
+    () => messages.map((message) => message.runId).filter(Boolean),
+    [messages],
+  );
+  const active = useSessionActiveRun(sessionRunIds);
+  const activeBelongsHere = Boolean(active);
 
   const scrollToLast = useCallback(
     (smooth = false) => {
@@ -84,22 +95,22 @@ export function MessageList({ messages, focusId, focusNonce, onUndoAssistant }: 
   // (last) message. Virtuoso's followOutput only fires on new items, not on
   // an item growing, so we pin to the bottom ourselves while at-bottom.
   useEffect(() => {
-    if (!active) return;
+    if (!activeBelongsHere || !active) return;
     if (atBottomRef.current) scrollToLast(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active?.textChars, active?.thoughtChars, active?.htmlVersion, active?.state]);
+  }, [activeBelongsHere, active?.textChars, active?.thoughtChars, active?.htmlVersion, active?.state]);
 
   // The typewriter buffer reveals text AFTER the raw tokens have all arrived,
   // so the message keeps growing between token bursts with no snapshot change
   // to trigger the effect above. While a run is actively running, gently keep
   // the view pinned to the bottom (only if the user is already there).
   useEffect(() => {
-    if (active?.state !== 'running') return;
+    if (!activeBelongsHere || active?.state !== 'running') return;
     const id = window.setInterval(() => {
       if (atBottomRef.current) scrollToLast(false);
     }, 180);
     return () => window.clearInterval(id);
-  }, [active?.state, scrollToLast]);
+  }, [activeBelongsHere, active?.state, scrollToLast]);
 
   // History-click jump: scroll the requested message into view (centered) and
   // flash it for ~1.3s so the user sees exactly which task they returned to.
@@ -122,6 +133,11 @@ export function MessageList({ messages, focusId, focusNonce, onUndoAssistant }: 
     <Virtuoso
       ref={ref}
       data={messages}
+      // Keep Virtuoso rows keyed by the message identity, not their array
+      // index. Switching sessions replaces the whole data array; index reuse
+      // can otherwise leave a previous session's streaming MessageItem alive
+      // for one render and show the wrong run's response.
+      computeItemKey={(_, msg) => msg.id || msg.runId}
       followOutput={(isAtBottom) => (isAtBottom ? 'auto' : false)}
       atBottomThreshold={140}
       atBottomStateChange={(bottom) => {
@@ -178,6 +194,8 @@ export function MessageList({ messages, focusId, focusNonce, onUndoAssistant }: 
               durationMs={msg.durationMs}
               fallbackTraces={msg.traces}
               fallbackTranscript={msg.transcript}
+              planEntries={msg.planEntries}
+              showPlan={msg.showPlan}
               autoExpandWork={msg.autoExpandWork}
               canUndo={Boolean(msg.canUndo)}
               onUndo={

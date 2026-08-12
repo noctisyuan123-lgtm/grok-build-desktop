@@ -2369,9 +2369,13 @@ async fn enqueue_run(
     prompt: String,
     cwd: String,
     args: Vec<String>,
+    parent_run_id: Option<String>,
+    // UI session / tab id. Independent lanes run concurrently; same lane
+    // stays serial. Omit only for legacy callers (shared default lane).
+    lane_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let (run_id, position) = queue
-        .enqueue(prompt, cwd, args)
+        .enqueue(prompt, cwd, args, parent_run_id, lane_id)
         .await
         .map_err(|e| e.to_string())?;
     Ok(serde_json::json!({ "runId": run_id, "position": position }))
@@ -2389,12 +2393,15 @@ async fn cancel_run(
 async fn get_queue(
     queue: tauri::State<'_, std::sync::Arc<RunQueue>>,
 ) -> Result<serde_json::Value, String> {
-    let (active, waiting) = queue.snapshot().await;
+    let (active_ids, waiting) = queue.snapshot().await;
     Ok(serde_json::json!({
-        "active": active,
+        // Backward-compat single-active field: first concurrent active, if any.
+        "active": active_ids.first().cloned(),
+        "activeIds": active_ids,
         "queue": waiting.iter().map(|r| serde_json::json!({
             "id": r.id, "prompt": r.prompt, "cwd": r.cwd,
             "state": r.state, "enqueuedAt": r.enqueued_at,
+            "laneId": r.lane_id,
         })).collect::<Vec<_>>(),
     }))
 }
@@ -2706,14 +2713,16 @@ fn forward_queue_message(app: &tauri::AppHandle, msg: &QueueMessage) {
             let q = app.state::<std::sync::Arc<RunQueue>>().inner().clone();
             let app_cloned = app.clone();
             tauri::async_runtime::spawn(async move {
-                let (active, waiting) = q.snapshot().await;
+                let (active_ids, waiting) = q.snapshot().await;
                 let _ = app_cloned.emit(
                     "grok-desktop://queue-changed",
                     serde_json::json!({
-                        "active": active,
+                        "active": active_ids.first().cloned(),
+                        "activeIds": active_ids,
                         "queue": waiting.iter().map(|r| serde_json::json!({
                             "id": r.id, "prompt": r.prompt, "cwd": r.cwd,
                             "state": r.state, "enqueuedAt": r.enqueued_at,
+                            "laneId": r.lane_id,
                         })).collect::<Vec<_>>(),
                     }),
                 );
@@ -2831,6 +2840,8 @@ pub fn run() {
                                         ended_at: Some(now_ms),
                                         stop_reason: Some("legacy".into()),
                                         error: None,
+                                        lane_id: String::new(),
+                                        parent_run_id: None,
                                     };
                                     let _ = db.insert_run(&rec).await;
                                 }

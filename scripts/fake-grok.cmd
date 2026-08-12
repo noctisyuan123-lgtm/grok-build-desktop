@@ -1,17 +1,39 @@
 @echo off
 rem Mimics `grok --output-format streaming-json` for tests.
 rem Windows twin of fake-grok.sh -- keep the modes and emitted lines in sync.
-rem Usage: fake-grok.cmd [--ok|--fail|--hang|--slow|--mixed]
-setlocal
+rem Usage: fake-grok.cmd [--ok|--fail|--hang|--slow|--mixed] [--resume SESSION]...
+setlocal EnableDelayedExpansion
 
-set "mode=%~1"
-if "%mode%"=="" set "mode=--ok"
+set "mode=--ok"
+set "resume_session="
 
+:parse
+if "%~1"=="" goto run
+if "%~1"=="--ok" set "mode=--ok" & shift & goto parse
+if "%~1"=="--fail" set "mode=--fail" & shift & goto parse
+if "%~1"=="--hang" set "mode=--hang" & shift & goto parse
+if "%~1"=="--slow" set "mode=--slow" & shift & goto parse
+if "%~1"=="--mixed" set "mode=--mixed" & shift & goto parse
+if "%~1"=="--resume" (
+  set "resume_session=%~2"
+  shift
+  shift
+  goto parse
+)
+shift
+goto parse
+
+:run
 if "%mode%"=="--ok" (
   echo {"type":"thought","data":"thinking"}
-  echo {"type":"text","data":"hello"}
-  echo {"type":"text","data":" world"}
-  echo {"type":"end","stopReason":"EndTurn","sessionId":"sess-1","requestId":"req-1"}
+  if not "%resume_session%"=="" (
+    echo {"type":"text","data":"resume:%resume_session%"}
+    echo {"type":"end","stopReason":"EndTurn","sessionId":"%resume_session%","requestId":"req-1"}
+  ) else (
+    echo {"type":"text","data":"hello"}
+    echo {"type":"text","data":" world"}
+    echo {"type":"end","stopReason":"EndTurn","sessionId":"sess-1","requestId":"req-1"}
+  )
   exit /b 0
 )
 

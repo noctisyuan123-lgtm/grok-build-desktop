@@ -46,6 +46,11 @@ pub struct RunRecord {
     pub ended_at: Option<i64>,
     pub stop_reason: Option<String>,
     pub error: Option<String>,
+    /// UI session / tab lane. Independent lanes run concurrently; same lane
+    /// stays serial (including parent → follow-up ordering).
+    pub lane_id: String,
+    /// Exact parent run whose ACP session this follow-up should resume.
+    pub parent_run_id: Option<String>,
 }
 
 #[derive(Clone)]
@@ -65,10 +70,12 @@ type RunRow = (
     Option<i64>,    // ended_at
     Option<String>, // stop_reason
     Option<String>, // error
+    String,         // lane_id
+    Option<String>, // parent_run_id
 );
 
 fn run_record(row: RunRow) -> RunRecord {
-    let (id, prompt, cwd, args_json, state, eq, st, en, sr, err) = row;
+    let (id, prompt, cwd, args_json, state, eq, st, en, sr, err, lane_id, parent_run_id) = row;
     RunRecord {
         id,
         prompt,
@@ -80,6 +87,8 @@ fn run_record(row: RunRow) -> RunRecord {
         ended_at: en,
         stop_reason: sr,
         error: err,
+        lane_id,
+        parent_run_id,
     }
 }
 
@@ -94,11 +103,20 @@ CREATE TABLE IF NOT EXISTS runs (
     started_at INTEGER,
     ended_at INTEGER,
     stop_reason TEXT,
-    error TEXT
+    error TEXT,
+    lane_id TEXT NOT NULL DEFAULT '',
+    parent_run_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_runs_state ON runs(state);
 CREATE INDEX IF NOT EXISTS idx_runs_enqueued_at ON runs(enqueued_at);
 "#;
+
+/// Columns added after the initial schema. Applied with ALTER TABLE so
+/// existing installs keep their rows.
+const MIGRATIONS: &[&str] = &[
+    "ALTER TABLE runs ADD COLUMN lane_id TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE runs ADD COLUMN parent_run_id TEXT",
+];
 
 /// Execute every `;`-delimited DDL statement in `schema` against the given
 /// pool. sqlx::query() prepares a single statement at a time, so the CREATE
@@ -115,6 +133,20 @@ pub(crate) async fn run_schema(pool: &SqlitePool, schema: &str) -> Result<(), sq
     Ok(())
 }
 
+async fn apply_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    for stmt in MIGRATIONS {
+        // Duplicate column name is expected on fresh schemas that already
+        // include the column in CREATE TABLE, and on re-open of migrated DBs.
+        if let Err(err) = sqlx::query(stmt).execute(pool).await {
+            let msg = err.to_string();
+            if !msg.contains("duplicate column") {
+                return Err(err);
+            }
+        }
+    }
+    Ok(())
+}
+
 impl Db {
     pub async fn open_memory() -> Result<Self, sqlx::Error> {
         let pool = SqlitePoolOptions::new()
@@ -122,6 +154,7 @@ impl Db {
             .connect_with(SqliteConnectOptions::from_str("sqlite::memory:")?)
             .await?;
         run_schema(&pool, SCHEMA).await?;
+        apply_migrations(&pool).await?;
         Ok(Self { pool })
     }
 
@@ -139,18 +172,20 @@ impl Db {
             .connect_with(opts)
             .await?;
         run_schema(&pool, SCHEMA).await?;
+        apply_migrations(&pool).await?;
         Ok(Self { pool })
     }
 
     pub async fn insert_run(&self, r: &RunRecord) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO runs (id, prompt, cwd, args_json, state, enqueued_at, started_at, ended_at, stop_reason, error)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO runs (id, prompt, cwd, args_json, state, enqueued_at, started_at, ended_at, stop_reason, error, lane_id, parent_run_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&r.id).bind(&r.prompt).bind(&r.cwd).bind(&r.args_json)
         .bind(r.state.as_str())
         .bind(r.enqueued_at).bind(r.started_at).bind(r.ended_at)
         .bind(&r.stop_reason).bind(&r.error)
+        .bind(&r.lane_id).bind(&r.parent_run_id)
         .execute(&self.pool).await?;
         Ok(())
     }
@@ -183,7 +218,7 @@ impl Db {
     pub async fn fetch_run(&self, id: &str) -> Result<Option<RunRecord>, sqlx::Error> {
         let row: Option<RunRow> =
             sqlx::query_as(
-                "SELECT id, prompt, cwd, args_json, state, enqueued_at, started_at, ended_at, stop_reason, error FROM runs WHERE id = ?"
+                "SELECT id, prompt, cwd, args_json, state, enqueued_at, started_at, ended_at, stop_reason, error, lane_id, parent_run_id FROM runs WHERE id = ?"
             )
             .bind(id)
             .fetch_optional(&self.pool).await?;
@@ -193,7 +228,7 @@ impl Db {
     pub async fn list_by_state(&self, state: RunState) -> Result<Vec<RunRecord>, sqlx::Error> {
         let rows: Vec<RunRow> =
             sqlx::query_as(
-                "SELECT id, prompt, cwd, args_json, state, enqueued_at, started_at, ended_at, stop_reason, error
+                "SELECT id, prompt, cwd, args_json, state, enqueued_at, started_at, ended_at, stop_reason, error, lane_id, parent_run_id
                  FROM runs WHERE state = ? ORDER BY enqueued_at ASC"
             )
             .bind(state.as_str())

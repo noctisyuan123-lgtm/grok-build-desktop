@@ -3456,6 +3456,11 @@ button.status-cluster.status-action:disabled {
   height: 17px;
   width: 17px;
 }
+/* Session history section head — match New session / Search (14px absolute).
+   Root is 13px, so the prior 0.72rem head was ~9.4px. */
+.history-nav > .nav-head {
+  font-size: 14px;
+}
 .customize-overlay {
   padding: 28px;
 }
@@ -5119,6 +5124,328 @@ body[data-theme='light'] .hljs-comment {
 .composer-row {
   position: relative;
 }
+
+/* Plan checklist under an assistant response — rendered markdown task-list. */
+.plan-todo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  list-style: none;
+  margin: 10px 0 4px;
+  padding: 0 2px;
+}
+
+.plan-todo-item {
+  align-items: flex-start;
+  color: color-mix(in srgb, var(--conversation-text) 48%, transparent);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  line-height: 18px;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+}
+
+/* Match assistant markdown `.task-list-item-checkbox` chrome, conversation-tinted. */
+.plan-todo-item .plan-todo-checkbox,
+.plan-todo-item .task-list-item-checkbox {
+  appearance: none;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--conversation-text) 42%, transparent);
+  border-radius: 3px;
+  flex: 0 0 11px;
+  height: 11px;
+  margin: 3.5px 0 0;
+  opacity: 1;
+  pointer-events: none;
+  position: relative;
+  width: 11px;
+}
+
+.plan-todo-item .plan-todo-checkbox:checked,
+.plan-todo-item .task-list-item-checkbox:checked {
+  background: color-mix(in srgb, var(--conversation-text) 55%, transparent);
+  border-color: color-mix(in srgb, var(--conversation-text) 55%, transparent);
+}
+
+.plan-todo-item .plan-todo-checkbox:checked::after,
+.plan-todo-item .task-list-item-checkbox:checked::after {
+  border: solid var(--grok-bg-0, #0b0b0c);
+  border-width: 0 1.5px 1.5px 0;
+  content: '';
+  height: 4px;
+  left: 3px;
+  position: absolute;
+  top: 0.5px;
+  transform: rotate(45deg);
+  width: 2px;
+}
+
+.plan-todo-item.is-active .plan-todo-checkbox,
+.plan-todo-item.is-active .task-list-item-checkbox {
+  border-color: color-mix(in srgb, var(--conversation-text) 72%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--conversation-text) 18%, transparent);
+}
+
+.plan-todo-text {
+  min-width: 0;
+}
+
+.plan-todo-item.is-completed,
+.plan-todo-item.is-completed .plan-todo-text {
+  color: color-mix(in srgb, var(--conversation-text) 36%, transparent);
+  text-decoration: line-through;
+}
+
+.plan-todo-item.is-active,
+.plan-todo-item.is-active .plan-todo-text {
+  color: color-mix(in srgb, var(--conversation-text) 78%, transparent);
+  font-weight: 500;
+}
+
+.plan-todo-item.is-pending {
+  color: color-mix(in srgb, var(--conversation-text) 42%, transparent);
+}
+
+/* Floating subagent pill above the composer (session-scoped). */
+.subagent-float {
+  animation: subagent-float-in 180ms ease-out;
+  display: flex;
+  justify-content: flex-start;
+  margin: 0 0 6px;
+  padding: 0 4px;
+}
+
+.subagent-float-card {
+  align-items: center;
+  background: color-mix(in srgb, var(--grok-bg-2) 88%, transparent);
+  border: 1px solid var(--grok-border-1);
+  border-radius: 999px;
+  color: var(--grok-text-2);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 8px;
+  line-height: 1;
+  max-width: min(100%, 420px);
+  padding: 6px 12px 6px 10px;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.subagent-float-card:hover,
+.subagent-float.is-open .subagent-float-card {
+  background: color-mix(in srgb, var(--grok-bg-3) 92%, transparent);
+  border-color: var(--grok-border-2);
+  color: var(--grok-text-1);
+}
+
+.subagent-float-card:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--grok-accent) 70%, transparent);
+  outline-offset: 2px;
+}
+
+.subagent-float-label {
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-float-status,
+.subagent-drawer-status {
+  color: var(--grok-text-3);
+  font-size: 11px;
+}
+
+.subagent-float-status.status-running,
+.subagent-drawer-status.status-running,
+.subagent-float.is-live .subagent-float-status {
+  color: var(--grok-accent);
+}
+
+.subagent-float-progress {
+  color: var(--grok-text-3);
+  font-size: 11px;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes subagent-float-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.subagent-drawer-overlay {
+  animation: subagent-float-in 160ms ease-out;
+  background: rgba(0, 0, 0, 0.28);
+  bottom: 0;
+  left: 0;
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 80;
+}
+
+.subagent-drawer {
+  background: var(--grok-bg-1);
+  border-left: 1px solid var(--grok-border-1);
+  bottom: 0;
+  box-shadow: -12px 0 40px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  outline: none;
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: min(380px, 100vw);
+}
+
+.subagent-drawer-head {
+  align-items: center;
+  border-bottom: 1px solid var(--grok-border-1);
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 14px 14px 12px;
+}
+
+.subagent-drawer-title {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.subagent-drawer-title strong {
+  color: var(--grok-text-1);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.subagent-drawer-close {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--grok-text-2);
+  cursor: pointer;
+  display: inline-flex;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+
+.subagent-drawer-close:hover {
+  background: var(--grok-bg-3);
+  color: var(--grok-text-1);
+}
+
+.subagent-drawer-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+}
+
+.subagent-drawer-meta {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.subagent-drawer-meta div {
+  display: grid;
+  gap: 2px;
+}
+
+.subagent-drawer-meta dt {
+  color: var(--grok-text-3);
+  font-size: 11px;
+  margin: 0;
+}
+
+.subagent-drawer-meta dd {
+  color: var(--grok-text-1);
+  font-size: 13px;
+  margin: 0;
+}
+
+.subagent-drawer-detail {
+  background: var(--grok-bg-0);
+  border: 1px solid var(--grok-border-1);
+  border-radius: 10px;
+  color: var(--grok-text-2);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.subagent-drawer-children h3 {
+  color: var(--grok-text-2);
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.subagent-drawer-children ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.subagent-drawer-children li {
+  align-items: baseline;
+  color: var(--grok-text-2);
+  display: grid;
+  font-size: 12px;
+  gap: 2px 8px;
+  grid-template-columns: 14px minmax(0, 1fr);
+}
+
+.subagent-drawer-children li small {
+  color: var(--grok-text-3);
+  grid-column: 2;
+}
+
+.subagent-drawer-empty {
+  color: var(--grok-text-3);
+  font-size: 12px;
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .subagent-float,
+  .subagent-drawer-overlay {
+    animation: none;
+  }
+}
 .composer-context-footer {
   align-items: center;
   display: flex;
@@ -5234,7 +5561,7 @@ body[data-theme='light'] .hljs-comment {
 }
 .context-usage-header > strong {
   color: var(--text-1);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.01em;
   margin: 0;
@@ -7392,7 +7719,7 @@ select:focus-visible {
   border-bottom: 1px solid rgba(255, 255, 255, 0.095);
   color: var(--text-muted);
   display: flex;
-  font-size: 13px;
+  font-size: 14px;
   gap: 7px;
   justify-content: flex-start;
   line-height: 1;
@@ -8309,9 +8636,9 @@ body,
 .activity-list,
 .message-worked-list {
   border-left: 0;
-  gap: 8px;
+  gap: 4px;
   margin-left: 0;
-  padding: 2px 0 2px 12px;
+  padding: 1px 0 1px 12px;
 }
 
 .activity-list .activity-row {
@@ -8320,7 +8647,7 @@ body,
   border-radius: 0;
   font-size: 13px;
   justify-content: flex-start;
-  min-height: 22px;
+  min-height: 20px;
   padding: 0;
 }
 
@@ -8394,18 +8721,25 @@ body,
 .transcript-segments {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  margin: 0 0 8px;
+  gap: 1px;
+  margin: 0 0 5px;
 }
 
-.transcript-response.message-body,
+/* Do not narrow normal/transcript assistant responses — they share the full
+   message column. Thought bodies stay compact for denser workflow reading. */
+.transcript-response.message-body {
+  margin: 0;
+  max-width: none;
+}
+
 .transcript-thought-body.message-body {
   margin: 0;
   max-width: 640px;
 }
 
 .transcript-thought > button,
-.transcript-tool-summary {
+.transcript-tool-summary,
+.transcript-phase > button {
   align-items: center;
   background: transparent;
   border: 0;
@@ -8421,18 +8755,35 @@ body,
 }
 
 .transcript-thought > button:hover,
-.transcript-tool-summary:hover {
+.transcript-tool-summary:hover,
+.transcript-phase > button:hover {
   color: var(--conversation-text);
 }
 
 .transcript-thought > button svg,
-.transcript-tool-summary svg {
+.transcript-tool-summary svg,
+.transcript-phase > button svg {
   transition: transform 160ms ease;
 }
 
 .transcript-thought.is-expanded > button svg,
-.transcript-tool-group.is-expanded > .transcript-tool-summary svg {
+.transcript-tool-group.is-expanded > .transcript-tool-summary svg,
+.transcript-phase.is-expanded > button svg {
   transform: rotate(180deg);
+}
+
+/* Closed workflow phase: one neutral summary above an intermediate response. */
+.transcript-phase-block {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.transcript-phase-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 1px;
 }
 
 .transcript-thought-body {
@@ -8448,8 +8799,43 @@ body,
 }
 
 .transcript-tool-group .message-worked-list {
-  margin: 3px 0 0;
+  margin: 1px 0 0;
   padding-left: 0;
+}
+
+/* A tool group stays compact by default, but its one current call gets a
+   brief stage while it runs. It enters from below; on completion it glides
+   upward and fades into the collapsed summary, leaving the next call room to
+   take over without moving the rest of the transcript. */
+.transcript-tool-group .activity-motion-enter {
+  animation: activity-row-enter 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.transcript-tool-group .activity-motion-settle {
+  animation: activity-row-settle 420ms cubic-bezier(0.4, 0, 0.7, 0.2) both;
+  pointer-events: none;
+}
+
+@keyframes activity-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes activity-row-settle {
+  from {
+    opacity: 0.8;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
 }
 
 .activity-list .activity-item.activity-is-edit .activity-row-label {
@@ -8476,7 +8862,6 @@ body,
 
 /* Cursor/Codex-style live shimmer: a restrained highlight crosses only the
    currently active label. Completed transcript rows remain static. */
-.transcript-work.is-live .message-worked-summary,
 .transcript-thought.is-running > button > span,
 .activity-list .activity-item.activity-status-running .activity-row-label,
 .agent-starting > span:last-child {
@@ -8484,9 +8869,9 @@ body,
   background: linear-gradient(
     100deg,
     color-mix(in srgb, var(--conversation-text) 48%, transparent) 20%,
-    color-mix(in srgb, var(--conversation-text) 48%, transparent) 39%,
-    var(--conversation-text) 50%,
-    color-mix(in srgb, var(--conversation-text) 48%, transparent) 61%,
+    color-mix(in srgb, var(--conversation-text) 48%, transparent) 38%,
+    rgba(255, 255, 255, 0.86) 49%,
+    color-mix(in srgb, var(--conversation-text) 48%, transparent) 58%,
     color-mix(in srgb, var(--conversation-text) 48%, transparent) 80%
   );
   background-clip: text;
@@ -8506,13 +8891,16 @@ body,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .transcript-work.is-live .message-worked-summary,
   .transcript-thought.is-running > button > span,
   .activity-list .activity-item.activity-status-running .activity-row-label,
-  .agent-starting > span:last-child {
+  .agent-starting > span:last-child,
+  .transcript-tool-group .activity-motion-enter,
+  .transcript-tool-group .activity-motion-settle {
     animation: none;
     background: none;
     color: color-mix(in srgb, var(--conversation-text) 72%, transparent);
+    opacity: 1;
+    transform: none;
     -webkit-text-fill-color: currentColor;
   }
 }
@@ -8641,6 +9029,9 @@ body,
   border-color: #d9d9d9;
 }
 
+/* Stop is a compact text control in .composer-inline-bar; no filled twin of send. */
+
+/* Current-session Stop occupies the send slot: filled circle + square glyph. */
 .composer-inline-bar .composer-send.composer-stop {
   background: var(--text-1);
   border: 0;

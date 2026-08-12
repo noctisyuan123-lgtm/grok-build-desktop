@@ -1,12 +1,16 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { TraceTimeline } from '../TraceTimeline';
+import { ActivityGroup, TraceTimeline } from '../TraceTimeline';
 import { streamStore } from '../../lib/streamStore';
 import type { TraceEvent } from '../../lib/traceParser';
 
 beforeEach(() => {
   streamStore.__reset();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 function makeTrace(overrides: Partial<TraceEvent> = {}): TraceEvent {
@@ -24,6 +28,190 @@ function makeTrace(overrides: Partial<TraceEvent> = {}): TraceEvent {
 function seed(traces: TraceEvent[], state: 'running' | 'done' | 'failed' = 'running') {
   streamStore.patchRun('r1', { traces, state, startedAt: 1_000 });
 }
+
+describe('ActivityGroup staged tool motion', () => {
+  it('exposes only the newest running tool while the group stays collapsed', () => {
+    const { container } = render(
+      <ActivityGroup
+        traces={[
+          makeTrace({
+            key: 'tool:1',
+            label: 'Read a.ts',
+            status: 'done',
+            endedAt: 1_500,
+          }),
+          makeTrace({
+            key: 'tool:2',
+            label: 'Download dependencies',
+            status: 'running',
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Download dependencies')).toBeInTheDocument();
+    expect(screen.queryByText('Read a.ts')).toBeNull();
+    expect(container.querySelectorAll('.activity-row')).toHaveLength(1);
+    expect(container.querySelector('.activity-motion-enter')).toBeInTheDocument();
+    expect(container.querySelector('.activity-status-running .activity-row-label')).toBeInTheDocument();
+  });
+
+  it('does not duplicate the active tool when the group is expanded', async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <ActivityGroup
+        traces={[
+          makeTrace({
+            key: 'tool:1',
+            label: 'Read a.ts',
+            status: 'done',
+            endedAt: 1_500,
+          }),
+          makeTrace({
+            key: 'tool:2',
+            label: 'Download dependencies',
+            status: 'running',
+          }),
+        ]}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /Read 1 file, used 1 tool/i }));
+    expect(screen.getByText('Read a.ts')).toBeInTheDocument();
+    expect(screen.getAllByText('Download dependencies')).toHaveLength(1);
+    expect(container.querySelectorAll('.activity-row')).toHaveLength(2);
+    expect(container.querySelector('.activity-motion-enter')).toBeNull();
+    expect(container.querySelector('.activity-motion-settle')).toBeNull();
+  });
+
+  it('settles the finished tool into the summary when no next call is running', () => {
+    vi.useFakeTimers();
+    const { container, rerender } = render(
+      <ActivityGroup
+        traces={[makeTrace({ key: 'tool:1', label: 'Download dependencies', status: 'running' })]}
+      />,
+    );
+    expect(container.querySelector('.activity-motion-enter')).toBeInTheDocument();
+
+    rerender(
+      <ActivityGroup
+        traces={[
+          makeTrace({
+            key: 'tool:1',
+            label: 'Download dependencies',
+            status: 'done',
+            endedAt: 2_000,
+          }),
+        ]}
+      />,
+    );
+    expect(container.querySelector('.activity-motion-settle')).toBeInTheDocument();
+    expect(screen.getByText('Download dependencies')).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(420);
+    });
+    expect(container.querySelector('.activity-motion-settle')).toBeNull();
+    expect(screen.queryByText('Download dependencies')).toBeNull();
+    expect(screen.getByRole('button', { name: /Used 1 tool/i })).toBeInTheDocument();
+  });
+
+  it('keeps the completed call floating out while the next call enters', () => {
+    const { container, rerender } = render(
+      <ActivityGroup traces={[makeTrace({ key: 'tool:1', label: 'Read a.ts' })]} />,
+    );
+    rerender(
+      <ActivityGroup
+        traces={[
+          makeTrace({ key: 'tool:1', label: 'Read a.ts', status: 'done', endedAt: 1_500 }),
+          makeTrace({ key: 'tool:2', label: 'Download dependencies' }),
+        ]}
+      />,
+    );
+    expect(container.querySelector('.activity-motion-settle')).toBeInTheDocument();
+    expect(container.querySelector('.activity-motion-enter')).toBeInTheDocument();
+  });
+
+  it('keeps a single edit compact and opens its diff directly under the short summary', async () => {
+    const user = userEvent.setup();
+    render(
+      <ActivityGroup
+        traces={[
+          makeTrace({
+            key: 'edit:1',
+            label: 'Edit /Users/untitled/Desktop/hello_world.txt',
+            path: '/Users/untitled/Desktop/hello_world.txt',
+            status: 'done',
+            endedAt: 2_000,
+            diff: '-old\n+new',
+            additions: 1,
+            deletions: 1,
+          }),
+        ]}
+      />,
+    );
+
+    const summary = screen.getByRole('button', { name: /Edited hello_world\.txt/ });
+    expect(screen.queryByText('/Users/untitled/Desktop/hello_world.txt')).toBeNull();
+    await user.click(summary);
+    expect(screen.getByLabelText('Changes to /Users/untitled/Desktop/hello_world.txt')).toBeInTheDocument();
+    expect(screen.queryByText('Edited /Users/untitled/Desktop/hello_world.txt')).toBeNull();
+  });
+
+  it('embedded multi-tool groups list each tool once without a second summary', async () => {
+    const { container } = render(
+      <ActivityGroup
+        embedded
+        traces={[
+          makeTrace({
+            key: 'tool:1',
+            label: 'Read a.ts',
+            status: 'done',
+            endedAt: 1_500,
+          }),
+          makeTrace({
+            key: 'tool:2',
+            label: 'Search MessageItem',
+            status: 'done',
+            endedAt: 2_000,
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /Read 1 file/i })).toBeNull();
+    expect(screen.getByText('Read a.ts')).toBeInTheDocument();
+    expect(screen.getByText('Search MessageItem')).toBeInTheDocument();
+    expect(container.querySelectorAll('.activity-row')).toHaveLength(2);
+  });
+
+  it('embedded single edit still opens the diff from the concise Edited-file row', async () => {
+    const user = userEvent.setup();
+    render(
+      <ActivityGroup
+        embedded
+        traces={[
+          makeTrace({
+            key: 'edit:1',
+            label: 'Edit /Users/untitled/Desktop/hello_world.txt',
+            path: '/Users/untitled/Desktop/hello_world.txt',
+            status: 'done',
+            endedAt: 2_000,
+            diff: '-old\n+new',
+            additions: 1,
+            deletions: 1,
+          }),
+        ]}
+      />,
+    );
+
+    const summary = screen.getByRole('button', { name: /Edited hello_world\.txt/ });
+    expect(screen.queryByText('Edited /Users/untitled/Desktop/hello_world.txt')).toBeNull();
+    await user.click(summary);
+    expect(screen.getByLabelText('Changes to /Users/untitled/Desktop/hello_world.txt')).toBeInTheDocument();
+    expect(screen.queryByText('Edited /Users/untitled/Desktop/hello_world.txt')).toBeNull();
+  });
+});
 
 describe('TraceTimeline activity rail', () => {
   it('renders nothing for an unknown run', () => {
@@ -89,6 +277,34 @@ describe('TraceTimeline activity rail', () => {
     expect(screen.getByLabelText('Tool and subagent activity')).toBeInTheDocument();
     expect(screen.queryByText('permission denied')).toBeNull();
     expect(screen.getByText('×')).toBeInTheDocument();
+  });
+
+  it('keeps subagent detail bodies collapsed until the summary row is clicked', async () => {
+    const user = userEvent.setup();
+    seed(
+      [
+        makeTrace({
+          key: 'subagent:a',
+          kind: 'subagent',
+          label: 'Explore repo',
+          detail: 'nested agent output that must stay hidden',
+          status: 'done',
+          endedAt: 2_000,
+        }),
+      ],
+      'done',
+    );
+    render(<TraceTimeline runId="r1" />);
+
+    // Expand the outer activity rail first (summary is collapsed by default).
+    await user.click(screen.getByRole('button', { name: /Used 1 subagent/i }));
+    const row = screen.getByRole('button', { name: /Subagent · Explore repo/i });
+    expect(row).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('nested agent output that must stay hidden')).toBeNull();
+
+    await user.click(row);
+    expect(row).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('nested agent output that must stay hidden')).toBeInTheDocument();
   });
 
   it('shows a compact completed summary without an extra full-width panel', () => {

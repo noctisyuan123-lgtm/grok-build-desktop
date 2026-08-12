@@ -71,9 +71,11 @@ describe('streamStore', () => {
   it('replaceQueue overwrites queue snapshot', () => {
     replaceQueue({
       active: 'r1',
+      activeIds: ['r1', 'r3'],
       items: [{ id: 'r2', prompt: 'p', state: 'Queued', enqueuedAt: 1 }],
     });
     expect(streamStore.getQueueSnapshot().active).toBe('r1');
+    expect(streamStore.getQueueSnapshot().activeIds).toEqual(['r1', 'r3']);
     expect(streamStore.getQueueSnapshot().items.length).toBe(1);
   });
 

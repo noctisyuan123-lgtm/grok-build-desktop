@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useElapsed } from '../hooks/useElapsed';
 import { useRunSnapshot } from '../hooks/useRunSnapshot';
 import type { RunSnapshot } from '../lib/streamStore';
+import { displayEdit, isEditTrace, sumEditStats } from '../lib/editStats';
 import type { TraceEvent, TraceStatus } from '../lib/traceParser';
 import { t } from '../i18n';
 
@@ -78,10 +79,84 @@ export function TraceTimeline({ runId, workedLabel, fallbackTraces = [] }: Props
   );
 }
 
-export function ActivityGroup({ traces }: { traces: TraceEvent[] }) {
+export function ActivityGroup({
+  traces,
+  hideEditDetails = false,
+  embedded = false,
+}: {
+  traces: TraceEvent[];
+  /** Phase headings already expose edit totals; avoid repeating edit rows below. */
+  hideEditDetails?: boolean;
+  /**
+   * When nested under a workflow phase summary, render each tool once without
+   * a second group summary. Single-edit keeps the concise Edited-file row that
+   * opens its diff directly (no duplicate full-path row).
+   */
+  embedded?: boolean;
+}) {
   const visible = traces.filter(isVisibleTrace);
   const [expanded, setExpanded] = useState(false);
+  const [settlingTrace, setSettlingTrace] = useState<TraceEvent | null>(null);
+  const settleTimer = useRef<number | null>(null);
+  const previousActiveKeyRef = useRef<string | null>(null);
+  // Newest running call only — collapsed groups stage that one row.
+  const activeTrace =
+    [...visible].reverse().find((trace) => trace.status === 'running') ?? null;
+  const activeKey = activeTrace?.key ?? null;
+  // Stable content signature so settle logic does not re-fire on new array identity.
+  const tracesFingerprint = visible.map((trace) => `${trace.key}:${trace.status}`).join('\0');
+
+  useEffect(() => {
+    return () => {
+      if (settleTimer.current != null) window.clearTimeout(settleTimer.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const clearSettleTimer = () => {
+      if (settleTimer.current != null) {
+        window.clearTimeout(settleTimer.current);
+        settleTimer.current = null;
+      }
+    };
+
+    const previousKey = previousActiveKeyRef.current;
+    if (activeKey) {
+      clearSettleTimer();
+      if (previousKey && previousKey !== activeKey) {
+        const finished = visible.find((trace) => trace.key === previousKey);
+        if (finished && finished.status !== 'running') {
+          setSettlingTrace(finished);
+          settleTimer.current = window.setTimeout(() => {
+            setSettlingTrace(null);
+            settleTimer.current = null;
+          }, 420);
+        }
+      }
+      previousActiveKeyRef.current = activeKey;
+      return;
+    }
+
+    previousActiveKeyRef.current = null;
+    if (!previousKey) return;
+
+    const finished = visible.find((trace) => trace.key === previousKey);
+    if (!finished || finished.status === 'running') return;
+
+    clearSettleTimer();
+    setSettlingTrace(finished);
+    settleTimer.current = window.setTimeout(() => {
+      setSettlingTrace(null);
+      settleTimer.current = null;
+    }, 420);
+
+    return;
+    // visible is read via tracesFingerprint; listing it would churn on every parent render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fingerprint tracks visible content
+  }, [activeKey, tracesFingerprint]);
+
   if (visible.length === 0) return null;
+
   const singleEdit = visible.length === 1 && isEditTrace(visible[0]!) ? visible[0] : undefined;
   const editStats = visible.map(displayEdit);
   const additions = editStats.reduce((total, edit) => total + edit.additions, 0);
@@ -89,6 +164,62 @@ export function ActivityGroup({ traces }: { traces: TraceEvent[] }) {
   const summary = singleEdit
     ? `Edited ${shortPath(singleEdit.path) || singleEdit.label.replace(/^Edit\s*/iu, '')}`
     : summarizeTraces(visible);
+  const detailTraces = hideEditDetails ? visible.filter((trace) => !isEditTrace(trace)) : visible;
+
+  // Nested under a phase summary: one row per tool, no second group chrome.
+  // Single edit retains the concise Edited-file control that opens the diff.
+  if (embedded) {
+    if (singleEdit) {
+      return (
+        <section className={`transcript-tool-group${expanded ? ' is-expanded' : ''}`}>
+          <button
+            type="button"
+            className="transcript-tool-summary"
+            onClick={() => setExpanded((value) => !value)}
+            aria-expanded={expanded}
+          >
+            <span>{summary}</span>
+            {additions > 0 || deletions > 0 ? (
+              <span className="activity-diff-stats">
+                {additions > 0 ? <span className="is-add">+{additions}</span> : null}{' '}
+                {deletions > 0 ? <span className="is-del">−{deletions}</span> : null}
+              </span>
+            ) : null}
+            <ChevronDown size={14} strokeWidth={1.7} aria-hidden />
+          </button>
+          {expanded ? (
+            <div
+              className="activity-list message-worked-list"
+              aria-label={t('message.traceAriaLabel')}
+            >
+              <EditDetail trace={singleEdit} />
+            </div>
+          ) : null}
+        </section>
+      );
+    }
+    return (
+      <div className="activity-list message-worked-list" aria-label={t('message.traceAriaLabel')}>
+        {detailTraces.map((trace) => (
+          <ActivityRow key={trace.key} trace={trace} />
+        ))}
+      </div>
+    );
+  }
+
+  // Collapsed: one staged row (enter while running, settle on completion).
+  // Expanded: every row once, static aside from the running-label shimmer in CSS.
+  const stagedRows = !expanded && (settlingTrace || activeTrace) ? (
+    <>
+      {settlingTrace && (!hideEditDetails || !isEditTrace(settlingTrace)) ? (
+        <ActivityRow key={`settle:${settlingTrace.key}`} trace={settlingTrace} motion="settle" />
+      ) : null}
+      {activeTrace && (!hideEditDetails || !isEditTrace(activeTrace)) ? (
+        <ActivityRow key={`enter:${activeTrace.key}`} trace={activeTrace} motion="enter" />
+      ) : null}
+    </>
+  ) : null;
+
   return (
     <section className={`transcript-tool-group${expanded ? ' is-expanded' : ''}`}>
       <button
@@ -106,14 +237,40 @@ export function ActivityGroup({ traces }: { traces: TraceEvent[] }) {
         ) : null}
         <ChevronDown size={14} strokeWidth={1.7} aria-hidden />
       </button>
-      {expanded ? (
+      {expanded || stagedRows ? (
         <div className="activity-list message-worked-list" aria-label={t('message.traceAriaLabel')}>
-          {visible.map((trace) => (
-            <ActivityRow key={trace.key} trace={trace} />
-          ))}
+          {expanded ? (
+            singleEdit ? (
+              <EditDetail trace={singleEdit} />
+            ) : (
+              detailTraces.map((trace) => <ActivityRow key={trace.key} trace={trace} />)
+            )
+          ) : stagedRows}
         </div>
       ) : null}
     </section>
+  );
+}
+
+function EditDetail({ trace }: { trace: TraceEvent }) {
+  const edit = displayEdit(trace);
+  if (!edit.diff) return null;
+  return (
+    <div className="activity-detail-surface">
+      <pre className="activity-diff" aria-label={`Changes to ${trace.path || trace.label}`}>
+        {parseDiff(edit.diff).map((line, index) => (
+          <span key={`${index}:${line.text}`} className={`activity-diff-line is-${line.kind}`}>
+            <span className="activity-diff-number" aria-hidden>
+              {index + 1}
+            </span>
+            <span className="activity-diff-sign" aria-hidden>
+              {line.kind === 'add' ? '+' : line.kind === 'del' ? '−' : ' '}
+            </span>
+            <code>{line.text}</code>
+          </span>
+        ))}
+      </pre>
+    </div>
   );
 }
 
@@ -185,7 +342,15 @@ function ActivitySummary({
   );
 }
 
-export function ActivityRow({ trace }: { trace: TraceEvent }) {
+export function ActivityRow({
+  trace,
+  motion,
+}: {
+  trace: TraceEvent;
+  motion?: 'enter' | 'settle';
+}) {
+  // Subagent (and tool) detail bodies stay collapsed until the user opens the
+  // summary row — never auto-open nested activity inside Work for / TraceTimeline.
   const [expanded, setExpanded] = useState(false);
   const elapsed = useElapsed(trace.startedAt, trace.endedAt);
   const duration =
@@ -225,7 +390,7 @@ export function ActivityRow({ trace }: { trace: TraceEvent }) {
 
   return (
     <div
-      className={`activity-item activity-kind-${trace.kind} activity-status-${trace.status}${isEdit ? ' activity-is-edit' : ''}${expanded ? ' row-open' : ''}`}
+      className={`activity-item activity-kind-${trace.kind} activity-status-${trace.status}${isEdit ? ' activity-is-edit' : ''}${expanded ? ' row-open' : ''}${motion ? ` activity-motion-${motion}` : ''}`}
       data-parent={trace.parentKey || undefined}
     >
       {hasBody ? (
@@ -268,44 +433,6 @@ export function ActivityRow({ trace }: { trace: TraceEvent }) {
       ) : null}
     </div>
   );
-}
-
-function isEditTrace(trace: TraceEvent): boolean {
-  return trace.diff != null || trace.additions != null || trace.deletions != null;
-}
-
-function displayEdit(trace: TraceEvent): {
-  diff?: string;
-  additions: number;
-  deletions: number;
-} {
-  if (!trace.diff) {
-    return { additions: trace.additions ?? 0, deletions: trace.deletions ?? 0 };
-  }
-  const lines = trace.diff.split('\n');
-  const additions = lines.filter((line) => line.startsWith('+'));
-  const deletions = lines.filter((line) => line.startsWith('-'));
-  // Migration for the first transcript build: Grok repeated created-file
-  // content in direct + nested fields, while numeric new_line=1 was treated as
-  // deleted source. Repair those already-persisted traces at display time.
-  if (
-    additions.length > 0 &&
-    additions.length % 2 === 0 &&
-    deletions.length > 0 &&
-    deletions.every((line) => /^-\d+$/u.test(line))
-  ) {
-    const half = additions.length / 2;
-    const first = additions.slice(0, half);
-    const second = additions.slice(half);
-    if (first.every((line, index) => line === second[index])) {
-      return { diff: first.join('\n'), additions: half, deletions: 0 };
-    }
-  }
-  return {
-    diff: trace.diff,
-    additions: trace.additions ?? additions.length,
-    deletions: trace.deletions ?? deletions.length,
-  };
 }
 
 function shortPath(path: string | undefined): string | undefined {
@@ -399,18 +526,6 @@ function summarizeTraces(traces: TraceEvent[]): string {
 
   const summary = parts.join(', ') || 'worked';
   return `${summary[0]!.toUpperCase()}${summary.slice(1)}`;
-}
-
-function sumEditStats(traces: TraceEvent[]): { additions: number; deletions: number } {
-  return traces.reduce(
-    (totals, trace) => {
-      const edit = displayEdit(trace);
-      totals.additions += edit.additions;
-      totals.deletions += edit.deletions;
-      return totals;
-    },
-    { additions: 0, deletions: 0 },
-  );
 }
 
 function countWithNoun(count: number, noun: string): string {

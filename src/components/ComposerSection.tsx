@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, SlidersHorizontal } from 'lucide-react';
 import { Composer, type ComposerHandle } from './Composer';
 import { ContextUsageRing } from './ContextUsageRing';
+import { SubagentFloat } from './SubagentFloat';
 import type { useModelConfig } from '../hooks/useModelConfig';
 import {
   isGrokModelId,
@@ -51,6 +52,8 @@ export interface ComposerSectionProps {
   applyCodingPreset: (preset: (typeof codingPresets)[number]) => void;
   grokIsRunning: boolean;
   activeRunId: string | null;
+  /** UI session / tab id for concurrent lane scheduling. */
+  laneId: string;
   stopRun: (runId: string) => void;
 }
 
@@ -72,6 +75,7 @@ export function ComposerSection({
   applyCodingPreset,
   grokIsRunning,
   activeRunId,
+  laneId,
   stopRun,
 }: ComposerSectionProps) {
   const {
@@ -136,10 +140,20 @@ export function ComposerSection({
           </button>
         </div>
       ) : null}
+      <SubagentFloat
+        sessionRunIds={messages
+          .map((message) => message.runId)
+          .filter((id): id is string => Boolean(id))}
+      />
       <Composer
         ref={composerRef}
         cwd={codingCwd}
         argsBuilder={buildRunArgs}
+        parentRunId={activeRunId ?? undefined}
+        laneId={laneId}
+        sessionRunIds={messages
+          .map((message) => message.runId)
+          .filter((id): id is string => Boolean(id))}
         initialValue={drafts[mode] || defaultDrafts[mode]}
         placeholder={modeCopy[mode].placeholder}
         onTextChange={(text) => {

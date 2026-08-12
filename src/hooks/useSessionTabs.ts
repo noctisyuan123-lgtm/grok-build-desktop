@@ -101,8 +101,8 @@ export function useSessionTabs(deps: SessionTabsDeps) {
   // invoked from stale closures (the ⌘N keydown listener and the ⌘K palette
   // memo, whose dep arrays don't include messages/tabs), so reading the
   // render-scope variables there could act on state that is many turns old.
-  const sessionStateRef = useRef({ activeTabId, messages, tabs });
-  sessionStateRef.current = { activeTabId, messages, tabs };
+  const sessionStateRef = useRef({ activeTabId, messages, tabs, codingCwd });
+  sessionStateRef.current = { activeTabId, messages, tabs, codingCwd };
   function handleTabCreate() {
     const current = sessionStateRef.current;
     // Already on a clean slate? Reuse it instead of stacking another empty
@@ -116,31 +116,39 @@ export function useSessionTabs(deps: SessionTabsDeps) {
       focusComposer();
       return;
     }
-    // No pre-create snapshot of the active tab here: the sync effect below
-    // already mirrors codingCwd/messages into it on every change, and a
-    // snapshot taken from a stale closure (⌘N/⌘K) would overwrite that fresh
-    // mirror with old messages and truncate the conversation's history.
-    setTabs((existing) => [...existing, makeTab('', [], defaultTabName('', existing.length))]);
-    // The new tab id is generated inside the setter; pull it out via a
-    // microtask so the state update has committed.
-    queueMicrotask(() => {
-      setTabs((current) => {
-        const newest = current[current.length - 1];
-        if (newest) {
-          setActiveTabId(newest.id);
-          setCodingCwd(newest.cwd);
-          setMessages(newest.messages as unknown as ChatMessage[]);
-        }
-        return current;
-      });
-      // "Clean slate" — Claude-Desktop-style. Wipe the composer draft, any
-      // leftover banner / notice, and the last-run card. The user opened a
-      // new session because they wanted a *fresh* surface.
-      setDrafts({ standard: '', coding: '' });
-      setComposerValue('');
-      setSessionNotice(null);
-      setLastRun(null);
-    });
+    // Atomic create + switch (same pattern as switchToSession). The previous
+    // path deferred the switch via queueMicrotask after a bare append, which
+    // could leave one paint with activeTabId pointing at the new tab while
+    // `messages` still held the prior conversation. The active-tab mirror
+    // effect then copied those old messages into the fresh tab — so ⌘N
+    // appeared to "split" / re-show the old session instead of a clean slate.
+    // Snapshot the live surface into the outgoing tab first (mirror may lag
+    // one frame behind stream finalize), then activate an empty tab in the
+    // same event turn so React batches one coherent render.
+    const fresh = makeTab('', [], defaultTabName('', current.tabs.length));
+    setTabs((existing) => [
+      ...existing.map((t) =>
+        t.id === current.activeTabId
+          ? {
+              ...t,
+              cwd: current.codingCwd,
+              messages: current.messages as unknown as TabMessage[],
+            }
+          : t,
+      ),
+      fresh,
+    ]);
+    setActiveTabId(fresh.id);
+    setCodingCwd(fresh.cwd);
+    setMessages([]);
+    // "Clean slate" — Claude-Desktop-style. Wipe the composer draft, any
+    // leftover banner / notice, and the last-run card. The user opened a
+    // new session because they wanted a *fresh* surface.
+    setDrafts({ standard: '', coding: '' });
+    setComposerValue('');
+    setSessionNotice(null);
+    setLastRun(null);
+    focusComposer();
   }
 
   // Persist tabs (and the active id) whenever the array changes. This is the

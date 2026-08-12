@@ -213,8 +213,13 @@ describe('composer submit → queued run → streamed reply', () => {
       await tauri.emitRunEvent(runId, { type: 'text', data: 'partial output' });
     });
 
-    expect(screen.queryByText('Stop')).not.toBeInTheDocument();
-    await user.click(await screen.findByRole('button', { name: t('composerSection.stopRun') }));
+    // Stop occupies the send slot (icon-only square); no separate text Stop.
+    expect(screen.queryByRole('button', { name: t('composer.send') })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: t('composer.sendEnqueue') })).not.toBeInTheDocument();
+    const stop = await screen.findByRole('button', { name: t('composerSection.stopRun') });
+    expect(stop).toHaveClass('composer-send', 'composer-stop');
+    expect(stop.querySelector('.composer-stop-square')).toBeInTheDocument();
+    await user.click(stop);
     await waitFor(() => {
       const cancel = tauri.calls.find((c) => c.cmd === 'cancel_run');
       expect(cancel?.args).toEqual({ runId });
@@ -225,6 +230,33 @@ describe('composer submit → queued run → streamed reply', () => {
       await tauri.emitQueue(null, []);
     });
     expect(await screen.findByText(t('message.stopped'))).toBeInTheDocument();
+  });
+
+  it('enqueues a same-session follow-up against the exact active parent run', async () => {
+    const ctx = await bootApp();
+    const { tauri } = ctx;
+    const runId = await submitPrompt(ctx, 'Parent turn still streaming');
+
+    await act(async () => {
+      await tauri.emitQueue(runId, []);
+      await tauri.emitRunState(runId, 'Running', { startedAt: Date.now() });
+      await tauri.emitRunEvent(runId, { type: 'text', data: 'partial…' });
+    });
+
+    const followUpId = await submitPrompt(ctx, 'Continue after this finishes');
+    const enqueue = [...tauri.calls].reverse().find((c) => c.cmd === 'enqueue_run')!;
+    expect(enqueue.args.prompt).toBe('Continue after this finishes');
+    const args = enqueue.args.args as string[];
+    // Parent has not emitted a session id yet. The queue resolves this exact
+    // run's ACP session head when it starts the child — no cwd-global `-c`.
+    expect(enqueue.args.parentRunId).toBe(runId);
+    // Same UI session → same lane; backend serializes behind parentRunId.
+    expect(typeof enqueue.args.laneId).toBe('string');
+    expect(String(enqueue.args.laneId).length).toBeGreaterThan(0);
+    expect(args).not.toContain('-c');
+    expect(args).not.toContain('--resume');
+    expect(followUpId).toBeTruthy();
+    expect(await convo().findByText('Continue after this finishes')).toBeInTheDocument();
   });
 
   it('undoes only the latest completed turn and restores its prompt to the composer', async () => {
@@ -249,6 +281,82 @@ describe('composer submit → queued run → streamed reply', () => {
     await ctx.user.click(screen.getByRole('button', { name: t('common.undo') }));
     expect(await convo().findByText('Please revise this prompt')).toBeInTheDocument();
     expect(composerTextarea().value).toBe('Keep this newer draft');
+  });
+
+  it('after undo re-seeds visible prior turns into a fresh session (not a bare /clear)', async () => {
+    const ctx = await bootApp();
+    const firstRun = await submitPrompt(ctx, 'Remember the project name Aurora');
+    await act(async () => {
+      await ctx.tauri.streamReply(firstRun, ['Aurora noted.']);
+    });
+    await waitFor(() => {
+      expect(document.querySelector('.message-assistant')).toHaveTextContent('Aurora noted.');
+    });
+
+    const secondRun = await submitPrompt(ctx, 'Now do something wrong');
+    await act(async () => {
+      await ctx.tauri.streamReply(secondRun, ['Wrong answer to undo.']);
+    });
+    await waitFor(() => {
+      expect(document.querySelectorAll('.message-assistant').length).toBe(2);
+    });
+
+    const undoButtons = await convo().findAllByRole('button', { name: t('message.undoResponse') });
+    const enabledUndo = undoButtons.find((button) => !(button as HTMLButtonElement).disabled);
+    expect(enabledUndo).toBeTruthy();
+    await ctx.user.click(enabledUndo!);
+    expect(convo().queryByText('Wrong answer to undo.')).not.toBeInTheDocument();
+    expect(await convo().findByText('Remember the project name Aurora')).toBeInTheDocument();
+    expect(composerTextarea().value).toBe('Now do something wrong');
+
+    // Submit the restored (or revised) prompt: must NOT resume the ACP head
+    // that still holds the undone turn, and must re-seed the visible first turn.
+    await ctx.user.keyboard('{Enter}');
+    await waitFor(() => expect(ctx.tauri.runIds.length).toBe(3));
+    const enqueue = [...ctx.tauri.calls].reverse().find((c) => c.cmd === 'enqueue_run')!;
+    const args = enqueue.args.args as string[];
+    expect(args).not.toContain('--resume');
+    expect(args).not.toContain('-c');
+    const rulesIdx = args.indexOf('--rules');
+    expect(rulesIdx).toBeGreaterThanOrEqual(0);
+    const rules = args[rulesIdx + 1] ?? '';
+    expect(rules).toContain('Remember the project name Aurora');
+    expect(rules).toContain('Aurora noted.');
+    expect(rules).not.toContain('Wrong answer to undo');
+    expect(rules).not.toContain('Now do something wrong');
+  });
+
+  it('toast recovery after undo clears the fresh-session re-seed plan', async () => {
+    const ctx = await bootApp();
+    const firstRun = await submitPrompt(ctx, 'Keep this context');
+    await act(async () => {
+      await ctx.tauri.streamReply(firstRun, ['Kept.']);
+    });
+    const secondRun = await submitPrompt(ctx, 'Undo me');
+    await act(async () => {
+      await ctx.tauri.streamReply(secondRun, ['Gone.']);
+    });
+    await waitFor(() => {
+      expect(document.querySelectorAll('.message-assistant').length).toBe(2);
+    });
+
+    const undoButtons = await convo().findAllByRole('button', { name: t('message.undoResponse') });
+    const enabledUndo = undoButtons.find((button) => !(button as HTMLButtonElement).disabled);
+    expect(enabledUndo).toBeTruthy();
+    await ctx.user.click(enabledUndo!);
+    await ctx.user.click(screen.getByRole('button', { name: t('common.undo') }));
+    expect(await convo().findByText('Gone.')).toBeInTheDocument();
+
+    // Follow-up after toast restore should resume normally, not force-replay.
+    await ctx.user.clear(composerTextarea());
+    await ctx.user.type(composerTextarea(), 'Continue after restore');
+    await ctx.user.keyboard('{Enter}');
+    await waitFor(() => expect(ctx.tauri.runIds.length).toBe(3));
+    const enqueue = [...ctx.tauri.calls].reverse().find((c) => c.cmd === 'enqueue_run')!;
+    const args = enqueue.args.args as string[];
+    expect(args).toContain('--resume');
+    const rules = (args[args.indexOf('--rules') + 1] as string) ?? '';
+    expect(rules).not.toContain('re-seeded into a fresh session after Undo');
   });
 
   it('surfaces an enqueue failure as a session notice and keeps the draft', async () => {
@@ -299,6 +407,82 @@ describe('session tabs and history', () => {
     await waitFor(() => {
       expect(document.querySelector('.message-assistant')).toHaveTextContent('Login flake fixed.');
     });
+  });
+
+  it('⌘N starts a clean session without re-showing the prior conversation', async () => {
+    // Regression for the deferred microtask tab-create path that could mirror
+    // the old messages onto the new tab for one frame (and sometimes stick).
+    const ctx = await bootApp();
+    const { tauri, user } = ctx;
+
+    const runId = await submitPrompt(ctx, 'Prior conversation body');
+    await act(async () => {
+      await tauri.streamReply(runId, ['Prior reply stays in history only.']);
+    });
+    await waitFor(() => {
+      expect(document.querySelector('.message-assistant')).toHaveTextContent(
+        'Prior reply stays in history only.',
+      );
+    });
+
+    // ⌘N is ignored while a textarea/input has focus (don't steal New Window).
+    // Move focus onto a non-field chrome control, then fire the shortcut.
+    const priorRow = await screen.findByRole('button', { name: /Prior conversation body/ });
+    priorRow.focus();
+    await user.keyboard('{Meta>}n{/Meta}');
+
+    expect(
+      await convo().findByRole('button', { name: t('emptyState.workspaceAria') }),
+    ).toBeInTheDocument();
+    expect(convo().queryByText('Prior conversation body')).not.toBeInTheDocument();
+    expect(convo().queryByText('Prior reply stays in history only.')).not.toBeInTheDocument();
+
+    // Prior chat remains a distinct HISTORY row (not split into the new surface).
+    expect(await screen.findByRole('button', { name: /Prior conversation body/ })).toBeInTheDocument();
+  });
+
+  it('queues a new session without inheriting another session run args or Stop control', async () => {
+    const ctx = await bootApp();
+    const { tauri, user } = ctx;
+
+    const runA = await submitPrompt(ctx, 'Session A long script');
+    await act(async () => {
+      await tauri.emitQueue(runA, []);
+      await tauri.emitRunState(runA, 'Running', { startedAt: Date.now() });
+      await tauri.emitRunEvent(runA, {
+        type: 'text',
+        data: 'Streaming only in session A',
+      });
+    });
+    // Current session owns the run → Stop in the send slot.
+    expect(
+      await screen.findByRole('button', { name: t('composerSection.stopRun') }),
+    ).toHaveClass('composer-send', 'composer-stop');
+    expect(await convo().findByText('Streaming only in session A')).toBeInTheDocument();
+
+    // New empty session while A is still running.
+    await user.click(screen.getByRole('button', { name: new RegExp(t('nav.newSession')) }));
+    expect(
+      await convo().findByRole('button', { name: t('emptyState.workspaceAria') }),
+    ).toBeInTheDocument();
+    expect(convo().queryByText('Session A long script')).not.toBeInTheDocument();
+    expect(convo().queryByText('Streaming only in session A')).not.toBeInTheDocument();
+    // Other session's run must not replace this session's send button, and
+    // concurrent lanes mean this free session still shows Send (not Enqueue).
+    expect(screen.queryByRole('button', { name: t('composerSection.stopRun') })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: t('composer.send') })).toBeInTheDocument();
+
+    const runB = await submitPrompt(ctx, 'Fresh session B prompt');
+    const enqueueB = [...tauri.calls].reverse().find((c) => c.cmd === 'enqueue_run')!;
+    expect(enqueueB.args.prompt).toBe('Fresh session B prompt');
+    const argsB = enqueueB.args.args as string[];
+    // Must not continue / resume session A's conversation.
+    expect(argsB).not.toContain('-c');
+    expect(argsB).not.toContain('--resume');
+    expect(await convo().findByText('Fresh session B prompt')).toBeInTheDocument();
+    // Assistant output from A must not paint into B's empty-started surface.
+    expect(convo().queryByText('Streaming only in session A')).not.toBeInTheDocument();
+    expect(runB).toBeTruthy();
   });
 
   it('clears the conversation with an undo window that restores it', async () => {

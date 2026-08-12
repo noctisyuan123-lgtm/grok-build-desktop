@@ -33,9 +33,14 @@ export function QueueDock({ onError }: Props) {
     getQueue()
       .then((snap) => {
         if (cancelled) return;
-        replaceQueue({ active: snap.active, items: snap.queue as never });
+        const activeIds = snap.activeIds ?? (snap.active ? [snap.active] : []);
+        replaceQueue({
+          active: snap.active,
+          activeIds,
+          items: snap.queue as never,
+        });
         const queuedItems = snap.queue.filter((r) => r.state === 'Queued');
-        if (queuedItems.length > 0 && !snap.active) {
+        if (queuedItems.length > 0 && activeIds.length === 0) {
           setBannerCount(queuedItems.length);
           setResumeBannerVisible(true);
         }

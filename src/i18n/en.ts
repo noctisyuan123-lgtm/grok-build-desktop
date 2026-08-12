@@ -273,6 +273,20 @@ export const en = {
   'message.undoLatestOnly': 'Only the latest completed response can be undone',
   'message.turnUndone': 'Response moved back to the composer.',
 
+  // ── Subagent float / drawer ───────────────────────────────────────────────
+  'subagent.floatOpen': 'Open subagent session: {label}',
+  'subagent.drawerTitle': 'Subagent · {label}',
+  'subagent.drawerClose': 'Close subagent session',
+  'subagent.metaStatus': 'Status',
+  'subagent.metaElapsed': 'Elapsed',
+  'subagent.metaProgress': 'Progress',
+  'subagent.childTraces': 'Activity',
+  'subagent.noChildTraces': 'No nested tool activity is available for this subagent.',
+  'subagent.statusRunning': 'Running',
+  'subagent.statusDone': 'Done',
+  'subagent.statusError': 'Error',
+  'subagent.statusCancelled': 'Cancelled',
+
   // ── Title bar ─────────────────────────────────────────────────────────────
   'titleBar.toLight': 'Switch to light theme',
   'titleBar.toDark': 'Switch to dark theme',

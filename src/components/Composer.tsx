@@ -39,6 +39,15 @@ export interface ComposerHandle {
 interface Props {
   cwd: string;
   argsBuilder: () => string[];
+  /** Current session's active run. The backend resolves its session after it ends. */
+  parentRunId?: string;
+  /**
+   * UI session / tab id for the concurrent lane scheduler. Same lane serializes;
+   * different lanes run side-by-side. Never inferred from cwd.
+   */
+  laneId?: string;
+  /** Run ids that belong to this session (for session-scoped Send/Enqueue). */
+  sessionRunIds?: readonly string[];
   /** Initial seed value (e.g. restored from session_state drafts). Only applied once on mount. */
   initialValue?: string;
   placeholder?: string;
@@ -64,7 +73,11 @@ interface Props {
   onTextChange?: (text: string) => void;
   /** Compact mode/model/run controls rendered inside the input card. */
   controls?: ReactNode;
-  /** Replaces the send arrow while the active run can be stopped. */
+  /**
+   * When set (current UI session has a stoppable run), replaces the send
+   * arrow with an icon-only Stop control in the same slot. Enter still
+   * enqueues a follow-up — stop is click-only.
+   */
   onStop?: () => void;
 }
 
@@ -97,7 +110,20 @@ function detectActiveMention(text: string, caret: number): { start: number; quer
 }
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { cwd, argsBuilder, initialValue, placeholder, onEnqueued, onError, onTextChange, controls, onStop }: Props,
+  {
+    cwd,
+    argsBuilder,
+    parentRunId,
+    laneId,
+    sessionRunIds,
+    initialValue,
+    placeholder,
+    onEnqueued,
+    onError,
+    onTextChange,
+    controls,
+    onStop,
+  }: Props,
   outerRef,
 ) {
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -116,9 +142,55 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const fileInputRef = useRef<HTMLInputElement>(null);
   const onTextChangeRef = useRef(onTextChange);
   onTextChangeRef.current = onTextChange;
+  // Local draft undo/redo (textarea-scoped). Native undo stacks are cleared by
+  // programmatic value writes (setValue / submit clear / IME edge cases) and
+  // are unreliable in WebView/jsdom — keep a small stack so Cmd/Ctrl+Z restores
+  // accidental deletes without a global key listener or message-round-trip undo.
+  const draftHistoryRef = useRef<string[]>([initialValue ?? '']);
+  const draftIndexRef = useRef(0);
+  const applyingDraftHistoryRef = useRef(false);
+
+  const recordDraftHistory = useCallback((value: string) => {
+    if (applyingDraftHistoryRef.current || composingRef.current) return;
+    const history = draftHistoryRef.current;
+    const index = draftIndexRef.current;
+    if (history[index] === value) return;
+    const next = history.slice(0, index + 1);
+    next.push(value);
+    // Cap growth; drop oldest and keep index aligned.
+    if (next.length > 100) {
+      next.shift();
+      draftHistoryRef.current = next;
+      draftIndexRef.current = next.length - 1;
+    } else {
+      draftHistoryRef.current = next;
+      draftIndexRef.current = next.length - 1;
+    }
+  }, []);
+
+  const applyDraftHistory = useCallback((value: string) => {
+    const el = ref.current;
+    if (!el) return;
+    applyingDraftHistoryRef.current = true;
+    el.value = value;
+    const caret = value.length;
+    try {
+      el.setSelectionRange(caret, caret);
+    } catch {
+      /* some test hosts reject selection on detached nodes */
+    }
+    applyingDraftHistoryRef.current = false;
+    const nextCaret = el.selectionStart ?? 0;
+    setMention(detectActiveMention(el.value, nextCaret));
+  }, []);
   // Primitive selector — subscribing to whole run/queue snapshots would
   // re-render the Composer on every streamed token (see useHasInflight).
-  const hasInflight = useHasInflight();
+  // Session-scoped so another tab's long run does not flip Send → Enqueue here.
+  const hasInflight = useHasInflight(
+    sessionRunIds || laneId
+      ? { sessionRunIds: sessionRunIds ?? [], laneId }
+      : undefined,
+  );
 
   const addAttachments = useCallback(
     (incoming: ComposerAttachment[]) => {
@@ -220,17 +292,23 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         const el = ref.current;
         if (!el) return;
         el.value = text;
+        // Imperative writes (mode switch, undo-response restore, starters)
+        // replace the live draft — seed history so Cmd+Z can still recover
+        // the previous local text if the user immediately deletes.
+        recordDraftHistory(text);
       },
       getValue: () => ref.current?.value ?? '',
       focus: () => ref.current?.focus(),
     }),
-    [],
+    [recordDraftHistory],
   );
 
   // Apply initialValue once on mount.
   useEffect(() => {
     if (initialValue && ref.current && !ref.current.value) {
       ref.current.value = initialValue;
+      draftHistoryRef.current = [initialValue];
+      draftIndexRef.current = 0;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -251,8 +329,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
    * movement. We can't use a controlled value because the textarea is
    * uncontrolled (perf invariant — see onTextChange comment).
    */
-  const refreshMention = () => {
-    const el = ref.current;
+  const refreshMentionFrom = (el: HTMLTextAreaElement | null) => {
     if (!el) {
       setMention(null);
       return;
@@ -260,6 +337,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     const caret = el.selectionStart ?? 0;
     setMention(detectActiveMention(el.value, caret));
   };
+
+  const refreshMention = () => refreshMentionFrom(ref.current);
 
   const insertMention = (entry: FileEntry) => {
     const el = ref.current;
@@ -273,6 +352,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     el.value = `${before}${insertion}${after}`;
     const newCaret = before.length + insertion.length;
     el.setSelectionRange(newCaret, newCaret);
+    recordDraftHistory(el.value);
     setMention(null);
     el.focus();
   };
@@ -325,8 +405,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       } else {
         args.push('-p', prompt);
       }
-      const result = await enqueueRun({ prompt, cwd, args });
+      const result = await enqueueRun({ prompt, cwd, args, parentRunId, laneId });
       el.value = '';
+      recordDraftHistory('');
       setAttachments([]);
       onTextChangeRef.current?.('');
       onEnqueued?.({
@@ -444,9 +525,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         onCompositionEnd={() => {
           composingRef.current = false;
           setIsComposing(false);
+          const el = ref.current;
+          if (el) recordDraftHistory(el.value);
           refreshMention();
         }}
-        onInput={() => refreshMention()}
+        onInput={() => {
+          const el = ref.current;
+          if (el && !composingRef.current) recordDraftHistory(el.value);
+          refreshMention();
+        }}
         onClick={() => refreshMention()}
         onKeyUp={(e) => {
           // arrow-nav over the textarea moves the caret too — refresh after.
@@ -476,6 +563,29 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           if (mention && cwd.trim()) {
             const navKeys = ['Enter', 'Tab', 'ArrowDown', 'ArrowUp', 'Escape'];
             if (navKeys.includes(e.key)) return;
+          }
+          // Draft undo/redo — only while this textarea is the event target.
+          // Never register a window-level listener that could steal Cmd+Z from
+          // other editable controls or app-wide undo surfaces.
+          const mod = e.metaKey || e.ctrlKey;
+          if (mod && !e.altKey && e.key.toLowerCase() === 'z') {
+            const native = e.nativeEvent as KeyboardEvent;
+            if (composingRef.current || isComposing || native.isComposing || native.keyCode === 229) {
+              return;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.shiftKey) {
+              // Redo (Cmd/Ctrl+Shift+Z)
+              if (draftIndexRef.current < draftHistoryRef.current.length - 1) {
+                draftIndexRef.current += 1;
+                applyDraftHistory(draftHistoryRef.current[draftIndexRef.current] ?? '');
+              }
+            } else if (draftIndexRef.current > 0) {
+              draftIndexRef.current -= 1;
+              applyDraftHistory(draftHistoryRef.current[draftIndexRef.current] ?? '');
+            }
+            return;
           }
           if (e.key !== 'Enter' || e.shiftKey) return;
           // Four-layer guard against accidental Enter-during-IME auto-submit:

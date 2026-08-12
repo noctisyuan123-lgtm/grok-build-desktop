@@ -111,12 +111,11 @@ describe('switchToSession', () => {
 });
 
 describe('handleTabCreate', () => {
-  it('creates a fresh empty tab, switches to it, and wipes the surface', async () => {
+  it('creates a fresh empty tab, switches to it, and wipes the surface', () => {
     seedTabs();
     const { result } = renderHook(() => useHarness([message('a1')]));
-    await act(async () => {
+    act(() => {
       result.current.handleTabCreate();
-      await Promise.resolve(); // let the queued microtask commit
     });
     expect(result.current.tabs).toHaveLength(3);
     const newest = result.current.tabs[2];
@@ -128,16 +127,54 @@ describe('handleTabCreate', () => {
     expect(result.current.lastRun).toBeNull();
   });
 
-  it('reuses an already-empty active tab instead of stacking new empty rows', async () => {
+  it('does not copy the prior conversation into the new tab (⌘N clean slate)', () => {
+    // Regression: deferred microtask switch left one frame where activeTabId
+    // was the new tab while messages still held the old conversation; the
+    // mirror effect then persisted those messages onto the fresh tab.
+    seedTabs();
+    const { result } = renderHook(() => useHarness([message('a1'), message('a2')]));
+    const priorId = result.current.activeTabId;
+
+    act(() => {
+      result.current.handleTabCreate();
+    });
+
+    const newest = result.current.tabs[result.current.tabs.length - 1];
+    expect(newest.id).not.toBe(priorId);
+    expect(result.current.activeTabId).toBe(newest.id);
+    expect(result.current.messages).toEqual([]);
+    expect(newest.messages).toEqual([]);
+    // Prior conversation remains intact on its own tab (no split/wipe).
+    const prior = result.current.tabs.find((t) => t.id === priorId)!;
+    expect(prior.messages.map((m) => m.id)).toEqual(['a1', 'a2']);
+  });
+
+  it('preserves live messages that have not yet been mirrored into the tab store', () => {
+    seedTabs();
+    const { result } = renderHook(() => useHarness([message('a1')]));
+    // Commit the live append first (as a real stream/user event would), then
+    // create — sessionStateRef must snapshot the live surface, not only the
+    // last mirrored tab.messages array.
+    act(() => {
+      result.current.setMessages((cur) => [...cur, message('live')]);
+    });
+    act(() => {
+      result.current.handleTabCreate();
+    });
+    const prior = result.current.tabs.find((t) => t.id === 't1')!;
+    expect(prior.messages.map((m) => m.id)).toEqual(['a1', 'live']);
+    expect(result.current.messages).toEqual([]);
+  });
+
+  it('reuses an already-empty active tab instead of stacking new empty rows', () => {
     window.localStorage.setItem(
       tabsStorageKey,
       JSON.stringify([{ id: 't1', name: 'empty', cwd: '', createdAt: 1, messages: [] }]),
     );
     window.localStorage.setItem(tabsActiveKey, 't1');
     const { result } = renderHook(() => useHarness([]));
-    await act(async () => {
+    act(() => {
       result.current.handleTabCreate();
-      await Promise.resolve();
     });
     expect(result.current.tabs).toHaveLength(1);
     expect(result.current.activeTabId).toBe('t1');

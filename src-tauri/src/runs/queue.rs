@@ -4,7 +4,7 @@ use super::event::GrokEvent;
 use super::parser::parse_line;
 use super::process;
 use serde::Serialize;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::AsyncBufReadExt;
@@ -17,6 +17,10 @@ const BROADCAST_CAPACITY: usize = 1024;
 
 /// How much of grok's stderr we keep for error reporting on a non-zero exit.
 pub const STDERR_TAIL_MAX_BYTES: usize = 4096;
+
+/// Lane id used when the UI does not supply one (legacy callers / tests).
+/// All such runs share one serial lane.
+pub const DEFAULT_LANE_ID: &str = "";
 
 /// Truncate `tail` in place so at most `max_bytes` bytes of its END remain.
 /// The cut is moved forward to the next `char` boundary: grok's stderr is
@@ -60,20 +64,34 @@ pub enum QueueMessageKind {
     QueueChanged,
 }
 
+/// One concurrent execution slot, keyed by UI session lane.
+struct ActiveSlot {
+    run_id: String,
+    pgid: Option<i32>,
+}
+
 pub struct RunQueue {
     pub db: Db,
     inner: Arc<Mutex<Inner>>,
     notify: Arc<Notify>,
     pub tx: broadcast::Sender<QueueMessage>,
-    core: Arc<Mutex<Option<AcpHost>>>,
+    /// Per-lane ACP hosts. A host is *taken* out of the map for the duration
+    /// of a turn so concurrent lanes never share a mutex across a turn.
+    acp_hosts: Arc<Mutex<HashMap<String, AcpHost>>>,
 }
 
 struct Inner {
     waiting: VecDeque<RunRecord>,
-    active: Option<String>,
+    /// lane_id → currently executing run on that lane.
+    active_lanes: HashMap<String, ActiveSlot>,
     cancelled: HashSet<String>,
-    /// Process-group id of the running grok child, if any.
-    active_pgid: Option<i32>,
+    /// Follow-up run -> parent run, supplied by the UI session that owns it.
+    /// This is deliberately run-scoped rather than cwd-global: different UI
+    /// sessions may share a directory without sharing a conversation head.
+    parent_runs: HashMap<String, String>,
+    /// Session heads emitted by completed runs. A queued child resolves its
+    /// parent's head immediately before launch, after the parent has ended.
+    completed_sessions: HashMap<String, String>,
     grok_path: PathBuf,
 }
 
@@ -84,11 +102,19 @@ impl RunQueue {
         // Recover Queued rows into memory (do not auto-start — banner handles resume).
         let queued = db.list_by_state(RunState::Queued).await.unwrap_or_default();
 
+        let mut parent_runs = HashMap::new();
+        for rec in &queued {
+            if let Some(parent) = &rec.parent_run_id {
+                parent_runs.insert(rec.id.clone(), parent.clone());
+            }
+        }
+
         let inner = Inner {
             waiting: VecDeque::from(queued),
-            active: None,
+            active_lanes: HashMap::new(),
             cancelled: HashSet::new(),
-            active_pgid: None,
+            parent_runs,
+            completed_sessions: HashMap::new(),
             grok_path,
         };
         let (tx, rx) = broadcast::channel(BROADCAST_CAPACITY);
@@ -97,7 +123,7 @@ impl RunQueue {
             inner: Arc::new(Mutex::new(inner)),
             notify: Arc::new(Notify::new()),
             tx,
-            core: Arc::new(Mutex::new(None)),
+            acp_hosts: Arc::new(Mutex::new(HashMap::new())),
         };
         (queue, rx)
     }
@@ -115,10 +141,13 @@ impl RunQueue {
         prompt: String,
         cwd: String,
         args: Vec<String>,
+        parent_run_id: Option<String>,
+        lane_id: Option<String>,
     ) -> Result<(String, usize), sqlx::Error> {
         let id = uuid::Uuid::now_v7().to_string();
         let args_json = serde_json::to_string(&args).unwrap_or_else(|_| "[]".into());
         let now = chrono::Utc::now().timestamp_millis();
+        let lane = lane_id.unwrap_or_else(|| DEFAULT_LANE_ID.to_string());
         let rec = RunRecord {
             id: id.clone(),
             prompt,
@@ -130,18 +159,28 @@ impl RunQueue {
             ended_at: None,
             stop_reason: None,
             error: None,
+            lane_id: lane.clone(),
+            parent_run_id: parent_run_id.clone(),
         };
         self.db.insert_run(&rec).await?;
 
         let position;
         {
             let mut inner = self.inner.lock().await;
+            // Lane-local depth: runs already waiting on this lane plus the
+            // active run on this lane (if any). Other lanes do not inflate
+            // "you're next" for this session.
+            let ahead_waiting = inner
+                .waiting
+                .iter()
+                .filter(|r| r.lane_id == lane)
+                .count();
+            let lane_busy = inner.active_lanes.contains_key(&lane);
+            position = ahead_waiting + usize::from(lane_busy);
             inner.waiting.push_back(rec);
-            // Number of runs ahead of the new one: everything already waiting
-            // (e.g. recovered-but-not-resumed Queued rows after a restart)
-            // plus the active run if any. The old `active.is_none() → 0`
-            // branch reported "runs next" even with recovered runs in front.
-            position = inner.waiting.len() - 1 + usize::from(inner.active.is_some());
+            if let Some(parent_id) = parent_run_id {
+                inner.parent_runs.insert(id.clone(), parent_id);
+            }
         }
 
         let _ = self.tx.send(QueueMessage {
@@ -185,10 +224,19 @@ impl RunQueue {
             });
             return Ok(true);
         }
-        // If active: mark cancelled and kill group; worker loop will finalize.
-        if inner.active.as_deref() == Some(run_id) {
+        // If active on any lane: mark cancelled and kill that run's group only.
+        let pgid = inner
+            .active_lanes
+            .values()
+            .find(|slot| slot.run_id == run_id)
+            .and_then(|slot| slot.pgid);
+        if pgid.is_some()
+            || inner
+                .active_lanes
+                .values()
+                .any(|slot| slot.run_id == run_id)
+        {
             inner.cancelled.insert(run_id.into());
-            let pgid = inner.active_pgid;
             drop(inner);
             if let Some(p) = pgid {
                 process::kill_group(p).await;
@@ -236,10 +284,18 @@ impl RunQueue {
         Ok(drained.len() as u64)
     }
 
-    pub async fn snapshot(&self) -> (Option<String>, Vec<RunRecord>) {
+    /// Snapshot of concurrent actives + waiting records.
+    /// `active_ids` lists every run currently executing (one per busy lane).
+    pub async fn snapshot(&self) -> (Vec<String>, Vec<RunRecord>) {
         let inner = self.inner.lock().await;
+        let mut active_ids: Vec<String> = inner
+            .active_lanes
+            .values()
+            .map(|slot| slot.run_id.clone())
+            .collect();
+        active_ids.sort();
         (
-            inner.active.clone(),
+            active_ids,
             inner.waiting.iter().cloned().collect(),
         )
     }
@@ -253,34 +309,54 @@ impl RunQueue {
     }
 
     /// Spawn the worker loop as a long-running tokio task. Returns immediately.
+    ///
+    /// The worker drains every lane that is idle and has a waiting head, then
+    /// waits for the next notify. Each run is spawned as its own task so other
+    /// lanes are never blocked behind a long turn.
     pub fn spawn_worker(self: Arc<Self>) {
         let me = self.clone();
         tokio::spawn(async move {
             loop {
                 me.notify.notified().await;
-                while let Some(rec) = me.pop_next().await {
-                    me.run_one(rec).await;
-                }
+                me.drain_runnable().await;
             }
         });
     }
 
-    /// Pop the next runnable record, doing the cancelled check UNDER the same
-    /// lock that publishes `active`. A cancel that lands between pop and spawn
-    /// used to leave the run neither killed nor finalized: `active` pointed at
-    /// a skipped run forever and the DB row stayed Queued, resurrecting the
-    /// cancelled run on the next launch. Skipped runs are finalized as
-    /// Cancelled here instead.
-    async fn pop_next(&self) -> Option<RunRecord> {
+    /// Drain every currently runnable record into its own task.
+    async fn drain_runnable(self: &Arc<Self>) {
+        while let Some(rec) = self.pop_next_runnable().await {
+            let me = Arc::clone(self);
+            tokio::spawn(async move {
+                me.run_one(rec).await;
+            });
+        }
+    }
+
+    /// Pop the next record whose lane is idle (and not cancelled). Skipped
+    /// cancelled rows are finalized under the same lock that would publish
+    /// `active`, so a cancel between pop and spawn cannot leave a zombie.
+    async fn pop_next_runnable(&self) -> Option<RunRecord> {
         loop {
             let skipped_id;
             {
                 let mut inner = self.inner.lock().await;
-                let rec = inner.waiting.pop_front()?;
+                let Some(idx) = inner.waiting.iter().position(|r| {
+                    !inner.active_lanes.contains_key(&r.lane_id)
+                }) else {
+                    return None;
+                };
+                let rec = inner.waiting.remove(idx).expect("index from position");
                 if inner.cancelled.remove(&rec.id) {
                     skipped_id = rec.id;
                 } else {
-                    inner.active = Some(rec.id.clone());
+                    inner.active_lanes.insert(
+                        rec.lane_id.clone(),
+                        ActiveSlot {
+                            run_id: rec.id.clone(),
+                            pgid: None,
+                        },
+                    );
                     return Some(rec);
                 }
             }
@@ -293,7 +369,7 @@ impl RunQueue {
         }
     }
 
-    async fn run_one(&self, rec: RunRecord) {
+    async fn run_one(self: &Arc<Self>, rec: RunRecord) {
         let started_at = chrono::Utc::now().timestamp_millis();
         let _ = self
             .db
@@ -306,10 +382,10 @@ impl RunQueue {
                 None,
             )
             .await;
-        // Emit QueueChanged BEFORE StateChanged so the frontend's queue.active
-        // flips from None → Some(rec.id) before any text events arrive. The
-        // QueueChanged that fires from enqueue() can race with pop_next() and
-        // capture a stale active=None — emitting again here guarantees the
+        // Emit QueueChanged BEFORE StateChanged so the frontend's active set
+        // flips to include rec.id before any text events arrive. The
+        // QueueChanged that fires from enqueue() can race with pop and
+        // capture a stale snapshot — emitting again here guarantees the
         // post-pop snapshot is the one the frontend ends up with.
         let _ = self.tx.send(QueueMessage {
             run_id: rec.id.clone(),
@@ -325,7 +401,23 @@ impl RunQueue {
             },
         });
 
-        let args: Vec<String> = serde_json::from_str(&rec.args_json).unwrap_or_default();
+        let mut args: Vec<String> = serde_json::from_str(&rec.args_json).unwrap_or_default();
+        // The frontend may enqueue a same-session follow-up while its parent
+        // is still running. Resolve the parent's ACP session id here, not via
+        // CLI `-c` (ACP ignores that flag and it could select another UI
+        // session sharing the cwd).
+        let parent_session = {
+            let inner = self.inner.lock().await;
+            inner
+                .parent_runs
+                .get(&rec.id)
+                .and_then(|parent| inner.completed_sessions.get(parent))
+                .cloned()
+        };
+        if let Some(session_id) = parent_session {
+            args.push("--resume".to_string());
+            args.push(session_id);
+        }
         let grok_path = self.inner.lock().await.grok_path.clone();
         let cwd = std::path::PathBuf::from(&rec.cwd);
 
@@ -347,9 +439,13 @@ impl RunQueue {
             Ok(mut spawned) => {
                 let cancel_requested = {
                     let mut inner = self.inner.lock().await;
-                    inner.active_pgid = Some(spawned.pgid);
+                    if let Some(slot) = inner.active_lanes.get_mut(&rec.lane_id) {
+                        if slot.run_id == rec.id {
+                            slot.pgid = Some(spawned.pgid);
+                        }
+                    }
                     // A cancel may have landed between pop and spawn — its
-                    // `active_pgid` read saw None, so nothing was killed.
+                    // pgid read saw None, so nothing was killed.
                     // Honor it now that the pgid exists.
                     inner.cancelled.contains(&rec.id)
                 };
@@ -468,6 +564,13 @@ impl RunQueue {
                             match parse_line(&trimmed) {
                                 Ok(ev) => {
                                     consecutive_fail = 0;
+                                    if let GrokEvent::End { session_id, .. } = &ev {
+                                        self.inner
+                                            .lock()
+                                            .await
+                                            .completed_sessions
+                                            .insert(rec.id.clone(), session_id.clone());
+                                    }
                                     let _ = self.tx.send(QueueMessage {
                                         run_id: rec.id.clone(),
                                         kind: QueueMessageKind::Event {
@@ -504,7 +607,7 @@ impl RunQueue {
                 }
                 // Wait exit — bounded. Every other stall path has a watchdog;
                 // without one here a grok that closes stdout but never exits
-                // would leave the run Running forever and wedge the queue.
+                // would leave the run Running forever and wedge the lane.
                 let mut forced_exit = false;
                 let status = match tokio::time::timeout(
                     std::time::Duration::from_secs(30),
@@ -589,31 +692,46 @@ impl RunQueue {
     }
 
     async fn run_one_core(
-        &self,
+        self: &Arc<Self>,
         rec: &RunRecord,
         args: &[String],
         grok_path: &std::path::Path,
         cwd: &std::path::Path,
     ) {
         let config = CoreConfig::from_legacy_args(args);
-        let mut slot = self.core.lock().await;
-        let reuse = slot
-            .as_mut()
-            .is_some_and(|host| host.matches(grok_path, &config));
-        if !reuse {
-            *slot = match AcpHost::connect(grok_path, cwd, &config).await {
-                Ok(host) => Some(host),
+        // Take any existing host for this lane out of the pool so other lanes
+        // never wait on a shared turn mutex. Concurrent lanes each own a host.
+        let mut host = {
+            let mut hosts = self.acp_hosts.lock().await;
+            let reuse = hosts
+                .get_mut(&rec.lane_id)
+                .is_some_and(|h| h.matches(grok_path, &config));
+            if reuse {
+                hosts.remove(&rec.lane_id)
+            } else {
+                // Drop a stale host for this lane (if any) so its child is
+                // cleaned up via AcpHost::Drop before we connect a new one.
+                let _ = hosts.remove(&rec.lane_id);
+                None
+            }
+        };
+        if host.is_none() {
+            match AcpHost::connect(grok_path, cwd, &config).await {
+                Ok(h) => host = Some(h),
                 Err(error) => {
-                    drop(slot);
                     self.finalize(&rec.id, RunState::Failed, Some(error)).await;
                     return;
                 }
-            };
+            }
         }
-        let host = slot.as_mut().expect("ACP host initialized");
+        let mut host = host.expect("ACP host initialized");
         {
             let mut inner = self.inner.lock().await;
-            inner.active_pgid = Some(host.pgid());
+            if let Some(slot) = inner.active_lanes.get_mut(&rec.lane_id) {
+                if slot.run_id == rec.id {
+                    slot.pgid = Some(host.pgid());
+                }
+            }
         }
         let result = host
             .run_turn(&rec.id, &rec.prompt, cwd, &config, &self.tx)
@@ -621,6 +739,11 @@ impl RunQueue {
         let cancelled = self.inner.lock().await.cancelled.contains(&rec.id);
         match result {
             Ok(turn) if !cancelled => {
+                self.inner
+                    .lock()
+                    .await
+                    .completed_sessions
+                    .insert(rec.id.clone(), turn.session_id.clone());
                 let event = GrokEvent::End {
                     stop_reason: turn.stop_reason,
                     session_id: turn.session_id,
@@ -631,17 +754,17 @@ impl RunQueue {
                     run_id: rec.id.clone(),
                     kind: QueueMessageKind::Event { event, raw },
                 });
-                drop(slot);
+                // Return host to the lane pool for the next serial turn.
+                self.acp_hosts.lock().await.insert(rec.lane_id.clone(), host);
                 self.finalize(&rec.id, RunState::Done, None).await;
             }
             Ok(_) => {
-                *slot = None;
-                drop(slot);
+                // Cancelled mid-turn: drop host so the child is killed.
+                drop(host);
                 self.finalize(&rec.id, RunState::Cancelled, None).await;
             }
             Err(error) => {
-                *slot = None;
-                drop(slot);
+                drop(host);
                 let state = if cancelled {
                     RunState::Cancelled
                 } else {
@@ -664,10 +787,16 @@ impl RunQueue {
             // Prune the cancel mark so the set doesn't grow for the process
             // lifetime (and a recycled id could never be mis-skipped).
             inner.cancelled.remove(id);
-            if inner.active.as_deref() == Some(id) {
-                inner.active = None;
-                inner.active_pgid = None;
+            let lane_to_clear = inner
+                .active_lanes
+                .iter()
+                .find(|(_, slot)| slot.run_id == id)
+                .map(|(lane, _)| lane.clone());
+            if let Some(lane) = lane_to_clear {
+                inner.active_lanes.remove(&lane);
             }
+            // Parent edges only matter while the child is waiting to launch.
+            inner.parent_runs.remove(id);
         }
         let _ = self.tx.send(QueueMessage {
             run_id: id.into(),
@@ -682,7 +811,7 @@ impl RunQueue {
             run_id: id.into(),
             kind: QueueMessageKind::QueueChanged,
         });
-        // Wake worker for next.
+        // Wake worker so another waiting run on this (or any) idle lane can start.
         self.notify.notify_one();
     }
 }
