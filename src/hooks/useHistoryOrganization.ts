@@ -199,6 +199,7 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
           time: timeLabel(lastTs),
           pinned: pinnedPromptIds.has(t.id),
           group: promptGroups[t.id] ?? null,
+          projectPath: t.cwd.trim() || null,
           archived: archivedPromptIds.has(t.id),
           lastTs,
           active: t.id === activeTabId,
@@ -231,6 +232,7 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
     const archived = recentPrompts.filter((r) => r.archived);
     const pinned = live.filter((r) => r.pinned);
     const groupMap = new Map<string, HistoryRow[]>();
+    const projectMap = new Map<string, HistoryRow[]>();
     const ungrouped: HistoryRow[] = [];
     for (const r of live) {
       if (r.pinned) continue;
@@ -238,12 +240,19 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
         const arr = groupMap.get(r.group) ?? [];
         arr.push(r);
         groupMap.set(r.group, arr);
+      } else if (r.projectPath) {
+        const arr = projectMap.get(r.projectPath) ?? [];
+        arr.push(r);
+        projectMap.set(r.projectPath, arr);
       } else {
         ungrouped.push(r);
       }
     }
     const groups = Array.from(groupMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-    return { pinned, groups, ungrouped, archived };
+    const projectGroups = Array.from(projectMap.entries()).sort(
+      (a, b) => (b[1][0]?.lastTs ?? 0) - (a[1][0]?.lastTs ?? 0),
+    );
+    return { pinned, groups, projectGroups, ungrouped, archived };
   }, [recentPrompts]);
 
   return {

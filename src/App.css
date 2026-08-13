@@ -3456,10 +3456,12 @@ button.status-cluster.status-action:disabled {
   height: 17px;
   width: 17px;
 }
-/* Session history section head — match New session / Search (14px absolute).
-   Root is 13px, so the prior 0.72rem head was ~9.4px. */
+/* Keep the Conversations label aligned with the smaller Recent/Pinned heads. */
 .history-nav > .nav-head {
-  font-size: 14px;
+  color: var(--text-3);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
 }
 .customize-overlay {
   padding: 28px;
@@ -5934,6 +5936,37 @@ body[data-theme='light'] .hljs-comment {
 }
 .history-section-head svg {
   color: var(--text-4);
+}
+.project-history-group + .project-history-group {
+  margin-top: 5px;
+}
+.history-section-head.project-section-head {
+  align-items: center;
+  display: flex;
+  grid-template-columns: none;
+  justify-content: flex-start;
+  min-height: 35px;
+  padding: 6px 10px;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-1);
+  text-align: left;
+  width: 100%;
+}
+.project-section-head svg {
+  color: var(--text-2);
+  flex: 0 0 auto;
+}
+.project-section-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-history-group .history-row {
+  padding-left: 20px;
 }
 button.history-section-head.toggle {
   min-height: 0;

@@ -130,6 +130,8 @@ export type HistoryPreview = { id: string; title: string; detail: string; time: 
 export type HistoryRow = HistoryPreview & {
   pinned: boolean;
   group: string | null;
+  /** Canonical project path used to cluster otherwise ungrouped sessions. */
+  projectPath: string | null;
   archived: boolean;
   /** Last-activity timestamp (newest conversation sorts first). */
   lastTs: number;

@@ -81,6 +81,14 @@ describe('recentPrompts derivation', () => {
 });
 
 describe('pin / archive / group organization', () => {
+  it('clusters ungrouped conversations by their project path', () => {
+    const { result } = render();
+    const view = result.current.historyView;
+    expect(view.projectGroups.map(([path]) => path)).toEqual(['/b', '/a', '/old']);
+    expect(view.projectGroups.find(([path]) => path === '/a')?.[1].map((r) => r.id)).toEqual(['t1']);
+    expect(view.ungrouped).toEqual([]);
+  });
+
   it('partitions rows into pinned, groups, ungrouped, and archived sections', () => {
     const { result } = render();
     act(() => result.current.togglePinPrompt('t2'));

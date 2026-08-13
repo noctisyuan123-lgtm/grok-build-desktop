@@ -15,6 +15,7 @@ import {
   Copy,
   CornerUpLeft,
   FolderInput,
+  Folder,
   FolderPlus,
   History,
   Loader2,
@@ -28,6 +29,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { BrandGlyph } from './BrandGlyph';
 import type { ContextMenuItem, ContextMenuState } from './ContextMenu';
 import type { useHistoryOrganization } from '../hooks/useHistoryOrganization';
@@ -104,6 +106,32 @@ export function Sidebar({
     commitRowEdit,
     savePromptToLibrary,
   } = history;
+  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(
+    () => new Set(historyView.projectGroups.map(([path]) => path)),
+  );
+  const seenProjectPaths = useRef(new Set(historyView.projectGroups.map(([path]) => path)));
+  useEffect(() => {
+    const newPaths = historyView.projectGroups
+      .map(([path]) => path)
+      .filter((path) => !seenProjectPaths.current.has(path));
+    if (newPaths.length === 0) return;
+    newPaths.forEach((path) => seenProjectPaths.current.add(path));
+    setCollapsedProjects((current) => new Set([...current, ...newPaths]));
+  }, [historyView.projectGroups]);
+
+  function projectName(path: string): string {
+    const trimmed = path.replace(/\/+$/, '');
+    return trimmed.split('/').filter(Boolean).pop() ?? path;
+  }
+
+  function toggleProject(path: string) {
+    setCollapsedProjects((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }
 
   // Segment labels need static keys — t() is typed via keyof typeof en, so a
   // computed `sidebar.mode.${item}` key would not type-check.
@@ -407,9 +435,35 @@ export function Sidebar({
                 </div>
               ))}
 
+              {historyView.projectGroups.length > 0 ? (
+                <div className="project-list">
+                  <div className="project-list-label">Projects</div>
+                  {historyView.projectGroups.map(([path, rows]) => {
+                    const collapsed = collapsedProjects.has(path);
+                    return (
+                      <div className="history-group project-history-group" key={`hp-${path}`}>
+                        <button
+                          type="button"
+                          className="history-section-head project-section-head"
+                          title={path}
+                          aria-expanded={!collapsed}
+                          onClick={() => toggleProject(path)}
+                        >
+                          <Folder size={17} />
+                          <span>{projectName(path)}</span>
+                        </button>
+                        {!collapsed ? rows.map(renderHistoryRow) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+
               {historyView.ungrouped.length > 0 ? (
                 <div className="history-group">
-                  {historyView.pinned.length > 0 || historyView.groups.length > 0 ? (
+                  {historyView.pinned.length > 0 ||
+                  historyView.groups.length > 0 ||
+                  historyView.projectGroups.length > 0 ? (
                     <div className="history-section-head">
                       <History size={12} /> {t('sidebar.recent')}
                     </div>

@@ -141,9 +141,20 @@ describe('Sidebar collapse control', () => {
 });
 
 function historyRow(title: RegExp | string) {
-  return screen.getByRole('button', {
-    name: new RegExp(typeof title === 'string' ? title : title.source),
-  });
+  const pattern = new RegExp(typeof title === 'string' ? title : title.source);
+  // Project folders are collapsed by default. Open folders until the requested
+  // row is present so the existing row-action tests exercise the same controls
+  // without coupling every test to a particular project path.
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const row = screen.queryByRole('button', { name: pattern });
+    if (row) return row;
+    const collapsedProject = screen
+      .queryAllByRole('button')
+      .find((button) => button.getAttribute('aria-expanded') === 'false');
+    if (!collapsedProject) break;
+    fireEvent.click(collapsedProject);
+  }
+  return screen.getByRole('button', { name: pattern });
 }
 
 describe('Sidebar conversations list', () => {
@@ -165,8 +176,29 @@ describe('Sidebar conversations list', () => {
     render(<Harness />);
     expect(screen.queryByLabelText('Search history')).not.toBeInTheDocument();
     expect(document.querySelector('.search-box')).not.toBeInTheDocument();
-    expect(screen.getByText('fix the login flake')).toBeInTheDocument();
-    expect(screen.getByText('write release notes')).toBeInTheDocument();
+    expect(historyRow('fix the login flake')).toBeInTheDocument();
+    expect(historyRow('write release notes')).toBeInTheDocument();
+  });
+
+  it('shows project folders above sessions that share the same cwd', () => {
+    render(<Harness />);
+    const project = screen.getByText('a').closest('.project-history-group');
+    expect(project).toBeInTheDocument();
+    expect(within(project as HTMLElement).queryByText('fix the login flake')).not.toBeInTheDocument();
+    expect(screen.getByText('b').closest('.project-history-group')).toBeInTheDocument();
+  });
+
+  it('collapses and reopens a project folder without losing its sessions', async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    const project = screen.getByText('a').closest('.project-history-group') as HTMLElement;
+    const toggle = within(project).getByRole('button', { name: 'a' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await user.click(toggle);
+    expect(within(project).getByText('fix the login flake')).toBeInTheDocument();
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await user.click(toggle);
+    expect(within(project).queryByText('fix the login flake')).not.toBeInTheDocument();
   });
 
   it('keeps one global Search action in primary navigation', () => {
@@ -191,7 +223,7 @@ describe('Sidebar right-click actions', () => {
     const menu = await screen.findByRole('menu');
     await user.click(within(menu).getByRole('menuitem', { name: /Delete conversation/ }));
     await waitFor(() => expect(screen.queryByText('write release notes')).not.toBeInTheDocument());
-    expect(screen.getByText('fix the login flake')).toBeInTheDocument();
+    expect(historyRow('fix the login flake')).toBeInTheDocument();
   });
 
   it('pins a conversation into the Pinned section', async () => {
@@ -349,8 +381,8 @@ describe('Sidebar primary navigation', () => {
     await user.click(screen.getByRole('button', { name: /New Session/ }));
     expect(screen.queryByText('New conversation')).not.toBeInTheDocument();
     // Both original conversations survive as history rows.
-    expect(screen.getByText('fix the login flake')).toBeInTheDocument();
-    expect(screen.getByText('write release notes')).toBeInTheDocument();
+    expect(historyRow('fix the login flake')).toBeInTheDocument();
+    expect(historyRow('write release notes')).toBeInTheDocument();
     expect(screen.getByTestId('active-conversation')).toHaveTextContent('');
   });
 
