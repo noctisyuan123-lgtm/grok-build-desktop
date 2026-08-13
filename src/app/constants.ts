@@ -44,6 +44,7 @@ export const storageKeys = {
   inspectorTab: 'grok-desktop-inspector-tab',
   modelPreset: 'grok-desktop-model-preset',
   customModel: 'grok-desktop-custom-model',
+  availableModels: 'grok-desktop-available-models-v1',
   effortLevel: 'grok-desktop-effort-level',
   reasoningEffort: 'grok-desktop-reasoning-effort',
   permissionMode: 'grok-desktop-permission-mode',
@@ -168,6 +169,16 @@ export const grokModelPresets: Record<
     label: 'grok-build-0.1',
     detail: t('model.grokBuildPinnedDetail'),
     defaultReasoning: 'off',
+  },
+  'grok-4.6': {
+    label: 'grok-4.6',
+    detail: t('model.grok46Detail'),
+    defaultReasoning: 'high',
+  },
+  'grok-4.5': {
+    label: 'grok-4.5',
+    detail: t('model.grok45Detail'),
+    defaultReasoning: 'high',
   },
   'grok-4.3': {
     label: 'grok-4.3',

@@ -27,6 +27,8 @@ pub struct CoreConfig {
     pub review_only: bool,
     pub rules: Option<String>,
     pub resume_session_id: Option<String>,
+    pub share_session: bool,
+    pub fork_session: bool,
     pub prompt_blocks: Option<Vec<Value>>,
 }
 
@@ -39,6 +41,8 @@ impl CoreConfig {
             review_only: false,
             rules: None,
             resume_session_id: None,
+            share_session: false,
+            fork_session: false,
             prompt_blocks: None,
         };
         let mut i = 0;
@@ -56,6 +60,8 @@ impl CoreConfig {
                     })
                 }
                 "--resume" => out.resume_session_id = value,
+                "--share-session" => out.share_session = true,
+                "--fork-session" => out.fork_session = true,
                 "--prompt-json" => {
                     out.prompt_blocks = value.and_then(|raw| serde_json::from_str(&raw).ok())
                 }
@@ -96,8 +102,23 @@ impl CoreConfig {
         if self.always_approve {
             args.push("--always-approve".to_string());
         }
-        args.extend(["--no-leader".to_string(), "stdio".to_string()]);
+        // Isolated agent by default. Live `/cli` turns join the Desktop
+        // leader so TUI and Desktop write one in-memory session.
+        if self.uses_shared_leader() {
+            args.push("--leader".to_string());
+            args.extend([
+                "--leader-socket".to_string(),
+                desktop_leader_socket().to_string_lossy().into_owned(),
+            ]);
+        } else {
+            args.push("--no-leader".to_string());
+        }
+        args.push("stdio".to_string());
         args
+    }
+
+    fn uses_shared_leader(&self) -> bool {
+        self.share_session && self.resume_session_id.is_some() && !self.fork_session
     }
 
     fn launch_key(&self, binary: &Path) -> String {
@@ -111,6 +132,214 @@ pub fn should_use_acp(binary: &Path) -> bool {
         Ok("acp") => true,
         _ => binary.file_stem().is_some_and(|name| name == "grok"),
     }
+}
+
+/// Unix socket for the Desktop↔CLI shared grok leader.
+/// Override with `GROK_DESKTOP_LEADER_SOCKET` (tests / multiple installs).
+pub fn desktop_leader_socket() -> PathBuf {
+    if let Ok(path) = std::env::var("GROK_DESKTOP_LEADER_SOCKET") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".grok-desktop")
+        .join("leader.sock")
+}
+
+pub fn desktop_leader_socket_ready() -> bool {
+    let path = desktop_leader_socket();
+    #[cfg(unix)]
+    {
+        std::os::unix::net::UnixStream::connect(path).is_ok()
+    }
+    #[cfg(not(unix))]
+    {
+        path.exists()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RewindResult {
+    pub rewound: bool,
+    pub kept_prompt_index: Option<u64>,
+}
+
+/// Last prompt to keep when dropping the newest user turn.
+/// One rewind point cannot be executed (ACP rejects `-1`).
+pub fn last_kept_prompt_index(points: &Value) -> Option<u64> {
+    kept_prompt_index_for_undo(points, None).ok().flatten()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RewindTargetError {
+    PreviewNotFound,
+    AmbiguousPreview { matches: usize },
+    NewerPrompts { count: usize },
+}
+
+impl std::fmt::Display for RewindTargetError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PreviewNotFound => write!(
+                formatter,
+                "the undone Desktop prompt did not safely match a rewind point"
+            ),
+            Self::AmbiguousPreview { matches } => write!(
+                formatter,
+                "the undone Desktop prompt matched {matches} rewind points; refusing an ambiguous rewind"
+            ),
+            Self::NewerPrompts { count } => write!(
+                formatter,
+                "{count} newer prompt(s) follow the undone Desktop prompt; refusing to truncate them"
+            ),
+        }
+    }
+}
+
+/// Prefer the rewind point that matches the Desktop-undone user text.
+/// Blindly dropping the newest grok prompt undoes a later CLI turn instead.
+pub fn kept_prompt_index_for_undo(
+    points: &Value,
+    undone_preview: Option<&str>,
+) -> Result<Option<u64>, RewindTargetError> {
+    let Some(points) = points.get("rewind_points").and_then(Value::as_array) else {
+        return Ok(None);
+    };
+    if points.is_empty() {
+        return Ok(None);
+    }
+    let drop_at = match undone_preview
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        None => points.len() - 1,
+        Some(undone) => {
+            let matches = points
+                .iter()
+                .enumerate()
+                .filter_map(|(index, point)| {
+                    point
+                        .get("prompt_preview")
+                        .and_then(Value::as_str)
+                        .filter(|preview| previews_match(preview, undone))
+                        .map(|_| index)
+                })
+                .collect::<Vec<_>>();
+            match matches.as_slice() {
+                [index] => *index,
+                [] => return Err(RewindTargetError::PreviewNotFound),
+                _ => {
+                    return Err(RewindTargetError::AmbiguousPreview {
+                        matches: matches.len(),
+                    })
+                }
+            }
+        }
+    };
+    if drop_at + 1 < points.len() {
+        return Err(RewindTargetError::NewerPrompts {
+            count: points.len() - drop_at - 1,
+        });
+    }
+    if drop_at == 0 {
+        return Ok(None);
+    }
+    Ok(points[drop_at - 1]
+        .get("prompt_index")
+        .and_then(Value::as_u64))
+}
+
+fn previews_match(preview: &str, undone: &str) -> bool {
+    let preview = preview.trim();
+    let undone = undone.trim();
+    if preview.is_empty() || undone.is_empty() {
+        return false;
+    }
+    // Grok labels this field `prompt_preview` and may truncate a long prompt.
+    // Accept only a prefix relationship (never a middle substring), then let
+    // the caller require that exactly one rewind point matches.
+    preview == undone || undone.starts_with(preview)
+}
+
+fn reject_unloaded_shared_session(
+    config: &CoreConfig,
+    session_id: &str,
+    load_error: &str,
+) -> Result<(), String> {
+    if config.uses_shared_leader() {
+        return Err(format!(
+            "session/load failed for shared session {session_id}; refusing to prompt an unbound ACP client: {load_error}"
+        ));
+    }
+    Ok(())
+}
+
+/// Truncate the grok session to drop the undone user turn (conversation only).
+pub async fn rewind_last_user_turn(
+    binary: &Path,
+    cwd: &Path,
+    session_id: &str,
+    undone_preview: Option<&str>,
+) -> Result<RewindResult, String> {
+    let share = desktop_leader_socket_ready();
+    let config = CoreConfig {
+        model: None,
+        reasoning_effort: None,
+        always_approve: false,
+        review_only: false,
+        rules: None,
+        resume_session_id: Some(session_id.to_string()),
+        share_session: share,
+        fork_session: false,
+        prompt_blocks: None,
+    };
+    let mut host = AcpHost::connect(binary, cwd, &config).await?;
+    host.rewind_last_user_turn(cwd, session_id, &config, undone_preview)
+        .await
+}
+
+/// Create a durable replacement head after Undo.
+///
+/// Grok 1.0 can list rewind points for a loaded session while still refusing
+/// `_x.ai/rewind/execute`.  In that case Desktop must not resume the old head:
+/// it creates a fresh session whose system rules contain only the conversation
+/// that remains visible after Undo.  The old session is left untouched.
+pub async fn create_rebased_session(
+    binary: &Path,
+    cwd: &Path,
+    replay_rules: Option<&str>,
+) -> Result<String, String> {
+    let config = CoreConfig {
+        model: None,
+        reasoning_effort: None,
+        always_approve: false,
+        review_only: false,
+        rules: replay_rules
+            .map(str::trim)
+            .filter(|rules| !rules.is_empty())
+            .map(str::to_string),
+        resume_session_id: None,
+        share_session: false,
+        fork_session: false,
+        prompt_blocks: None,
+    };
+    let mut host = AcpHost::connect(binary, cwd, &config).await?;
+    let resolved_cwd = if cwd.is_absolute() && cwd.is_dir() {
+        cwd.to_path_buf()
+    } else {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/"))
+    };
+    let session_id = host
+        .new_session(&resolved_cwd.to_string_lossy(), &config)
+        .await?;
+    host.shutdown().await;
+    Ok(session_id)
 }
 
 pub struct AcpHost {
@@ -205,6 +434,131 @@ impl AcpHost {
         self.pgid
     }
 
+    /// Stop this ACP client and wait for it to release/flush its session.
+    /// `/cli` handoff and shared-session rewind must not race a Drop-triggered
+    /// background termination with the next `session/load`.
+    pub async fn shutdown(&mut self) {
+        #[cfg(unix)]
+        {
+            let _ = nix::sys::signal::killpg(
+                nix::unistd::Pid::from_raw(self.pgid),
+                nix::sys::signal::Signal::SIGTERM,
+            );
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = self.child.start_kill();
+        }
+        if timeout(Duration::from_secs(2), self.child.wait())
+            .await
+            .is_err()
+        {
+            let _ = self.child.start_kill();
+            let _ = timeout(Duration::from_secs(1), self.child.wait()).await;
+        }
+    }
+
+    async fn rewind_last_user_turn(
+        &mut self,
+        cwd: &Path,
+        session_id: &str,
+        config: &CoreConfig,
+        undone_preview: Option<&str>,
+    ) -> Result<RewindResult, String> {
+        let resolved_cwd = if cwd.is_absolute() && cwd.is_dir() {
+            cwd.to_path_buf()
+        } else {
+            std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/"))
+        };
+        let cwd = resolved_cwd.to_string_lossy();
+        // On the shared leader the TUI already holds this session. A second
+        // session/load replays the transcript into the pager and the next
+        // assistant turn often renders blank. Ask for points first; load only
+        // if this client cannot see the session.
+        let mut points = self
+            .request(
+                "_x.ai/rewind/points",
+                json!({ "sessionId": session_id }),
+                None,
+            )
+            .await;
+        if points.is_err() {
+            match self
+                .request(
+                    "session/load",
+                    session_open_params(&cwd, config, Some(session_id)),
+                    None,
+                )
+                .await
+            {
+                Ok(_) => {}
+                Err(error) if config.uses_shared_leader() => {
+                    return Err(format!(
+                        "session/load failed for shared session {session_id}; refusing rewind from an unbound ACP client: {error}"
+                    ));
+                }
+                Err(error) => return Err(error),
+            }
+            points = self
+                .request(
+                    "_x.ai/rewind/points",
+                    json!({ "sessionId": session_id }),
+                    None,
+                )
+                .await;
+        }
+        let points = points?;
+        let Some(target) = kept_prompt_index_for_undo(&points, undone_preview)
+            .map_err(|error| format!("cannot safely target rewind: {error}"))?
+        else {
+            return Ok(RewindResult {
+                rewound: false,
+                kept_prompt_index: None,
+            });
+        };
+        let execute_params = json!({
+            "sessionId": session_id,
+            "targetPromptIndex": target,
+            "conversationOnly": true,
+            "conversation_only": true
+        });
+        let mut result = self
+            .request("_x.ai/rewind/execute", execute_params.clone(), None)
+            .await?;
+        // A second client on the leader can list points without load, but
+        // execute then returns success:false and the TUI context is unchanged.
+        if result.get("success").and_then(Value::as_bool) == Some(false) {
+            match self
+                .request(
+                    "session/load",
+                    session_open_params(&cwd, config, Some(session_id)),
+                    None,
+                )
+                .await
+            {
+                Ok(_) => {
+                    result = self
+                        .request("_x.ai/rewind/execute", execute_params, None)
+                        .await?;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        if result.get("success").and_then(Value::as_bool) == Some(false) {
+            let detail = result
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("rewind failed");
+            return Err(detail.to_string());
+        }
+        Ok(RewindResult {
+            rewound: true,
+            kept_prompt_index: Some(target),
+        })
+    }
+
     pub async fn run_turn(
         &mut self,
         run_id: &str,
@@ -232,7 +586,7 @@ impl AcpHost {
                 match self
                     .request(
                         "session/load",
-                        json!({ "sessionId": id, "cwd": cwd, "mcpServers": [] }),
+                        session_open_params(&cwd, config, Some(id)),
                         None,
                     )
                     .await
@@ -247,27 +601,34 @@ impl AcpHost {
                         loaded
                     }
                     Err(error) => {
+                        reject_unloaded_shared_session(config, id, &error)?;
                         eprintln!(
                             "[grok core] session/load failed; creating a new session: {error}"
                         );
-                        self.new_session(&cwd).await?
+                        self.new_session(&cwd, config).await?
                     }
                 }
             }
         } else {
-            self.new_session(&cwd).await?
+            self.new_session(&cwd, config).await?
         };
 
         let prompt_blocks = content_blocks(prompt, config);
+        let mut prompt_params = json!({
+            "sessionId": session_id,
+            "prompt": prompt_blocks
+        });
+        if let Some(rules) = config
+            .rules
+            .as_deref()
+            .filter(|rules| !rules.trim().is_empty())
+        {
+            // Per-turn policy (Plan / undo replay) stays in `_meta`, never
+            // as a User content block — that leaked into the CLI transcript.
+            prompt_params["_meta"] = json!({ "rules": rules });
+        }
         let result = self
-            .request(
-                "session/prompt",
-                json!({
-                    "sessionId": session_id,
-                    "prompt": prompt_blocks
-                }),
-                Some((run_id, tx, config)),
-            )
+            .request("session/prompt", prompt_params, Some((run_id, tx, config)))
             .await?;
         Ok(TurnResult {
             session_id,
@@ -284,9 +645,9 @@ impl AcpHost {
         })
     }
 
-    async fn new_session(&mut self, cwd: &str) -> Result<String, String> {
+    async fn new_session(&mut self, cwd: &str, config: &CoreConfig) -> Result<String, String> {
         let result = self
-            .request("session/new", json!({ "cwd": cwd, "mcpServers": [] }), None)
+            .request("session/new", session_open_params(cwd, config, None), None)
             .await?;
         let session_id = result
             .get("sessionId")
@@ -392,29 +753,31 @@ fn permission_result(options: &[Value], may_approve: bool) -> Value {
         .unwrap_or_else(|| json!({ "outcome": { "outcome": "cancelled" } }))
 }
 
-fn content_blocks(prompt: &str, config: &CoreConfig) -> Vec<Value> {
-    let mut blocks = config
-        .prompt_blocks
-        .clone()
-        .unwrap_or_else(|| vec![json!({ "type": "text", "text": prompt })]);
-    // `grok agent stdio` does not accept the legacy CLI's --rules flag.
-    // Carry the policy/rules into ACP as a separate instruction block so
-    // Plan is behaviorally distinct from Default instead of being a label
-    // attached to the same backend configuration.
+/// ACP `session/new` and `session/load` identity params.
+///
+/// Desktop `--rules` must travel as `_meta.rules` (system prompt). Putting them
+/// in `session/prompt` text makes a visible User turn; Grok CLI then shows that
+/// dump when `/cli` resumes the shared session.
+fn session_open_params(cwd: &str, config: &CoreConfig, session_id: Option<&str>) -> Value {
+    let mut params = json!({ "cwd": cwd, "mcpServers": [] });
+    if let Some(session_id) = session_id {
+        params["sessionId"] = json!(session_id);
+    }
     if let Some(rules) = config
         .rules
         .as_deref()
         .filter(|rules| !rules.trim().is_empty())
     {
-        blocks.insert(
-            0,
-            json!({
-                "type": "text",
-                "text": format!("Grok Desktop instructions for this turn:\n{rules}")
-            }),
-        );
+        params["_meta"] = json!({ "rules": rules });
     }
-    blocks
+    params
+}
+
+fn content_blocks(prompt: &str, config: &CoreConfig) -> Vec<Value> {
+    config
+        .prompt_blocks
+        .clone()
+        .unwrap_or_else(|| vec![json!({ "type": "text", "text": prompt })])
 }
 
 impl Drop for AcpHost {
@@ -497,7 +860,116 @@ mod tests {
         assert_eq!(config.reasoning_effort.as_deref(), Some("xhigh"));
         assert_eq!(config.resume_session_id.as_deref(), Some("session-1"));
         assert!(config.always_approve);
+        assert!(!config.share_session);
         assert!(config.prompt_blocks.is_none());
+        assert!(config.launch_args().contains(&"--no-leader".to_string()));
+    }
+
+    #[test]
+    fn last_kept_prompt_is_the_second_newest_rewind_point() {
+        let points = json!({
+            "rewind_points": [
+                { "prompt_index": 0 },
+                { "prompt_index": 1 },
+                { "prompt_index": 2 }
+            ]
+        });
+        assert_eq!(last_kept_prompt_index(&points), Some(1));
+        assert_eq!(
+            last_kept_prompt_index(&json!({ "rewind_points": [{ "prompt_index": 0 }] })),
+            None
+        );
+        assert_eq!(
+            last_kept_prompt_index(&json!({ "rewind_points": [] })),
+            None
+        );
+        let labeled = json!({
+            "rewind_points": [
+                { "prompt_index": 0, "prompt_preview": "hello" },
+                { "prompt_index": 1, "prompt_preview": "from desktop" },
+                { "prompt_index": 2, "prompt_preview": "from CLI" }
+            ]
+        });
+        assert_eq!(
+            kept_prompt_index_for_undo(&labeled, Some("from desktop")),
+            Err(RewindTargetError::NewerPrompts { count: 1 })
+        );
+    }
+
+    #[test]
+    fn rewind_preview_matching_accepts_unique_truncation_but_rejects_unsafe_matches() {
+        let non_prefix = json!({
+            "rewind_points": [
+                { "prompt_index": 0, "prompt_preview": "setup" },
+                { "prompt_index": 1, "prompt_preview": "deploy production" }
+            ]
+        });
+        assert_eq!(
+            kept_prompt_index_for_undo(&non_prefix, Some("please deploy production now")),
+            Err(RewindTargetError::PreviewNotFound)
+        );
+
+        let truncated = json!({
+            "rewind_points": [
+                { "prompt_index": 0, "prompt_preview": "setup" },
+                { "prompt_index": 1, "prompt_preview": "deploy production" }
+            ]
+        });
+        assert_eq!(
+            kept_prompt_index_for_undo(
+                &truncated,
+                Some("deploy production after the final smoke test")
+            ),
+            Ok(Some(0))
+        );
+
+        let duplicate = json!({
+            "rewind_points": [
+                { "prompt_index": 0, "prompt_preview": "continue" },
+                { "prompt_index": 1, "prompt_preview": "continue" },
+                { "prompt_index": 2, "prompt_preview": "from CLI" }
+            ]
+        });
+        assert_eq!(
+            kept_prompt_index_for_undo(&duplicate, Some("continue")),
+            Err(RewindTargetError::AmbiguousPreview { matches: 2 })
+        );
+    }
+
+    #[test]
+    fn shared_session_load_failure_is_not_treated_as_an_attachment() {
+        let config = CoreConfig::from_legacy_args(&[
+            "--resume".into(),
+            "live-session".into(),
+            "--share-session".into(),
+        ]);
+        let error = reject_unloaded_shared_session(&config, "live-session", "not loaded")
+            .expect_err("shared session must fail closed");
+        assert!(error.contains("session/load failed for shared session live-session"));
+        assert!(error.contains("refusing to prompt an unbound ACP client"));
+
+        let isolated =
+            CoreConfig::from_legacy_args(&["--resume".into(), "isolated-session".into()]);
+        assert_eq!(
+            reject_unloaded_shared_session(&isolated, "isolated-session", "not found"),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn live_share_joins_the_desktop_leader_instead_of_forking() {
+        let args = vec![
+            "--resume".into(),
+            "live-session".into(),
+            "--share-session".into(),
+        ];
+        let config = CoreConfig::from_legacy_args(&args);
+        assert!(config.uses_shared_leader());
+        let launch = config.launch_args();
+        assert!(launch.contains(&"--leader".to_string()));
+        assert!(!launch.contains(&"--no-leader".to_string()));
+        let socket = desktop_leader_socket().to_string_lossy().into_owned();
+        assert!(launch.contains(&socket));
     }
 
     #[test]
@@ -513,7 +985,7 @@ mod tests {
     }
 
     #[test]
-    fn carries_read_only_rules_into_the_acp_prompt() {
+    fn puts_rules_on_session_meta_not_the_user_prompt() {
         let args = vec![
             "--rules".into(),
             "Stay read-only: inspect but do not edit files.".into(),
@@ -521,12 +993,16 @@ mod tests {
         let config = CoreConfig::from_legacy_args(&args);
         assert!(config.review_only);
         let blocks = content_blocks("review this repo", &config);
-        assert_eq!(blocks.len(), 2);
-        assert!(blocks[0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("Stay read-only"));
-        assert_eq!(blocks[1]["text"], "review this repo");
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0]["text"], "review this repo");
+        let params = session_open_params("/tmp/proj", &config, None);
+        assert_eq!(
+            params["_meta"]["rules"],
+            "Stay read-only: inspect but do not edit files."
+        );
+        let loaded = session_open_params("/tmp/proj", &config, Some("sess-1"));
+        assert_eq!(loaded["sessionId"], "sess-1");
+        assert_eq!(loaded["_meta"]["rules"], params["_meta"]["rules"]);
     }
 
     #[test]

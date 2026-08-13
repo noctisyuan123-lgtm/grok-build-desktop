@@ -42,7 +42,7 @@ use std::{
     io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -1354,7 +1354,12 @@ fn mode_context(mode: &str) -> &'static str {
     }
 }
 
-fn grok_prompt(prompt: &str, mode: &str, cwd: &Path) -> String {
+/// Durable Desktop guidance for the legacy single-command runner.
+///
+/// Keep this in `--rules`, not in `-p`: the latter becomes a visible User
+/// transcript entry and is shown again when the shared session is resumed by
+/// Grok CLI (`/cli`).
+fn grok_rules(mode: &str, cwd: &Path) -> String {
     format!(
         r#"{context}
 
@@ -1378,9 +1383,7 @@ Engineering behavior:
 
 Response format:
 Use `1. Summary`, `2. Files / Evidence`, `3. Changes or Recommendation`, `4. Verification commands`, and `5. Next step` for normal coding tasks only. For simple tasks, obey the user's requested format exactly.
-
-User task:
-{prompt}"#,
+"#,
         context = mode_context(mode),
         cwd = cwd.to_string_lossy()
     )
@@ -1432,6 +1435,7 @@ fn normalized_model(model: Option<String>) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn normalized_best_of_n(best_of_n: Option<u8>) -> Option<u8> {
     best_of_n.and_then(|value| match value {
         2..=5 => Some(value),
@@ -1488,26 +1492,26 @@ fn grok_args(prompt: &str, mode: &str, cwd: &Path, options: GrokRunOptions) -> V
         effort,
         reasoning_effort,
         permission_mode,
-        best_of_n,
+        best_of_n: _,
         experimental_memory,
         web_search_enabled,
         subagents_enabled,
         self_check,
     } = options;
-    let prepared_prompt = grok_prompt(prompt, mode, cwd);
+    let user_prompt = prompt.trim().to_string();
     if let Ok(template) = env::var("GROK_DESKTOP_GROK_ARGS") {
-        return split_template_args(&template, &prepared_prompt, mode);
+        return split_template_args(&template, &user_prompt, mode);
     }
 
     let model = normalized_model(model);
-    let effort = normalized_effort(effort);
-    let mut args = vec![
-        "--no-alt-screen".to_string(),
-        "--model".to_string(),
-        model,
-        "--effort".to_string(),
-        effort,
-    ];
+    // grok 1.0 aliases `--effort` to `--reasoning-effort`. Emit one flag.
+    let effort = normalized_reasoning_effort(reasoning_effort)
+        .or_else(|| normalized_reasoning_effort(Some(normalized_effort(effort))));
+    let mut args = vec!["--no-alt-screen".to_string(), "--model".to_string(), model];
+    if let Some(effort) = effort {
+        args.push("--reasoning-effort".to_string());
+        args.push(effort);
+    }
 
     if let Some(permission_mode) = normalized_permission_mode(permission_mode) {
         args.push("--permission-mode".to_string());
@@ -1523,17 +1527,6 @@ fn grok_args(prompt: &str, mode: &str, cwd: &Path, options: GrokRunOptions) -> V
         args.push("--check".to_string());
     }
 
-    if let Some(reasoning_effort) = normalized_reasoning_effort(reasoning_effort) {
-        args.push("--reasoning-effort".to_string());
-        args.push(reasoning_effort);
-    }
-
-    let best_of_n = normalized_best_of_n(best_of_n);
-    if let Some(n) = best_of_n {
-        args.push("--best-of-n".to_string());
-        args.push(n.to_string());
-    }
-
     if experimental_memory {
         args.push("--experimental-memory".to_string());
     }
@@ -1542,16 +1535,18 @@ fn grok_args(prompt: &str, mode: &str, cwd: &Path, options: GrokRunOptions) -> V
         args.push("--disable-web-search".to_string());
     }
 
-    // grok rejects `--no-subagents` together with `--best-of-n` (best-of-n
-    // fans out to subagents). Only disable subagents when not running best-of-n.
-    if !subagents_enabled && best_of_n.is_none() {
+    // grok 1.0 dropped `--best-of-n`; never emit it.
+    if !subagents_enabled {
         args.push("--no-subagents".to_string());
     }
+
+    args.push("--rules".to_string());
+    args.push(grok_rules(mode, cwd));
 
     args.push("--max-turns".to_string());
     args.push(grok_max_turns(12).to_string());
     args.push("-p".to_string());
-    args.push(prepared_prompt);
+    args.push(user_prompt);
     args.push("--output-format".to_string());
     args.push("plain".to_string());
     args
@@ -1711,6 +1706,848 @@ fn start_grok_login_blocking(device_auth: bool, cwd: Option<String>) -> ToolRun 
         command_timeout_secs(15),
         false,
     )
+}
+
+/// Open an interactive Grok TUI, preferring iTerm, falling back to Terminal.app.
+/// Optionally resumes a Desktop conversation head (`/cli` host slash).
+///
+/// Implementation writes a small shell script then launches a *short* shell
+/// line (`bash /path/to/script`). Long one-liners inside AppleScript/`write
+/// text` are unstable (quoting races, profile startup). A script path is not.
+#[tauri::command]
+async fn open_grok_cli(
+    app: tauri::AppHandle,
+    cwd: Option<String>,
+    session_id: Option<String>,
+) -> Result<(), String> {
+    // Isolated ACP still holds the session thread. Drop it before the TUI
+    // loads the same id on the shared leader, or Desktop turns stay private.
+    if session_id
+        .as_deref()
+        .is_some_and(|id| !id.trim().is_empty())
+    {
+        if let Some(queue) = app.try_state::<std::sync::Arc<RunQueue>>() {
+            queue.evict_acp_hosts().await;
+        }
+    }
+    tauri::async_runtime::spawn_blocking(move || open_grok_cli_blocking(cwd, session_id))
+        .await
+        .map_err(|error| format!("open_grok_cli join failed: {error}"))?
+}
+
+fn open_grok_cli_blocking(cwd: Option<String>, session_id: Option<String>) -> Result<(), String> {
+    // Same binary resolution as the run queue so interactive CLI finds grok
+    // even when the user's login PATH is thin.
+    let program = env::var("GROK_DESKTOP_GROK_CMD").unwrap_or_else(|_| default_grok_binary());
+    // Empty Desktop cwd must not fall back to the app source tree for a
+    // shipped .app — use $HOME like other shell helpers.
+    let cwd = cwd
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(default_shell_cwd);
+    let session = session_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
+
+    // `/desktop` lives on the CLI side, so Desktop must install the tiny
+    // personal Grok skill before opening the TUI. Handling `/desktop` only in
+    // the React composer made the command impossible to invoke from Grok CLI.
+    ensure_desktop_handoff_skill()?;
+    if let Some(session) = session.as_deref() {
+        // One Desktop-owned TUI per shared session. This also prevents a
+        // second `/cli` launch from orphaning the first process metadata.
+        stop_desktop_grok_cli(&program, session)?;
+    }
+    ensure_desktop_leader(&program)?;
+    let script_path = write_grok_cli_launch_script(&program, &cwd, session.as_deref())?;
+    // Short, boring command — no nested quotes, no PATH soup in AppleScript.
+    let launch_line = format!("exec bash {}", shell_quote(&script_path.to_string_lossy()));
+    open_interactive_shell(&launch_line)
+}
+
+const DESKTOP_HANDOFF_SKILL_MARKER: &str = "<!-- grok-build-desktop-managed-skill -->";
+
+fn desktop_handoff_skill_body() -> &'static str {
+    r#"---
+name: desktop
+description: Switch this shared Grok session to Grok Build Desktop and keep live sync active.
+user-invocable: true
+disable-model-invocation: true
+allowed-tools: Bash
+---
+
+<!-- grok-build-desktop-managed-skill -->
+
+Switch this shared session back to Grok Build Desktop now.
+
+Use Bash exactly once to run:
+
+    bash "$HOME/.grok-desktop/open-desktop.sh"
+
+Wait for the command result. Do not inspect or modify files and do not continue
+with unrelated work. Report the helper's success or error verbatim in one short
+sentence.
+"#
+}
+
+fn desktop_handoff_script_body() -> &'static str {
+    r#"#!/bin/bash
+set -u
+
+for app in \
+  "$HOME/Applications/Grok Build Desktop.app" \
+  "$HOME/Desktop/Grok Build Desktop.app"
+do
+  if [ -d "$app" ] && open "$app" >/dev/null 2>&1; then
+    echo "Grok Build Desktop focused; live sync remains active."
+    exit 0
+  fi
+done
+if open -b com.grok.desktop >/dev/null 2>&1; then
+  echo "Grok Build Desktop focused; live sync remains active."
+  exit 0
+fi
+if open -a "Grok Build Desktop" >/dev/null 2>&1; then
+  echo "Grok Build Desktop focused; live sync remains active."
+  exit 0
+fi
+if [ -d "/Applications/Grok Build Desktop.app" ] && \
+   open "/Applications/Grok Build Desktop.app" >/dev/null 2>&1; then
+  echo "Grok Build Desktop focused; live sync remains active."
+  exit 0
+fi
+
+echo "Could not find Grok Build Desktop.app." >&2
+exit 1
+"#
+}
+
+/// Install the personal `/desktop` command that is consumed by Grok CLI.
+///
+/// A user-authored skill with the same name is never overwritten. Files with
+/// our marker are safe to refresh when Desktop is upgraded.
+fn ensure_desktop_handoff_skill() -> Result<(), String> {
+    let home = env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
+    let helper_dir = PathBuf::from(&home).join(".grok-desktop");
+    let skill_dir = PathBuf::from(&home)
+        .join(".grok")
+        .join("skills")
+        .join("desktop");
+    let skill_path = skill_dir.join("SKILL.md");
+    let helper_path = helper_dir.join("open-desktop.sh");
+
+    if let Ok(existing) = fs::read_to_string(&skill_path) {
+        if !existing.contains(DESKTOP_HANDOFF_SKILL_MARKER) {
+            return Err(format!(
+                "Cannot install /desktop: {} already exists and is not managed by Grok Build Desktop",
+                skill_path.display()
+            ));
+        }
+    }
+
+    fs::create_dir_all(&skill_dir)
+        .map_err(|error| format!("mkdir {}: {error}", skill_dir.display()))?;
+    fs::create_dir_all(&helper_dir)
+        .map_err(|error| format!("mkdir {}: {error}", helper_dir.display()))?;
+    fs::write(&skill_path, desktop_handoff_skill_body())
+        .map_err(|error| format!("write {}: {error}", skill_path.display()))?;
+    fs::write(&helper_path, desktop_handoff_script_body())
+        .map_err(|error| format!("write {}: {error}", helper_path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&helper_path)
+            .map_err(|error| format!("stat {}: {error}", helper_path.display()))?
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&helper_path, perms)
+            .map_err(|error| format!("chmod {}: {error}", helper_path.display()))?;
+    }
+    Ok(())
+}
+
+fn leader_socket_ready(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        std::os::unix::net::UnixStream::connect(path).is_ok()
+    }
+    #[cfg(not(unix))]
+    {
+        path.exists()
+    }
+}
+
+/// Start (or reuse) the Desktop↔CLI grok leader. TUI and live ACP turns
+/// connect here so both write one in-memory session.
+fn ensure_desktop_leader(program: &str) -> Result<(), String> {
+    let socket = crate::runs::core::desktop_leader_socket();
+    if let Some(parent) = socket.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("mkdir {}: {error}", parent.display()))?;
+    }
+    if socket.exists() && !leader_socket_ready(&socket) {
+        let _ = fs::remove_file(&socket);
+    }
+    if leader_socket_ready(&socket) {
+        return Ok(());
+    }
+
+    let log_path = socket.with_file_name("leader.log");
+    let log = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|error| format!("open {}: {error}", log_path.display()))?;
+    let log_err = log
+        .try_clone()
+        .map_err(|error| format!("clone leader.log: {error}"))?;
+    let socket_arg = socket.to_string_lossy().into_owned();
+    let mut command = Command::new(program);
+    command
+        .args([
+            "agent",
+            "leader",
+            "--no-exit-on-disconnect",
+            "--leader-socket",
+            &socket_arg,
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(log))
+        .stderr(Stdio::from(log_err));
+    command
+        .spawn()
+        .map_err(|error| format!("start grok leader: {error}"))?;
+
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while Instant::now() < deadline {
+        if leader_socket_ready(&socket) {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(80));
+    }
+    Err(format!(
+        "grok leader did not come up at {}",
+        socket.display()
+    ))
+}
+
+/// Persist a launch script under ~/.grok-desktop/ so AppleScript only needs a path.
+fn write_grok_cli_launch_script(
+    program: &str,
+    cwd: &Path,
+    session_id: Option<&str>,
+) -> Result<PathBuf, String> {
+    let home = env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
+    let dir = PathBuf::from(&home).join(".grok-desktop");
+    fs::create_dir_all(&dir).map_err(|error| format!("mkdir ~/.grok-desktop: {error}"))?;
+    let script_path = dir.join("cli-launch.sh");
+    let process_path = session_id.map(|session| grok_cli_process_path(&dir, session));
+
+    let mut body = String::new();
+    body.push_str("#!/bin/bash\n");
+    body.push_str("# Generated by Grok Build Desktop `/cli` — do not edit.\n");
+    body.push_str("set +e\n");
+    body.push_str(
+        "export PATH=\"$HOME/.local/bin:$HOME/.grok/bin:$HOME/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"\n",
+    );
+    body.push_str("hash -r 2>/dev/null || true\n");
+    body.push_str(&format!(
+        "cd {} || cd \"$HOME\" || true\n",
+        shell_quote(&cwd.to_string_lossy())
+    ));
+    body.push_str("clear 2>/dev/null || true\n");
+    body.push_str("echo 'Grok CLI (from Desktop · live session)'\n");
+    body.push_str("echo\n");
+    // Prefer the absolute binary Desktop already resolved; fall back to PATH.
+    body.push_str(&format!("GROK_BIN={}\n", shell_quote(program)));
+    body.push_str("if [ ! -x \"$GROK_BIN\" ]; then\n");
+    body.push_str("  GROK_BIN=\"$(command -v grok 2>/dev/null || true)\"\n");
+    body.push_str("fi\n");
+    body.push_str("if [ -z \"$GROK_BIN\" ]; then\n");
+    body.push_str(
+        "  echo 'grok CLI not found. Install: curl -fsSL https://x.ai/cli/install.sh | bash'\n",
+    );
+    body.push_str("  echo 'Or set GROK_DESKTOP_GROK_CMD to the grok binary path.'\n");
+    body.push_str("  read -n 1 -s -r -p 'Press any key to close…'\n");
+    body.push_str("  exit 1\n");
+    body.push_str("fi\n");
+    let socket = crate::runs::core::desktop_leader_socket();
+    let socket = socket.to_string_lossy();
+    // Same leader socket Desktop ACP joins on `--share-session` turns.
+    if let Some(session) = session_id {
+        let process_path = process_path.expect("resume sessions have a process path");
+        body.push_str(&format!(
+            "PROCESS_META={}\n",
+            shell_quote(&process_path.to_string_lossy())
+        ));
+        body.push_str("PROCESS_META_TMP=\"$PROCESS_META.tmp.$$\"\n");
+        body.push_str("PROCESS_STARTED=\"$(ps -p \"$$\" -o lstart= 2>/dev/null)\"\n");
+        body.push_str(&format!(
+            "[ -n \"$PROCESS_STARTED\" ] && printf '%s\\n%s\\n%s\\n' \"$$\" {} \"$PROCESS_STARTED\" > \"$PROCESS_META_TMP\" && mv -f \"$PROCESS_META_TMP\" \"$PROCESS_META\" || {{ echo 'Could not record Desktop CLI process ownership.' >&2; exit 1; }}\n",
+            shell_quote(session)
+        ));
+        body.push_str(&format!(
+            "exec \"$GROK_BIN\" --leader --leader-socket {} --cwd {} --resume {}\n",
+            shell_quote(&socket),
+            shell_quote(&cwd.to_string_lossy()),
+            shell_quote(session)
+        ));
+    } else {
+        body.push_str(&format!(
+            "exec \"$GROK_BIN\" --leader --leader-socket {} --cwd {}\n",
+            shell_quote(&socket),
+            shell_quote(&cwd.to_string_lossy())
+        ));
+    }
+
+    fs::write(&script_path, body).map_err(|error| format!("write cli-launch.sh: {error}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&script_path)
+            .map_err(|error| format!("stat cli-launch.sh: {error}"))?
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script_path, perms)
+            .map_err(|error| format!("chmod cli-launch.sh: {error}"))?;
+    }
+    Ok(script_path)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct GrokCliProcessMetadata {
+    pid: u32,
+    session_id: String,
+    started_at: String,
+}
+
+fn grok_cli_process_path(dir: &Path, session_id: &str) -> PathBuf {
+    let encoded = session_id
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    dir.join(format!("cli-process-{encoded}.meta"))
+}
+
+fn parse_grok_cli_process_metadata(contents: &str) -> Option<GrokCliProcessMetadata> {
+    let mut lines = contents.lines();
+    let pid = lines.next()?.parse::<u32>().ok().filter(|pid| *pid > 1)?;
+    let session_id = lines.next()?.to_string();
+    let started_at = lines.next()?.trim().to_string();
+    if session_id.is_empty() || started_at.is_empty() || lines.next().is_some() {
+        return None;
+    }
+    Some(GrokCliProcessMetadata {
+        pid,
+        session_id,
+        started_at,
+    })
+}
+
+fn grok_cli_command_matches(command: &str, program: &str, socket: &Path, session_id: &str) -> bool {
+    let args = command.split_whitespace().collect::<Vec<_>>();
+    let expected_program = Path::new(program);
+    let program_matches = args.first().is_some_and(|actual| {
+        let actual = Path::new(actual);
+        actual == expected_program
+            || (expected_program.file_name().is_some()
+                && actual.file_name() == expected_program.file_name())
+    });
+    let has_flag_value = |flag: &str, expected: &str| {
+        args.windows(2)
+            .any(|pair| pair[0] == flag && pair[1] == expected)
+    };
+    program_matches
+        && args.contains(&"--leader")
+        && has_flag_value("--leader-socket", &socket.to_string_lossy())
+        && has_flag_value("--resume", session_id)
+}
+
+#[cfg(unix)]
+fn process_command(pid: u32) -> Option<String> {
+    let output = Command::new("ps")
+        .args(["-ww", "-p", &pid.to_string(), "-o", "command="])
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(unix)]
+fn process_started_at(pid: u32) -> Option<String> {
+    let output = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "lstart="])
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+#[cfg(unix)]
+fn process_is_alive(pid: u32) -> bool {
+    Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+/// Stop only a Grok TUI that Desktop itself launched for this exact session.
+/// Stale or ambiguous metadata is removed without signalling its PID.
+#[cfg(unix)]
+fn stop_desktop_grok_cli(program: &str, session_id: &str) -> Result<(), String> {
+    let home = env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
+    let metadata_path =
+        grok_cli_process_path(&PathBuf::from(home).join(".grok-desktop"), session_id);
+    let Ok(contents) = fs::read_to_string(&metadata_path) else {
+        return Ok(());
+    };
+    let Some(metadata) = parse_grok_cli_process_metadata(&contents) else {
+        let _ = fs::remove_file(&metadata_path);
+        return Ok(());
+    };
+    if metadata.session_id != session_id {
+        let _ = fs::remove_file(&metadata_path);
+        return Ok(());
+    }
+    if process_started_at(metadata.pid).as_deref() != Some(metadata.started_at.as_str()) {
+        let _ = fs::remove_file(&metadata_path);
+        return Ok(());
+    }
+    let socket = crate::runs::core::desktop_leader_socket();
+    let Some(command) = process_command(metadata.pid) else {
+        let _ = fs::remove_file(&metadata_path);
+        return Ok(());
+    };
+    if !grok_cli_command_matches(&command, program, &socket, session_id) {
+        let _ = fs::remove_file(&metadata_path);
+        return Ok(());
+    }
+
+    let status = Command::new("kill")
+        .args(["-TERM", &metadata.pid.to_string()])
+        .status()
+        .map_err(|error| format!("stop Desktop Grok CLI {}: {error}", metadata.pid))?;
+    if !status.success() && process_is_alive(metadata.pid) {
+        return Err(format!(
+            "could not stop Desktop Grok CLI process {}",
+            metadata.pid
+        ));
+    }
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while Instant::now() < deadline {
+        if !process_is_alive(metadata.pid) {
+            let _ = fs::remove_file(&metadata_path);
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    Err(format!(
+        "Desktop Grok CLI process {} did not exit; undo was cancelled",
+        metadata.pid
+    ))
+}
+
+#[cfg(not(unix))]
+fn stop_desktop_grok_cli(_program: &str, _session_id: &str) -> Result<(), String> {
+    Ok(())
+}
+
+/// Launch a short shell line in iTerm (preferred) or Terminal.app.
+///
+/// Never embed long commands in AppleScript. Callers should pass something
+/// like `exec bash '/Users/…/.grok-desktop/cli-launch.sh'`.
+fn open_interactive_shell(command: &str) -> Result<(), String> {
+    let quoted = applescript_quote(command);
+    let mut errors: Vec<String> = Vec::new();
+
+    // Keep the window returned by create window; current window can resolve to
+    // an already-running CLI session when iTerm has multiple windows.
+    // Never retry after an iTerm write failure: the command may already be
+    // buffered there, and a retry creates exec ...exec ....
+    let iterm_app = if Path::new("/Applications/iTerm-stable.app").is_dir() {
+        Some("iTerm-stable")
+    } else if Path::new("/Applications/iTerm2.app").is_dir() {
+        Some("iTerm2")
+    } else {
+        None
+    };
+    if let Some(app) = iterm_app {
+        let script = iterm_launch_script(app, &quoted);
+        match Command::new("osascript").args(["-e", &script]).output() {
+            Ok(output) if output.status.success() => return Ok(()),
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!(
+                    "{app} could not open a new CLI window: {}",
+                    stderr.trim()
+                ));
+            }
+            Err(error) => return Err(format!("{app} could not open a new CLI window: {error}")),
+        }
+    }
+
+    // Terminal.app is the fallback.
+    let script = format!(
+        "tell application \"Terminal\"\nactivate\ndo script {cmd}\nend tell",
+        cmd = quoted,
+    );
+    match Command::new("osascript").args(["-e", &script]).output() {
+        Ok(output) if output.status.success() => return Ok(()),
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            errors.push(format!("Terminal: {}", stderr.trim()));
+        }
+        Err(error) => errors.push(format!("Terminal: {error}")),
+    }
+
+    if let Ok(home) = env::var("HOME") {
+        let command_file = PathBuf::from(home)
+            .join(".grok-desktop")
+            .join("cli-launch.command");
+        let body = format!("#!/bin/bash\n{command}\n");
+        if fs::write(&command_file, body).is_ok() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(meta) = fs::metadata(&command_file) {
+                    let mut perms = meta.permissions();
+                    perms.set_mode(0o755);
+                    let _ = fs::set_permissions(&command_file, perms);
+                }
+            }
+            if let Ok(status) = Command::new("open").arg(&command_file).status() {
+                if status.success() {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "Could not open iTerm or Terminal.app. {}",
+        errors.join(" | ")
+    ))
+}
+
+fn iterm_launch_script(app: &str, quoted_command: &str) -> String {
+    format!(
+        "tell application \"{app}\"\n\
+         activate\n\
+         set newWindow to (create window with default profile)\n\
+         delay 0.9\n\
+         tell current session of newWindow\n\
+         write text {cmd}\n\
+         end tell\n\
+         end tell",
+        app = app,
+        cmd = quoted_command,
+    )
+}
+
+/// Focus / open Grok Build Desktop (`/desktop` host slash).
+#[tauri::command]
+async fn open_grok_desktop() -> Result<(), String> {
+    let home = env::var("HOME").unwrap_or_default();
+    // Prefer the current per-user install explicitly. Two bundles with the
+    // same id can coexist; `open -b` may otherwise pick an older /Applications
+    // copy and make a freshly installed fix appear ineffective.
+    for path in [
+        format!("{home}/Applications/Grok Build Desktop.app"),
+        format!("{home}/Desktop/Grok Build Desktop.app"),
+    ] {
+        if Path::new(&path).is_dir() {
+            if let Ok(status) = Command::new("open").arg(&path).status() {
+                if status.success() {
+                    return Ok(());
+                }
+            }
+        }
+    }
+    for args in [
+        vec!["-b", "com.grok.desktop"],
+        // Some builds register under the product name via `open -a`.
+        vec!["-a", "Grok Build Desktop"],
+    ] {
+        if let Ok(status) = Command::new("open").args(&args).status() {
+            if status.success() {
+                return Ok(());
+            }
+        }
+    }
+    let system_app = "/Applications/Grok Build Desktop.app";
+    if Path::new(system_app).is_dir() {
+        if let Ok(status) = Command::new("open").arg(system_app).status() {
+            if status.success() {
+                return Ok(());
+            }
+        }
+    }
+    Err("Could not open Grok Build Desktop (tried bundle id and Applications paths)".into())
+}
+
+static GROK_SESSION_UPDATES_PATHS: OnceLock<Mutex<HashMap<(PathBuf, String), PathBuf>>> =
+    OnceLock::new();
+
+fn find_grok_session_updates_path(
+    root: &Path,
+    session_id: &str,
+    cached: Option<&Path>,
+) -> Option<PathBuf> {
+    if cached.is_some_and(Path::is_file) {
+        return cached.map(Path::to_path_buf);
+    }
+    let entries = fs::read_dir(root).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path().join(session_id).join("updates.jsonl");
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn grok_session_updates_path(session_id: &str) -> Option<PathBuf> {
+    let root = grok_home_dir().join("sessions");
+    let key = (root.clone(), session_id.to_string());
+    let cache = GROK_SESSION_UPDATES_PATHS.get_or_init(|| Mutex::new(HashMap::new()));
+    let cached = cache.lock().ok().and_then(|paths| paths.get(&key).cloned());
+    let resolved = find_grok_session_updates_path(&root, session_id, cached.as_deref());
+
+    if let Ok(mut paths) = cache.lock() {
+        if let Some(path) = resolved.as_ref() {
+            paths.insert(key, path.clone());
+        } else {
+            paths.remove(&key);
+        }
+    }
+    resolved
+}
+
+fn read_updates_jsonl(path: &Path) -> Option<String> {
+    // The CLI appends this file while Desktop polls it. A snapshot can end in
+    // the middle of a UTF-8 code point; lossy decoding only affects that
+    // incomplete final record, which the JSONL parser already ignores. The
+    // next poll rereads the complete file, also handling rewind/truncation.
+    let bytes = fs::read(path).ok()?;
+    Some(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn update_chunk_text(update: &serde_json::Value) -> String {
+    update
+        .pointer("/content/text")
+        .or_else(|| update.get("text"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+fn apply_rewind_marker(turns: &mut Vec<(String, String)>, target: u64) {
+    let mut user_index: Option<u64> = None;
+    let mut keep = 0;
+    for (index, (role, _)) in turns.iter().enumerate() {
+        if role == "user" {
+            user_index = Some(user_index.map(|value| value + 1).unwrap_or(0));
+        }
+        if user_index.is_some_and(|value| value > target) {
+            break;
+        }
+        keep = index + 1;
+    }
+    turns.truncate(keep);
+}
+
+/// Rebuild chat markdown from grok's updates.jsonl (source of truth, including CLI turns).
+fn turns_from_updates_jsonl(jsonl: &str) -> Vec<(String, String)> {
+    let mut turns: Vec<(String, String)> = Vec::new();
+    for line in jsonl.lines() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let Some(update) = value.pointer("/params/update") else {
+            continue;
+        };
+        let kind = update
+            .get("sessionUpdate")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        match kind {
+            "rewind_marker" => {
+                if let Some(target) = update
+                    .get("target_prompt_index")
+                    .and_then(|value| value.as_u64())
+                {
+                    apply_rewind_marker(&mut turns, target);
+                }
+            }
+            "user_message_chunk" => {
+                let text = update_chunk_text(update);
+                if text.is_empty() {
+                    continue;
+                }
+                if turns.last().is_some_and(|(role, _)| role == "user") {
+                    turns.last_mut().unwrap().1.push_str(&text);
+                } else {
+                    turns.push(("user".into(), text));
+                }
+            }
+            "agent_message_chunk" => {
+                let text = update_chunk_text(update);
+                if text.is_empty() {
+                    continue;
+                }
+                if turns.last().is_some_and(|(role, _)| role == "assistant") {
+                    let body = &mut turns.last_mut().unwrap().1;
+                    if !body.ends_with('\n') {
+                        body.push_str("\n\n");
+                    }
+                    body.push_str(&text);
+                } else {
+                    turns.push(("assistant".into(), text));
+                }
+            }
+            _ => {}
+        }
+    }
+    turns
+}
+
+fn transcript_from_session_updates(session_id: &str) -> Option<String> {
+    let path = grok_session_updates_path(session_id)?;
+    let jsonl = read_updates_jsonl(&path)?;
+    let turns = turns_from_updates_jsonl(&jsonl);
+    if turns.is_empty() {
+        return None;
+    }
+    let markdown = turns
+        .into_iter()
+        .map(|(role, text)| {
+            let heading = if role == "user" { "User" } else { "Assistant" };
+            format!("## {heading}\n\n{text}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    Some(markdown)
+}
+
+/// Export a grok session transcript (markdown) for Desktop rehydration after CLI work.
+#[tauri::command]
+async fn export_grok_session(session_id: String) -> Result<String, String> {
+    let session_id = session_id.trim().to_string();
+    if session_id.is_empty() {
+        return Err("session id required".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(markdown) = transcript_from_session_updates(&session_id) {
+            if !markdown.trim().is_empty() {
+                return Ok(markdown);
+            }
+        }
+        let program = env::var("GROK_DESKTOP_GROK_CMD").unwrap_or_else(|_| default_grok_binary());
+        let output = Command::new(&program)
+            .args(["export", &session_id])
+            .env("PATH", command_path())
+            .output()
+            .map_err(|error| format!("failed to run grok export: {error}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!(
+                "grok export failed ({}): {}",
+                output.status,
+                stderr.trim()
+            ));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    })
+    .await
+    .map_err(|error| format!("export_grok_session join failed: {error}"))?
+}
+
+/// Drop the latest user turn from the shared grok session (ACP rewind).
+/// Desktop undo is local-only unless this runs; CLI + export poll would
+/// otherwise resurrect the undone messages.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UndoSessionResult {
+    rewound: bool,
+    session_id: String,
+    rebased: bool,
+}
+
+#[tauri::command]
+async fn rewind_grok_session(
+    app: tauri::AppHandle,
+    session_id: String,
+    cwd: Option<String>,
+    undo_prompt: Option<String>,
+    replay_context: Option<String>,
+) -> Result<UndoSessionResult, String> {
+    let session_id = session_id.trim().to_string();
+    if session_id.is_empty() {
+        return Err("session id required".into());
+    }
+    let program = env::var("GROK_DESKTOP_GROK_CMD").unwrap_or_else(|_| default_grok_binary());
+    if let Some(queue) = app.try_state::<std::sync::Arc<RunQueue>>() {
+        queue.evict_acp_hosts().await;
+    }
+    let stop_program = program.clone();
+    let stop_session_id = session_id.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        stop_desktop_grok_cli(&stop_program, &stop_session_id)
+    })
+    .await
+    .map_err(|error| format!("stop Desktop Grok CLI join failed: {error}"))??;
+    let cwd = normalized_cwd(cwd);
+    let undone = undo_prompt
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let rewind = crate::runs::core::rewind_last_user_turn(
+        Path::new(&program),
+        &cwd,
+        &session_id,
+        undone.as_deref(),
+    )
+    .await;
+    if matches!(rewind, Ok(ref result) if result.rewound) {
+        return Ok(UndoSessionResult {
+            rewound: true,
+            session_id,
+            rebased: false,
+        });
+    }
+
+    // Grok 1.0 may expose rewind points yet refuse execute for a loaded
+    // session.  Never reconnect Desktop/CLI to that stale head: create a new
+    // durable session seeded only with the turns still visible after Undo.
+    let rewind_error = rewind.err();
+    let replacement = crate::runs::core::create_rebased_session(
+        Path::new(&program),
+        &cwd,
+        replay_context.as_deref(),
+    )
+    .await
+    .map_err(|rebase_error| match rewind_error {
+        Some(rewind_error) => {
+            format!("rewind failed ({rewind_error}); replacement session failed ({rebase_error})")
+        }
+        None => format!("replacement session failed ({rebase_error})"),
+    })?;
+    Ok(UndoSessionResult {
+        rewound: false,
+        session_id: replacement,
+        rebased: true,
+    })
 }
 
 fn collect_tool_statuses() -> Vec<ToolStatus> {
@@ -2012,13 +2849,13 @@ async fn inspect_grok_environment(cwd: Option<String>) -> ToolRun {
 
 #[tauri::command]
 async fn list_grok_models() -> ToolRun {
-    let program = env::var("GROK_DESKTOP_GROK_CMD").unwrap_or_else(|_| "grok".to_string());
+    let program = env::var("GROK_DESKTOP_GROK_CMD").unwrap_or_else(|_| default_grok_binary());
     run_blocking_tool("grok models", move || {
         run_external_command(
             &program,
             vec!["models".to_string()],
             None,
-            command_timeout_secs(8),
+            command_timeout_secs(20),
             true,
         )
     })
@@ -2928,6 +3765,10 @@ pub fn run() {
             save_session_state,
             get_grok_auth_status,
             start_grok_login,
+            open_grok_cli,
+            open_grok_desktop,
+            export_grok_session,
+            rewind_grok_session,
             run_grok_task,
             run_shell_command,
             start_terminal_session,
@@ -2997,6 +3838,180 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cli_process_metadata_is_strict_and_session_scoped() {
+        assert_eq!(
+            parse_grok_cli_process_metadata("4321\nsession-abc\nWed Aug 12 21:56:47 2026\n"),
+            Some(GrokCliProcessMetadata {
+                pid: 4321,
+                session_id: "session-abc".into(),
+                started_at: "Wed Aug 12 21:56:47 2026".into(),
+            })
+        );
+        assert_eq!(
+            parse_grok_cli_process_metadata("0\nsession-abc\nWed Aug 12 21:56:47 2026\n"),
+            None
+        );
+        assert_eq!(
+            parse_grok_cli_process_metadata("4321\n\nWed Aug 12 21:56:47 2026\n"),
+            None
+        );
+        assert_eq!(
+            parse_grok_cli_process_metadata("4321\nsession-abc\nWed Aug 12 21:56:47 2026\nextra\n"),
+            None
+        );
+        assert_ne!(
+            grok_cli_process_path(Path::new("/tmp"), "session-a"),
+            grok_cli_process_path(Path::new("/tmp"), "session-b")
+        );
+    }
+
+    #[test]
+    fn cli_process_command_requires_desktop_leader_and_exact_session() {
+        let socket = Path::new("/tmp/grok-desktop/leader.sock");
+        let command = "/Users/test/.local/bin/grok --leader --leader-socket /tmp/grok-desktop/leader.sock --cwd /tmp --resume session-abc";
+        assert!(grok_cli_command_matches(
+            command,
+            "/Users/test/.local/bin/grok",
+            socket,
+            "session-abc"
+        ));
+        assert!(!grok_cli_command_matches(
+            command,
+            "/Users/test/.local/bin/grok",
+            socket,
+            "session-other"
+        ));
+        assert!(!grok_cli_command_matches(
+            "/Users/test/.local/bin/grok --resume session-abc",
+            "/Users/test/.local/bin/grok",
+            socket,
+            "session-abc"
+        ));
+        assert!(!grok_cli_command_matches(
+            "/usr/local/bin/not-grok --leader --leader-socket /tmp/grok-desktop/leader.sock --resume session-abc",
+            "/Users/test/.local/bin/grok",
+            socket,
+            "session-abc"
+        ));
+    }
+
+    #[test]
+    fn updates_path_reuses_valid_cache_and_recovers_from_stale_cache() {
+        let root = env::temp_dir().join(format!("grok-updates-path-test-{}", uuid::Uuid::now_v7()));
+        let session_id = "session-under-test";
+        let actual = root
+            .join("encoded-workspace")
+            .join(session_id)
+            .join("updates.jsonl");
+        fs::create_dir_all(actual.parent().expect("updates parent"))
+            .expect("create updates parent");
+        fs::write(&actual, "{}\n").expect("write updates");
+
+        let unavailable_root = root.join("not-a-directory");
+        assert_eq!(
+            find_grok_session_updates_path(&unavailable_root, session_id, Some(&actual)),
+            Some(actual.clone()),
+            "a validated cache hit must not require scanning the sessions root"
+        );
+        assert_eq!(
+            find_grok_session_updates_path(
+                &root,
+                session_id,
+                Some(&root.join("stale").join("updates.jsonl")),
+            ),
+            Some(actual.clone()),
+            "a stale cache entry must fall back to directory discovery"
+        );
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn updates_reader_keeps_complete_records_during_partial_utf8_append() {
+        let path = env::temp_dir().join(format!(
+            "grok-updates-read-test-{}.jsonl",
+            uuid::Uuid::now_v7()
+        ));
+        let complete = br#"{"params":{"update":{"sessionUpdate":"user_message_chunk","content":{"text":"hello"}}}}
+"#;
+        let mut snapshot = complete.to_vec();
+        snapshot.extend_from_slice(&[b'{', b'"', 0xe2]);
+        fs::write(&path, snapshot).expect("write partial updates snapshot");
+
+        let jsonl = read_updates_jsonl(&path).expect("read updates snapshot");
+        assert_eq!(
+            turns_from_updates_jsonl(&jsonl),
+            vec![("user".into(), "hello".into())]
+        );
+
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn updates_jsonl_keeps_cli_turns_and_honors_rewind_markers() {
+        let jsonl = r#"
+{"params":{"update":{"sessionUpdate":"user_message_chunk","content":{"text":"hello"}}}}
+{"params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"hi"}}}}
+{"params":{"update":{"sessionUpdate":"user_message_chunk","content":{"text":"from CLI"}}}}
+{"params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"cli reply"}}}}
+{"params":{"update":{"sessionUpdate":"rewind_marker","target_prompt_index":0}}}
+{"params":{"update":{"sessionUpdate":"user_message_chunk","content":{"text":"after rewind"}}}}
+{"params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"still here"}}}}
+"#;
+        let turns = turns_from_updates_jsonl(jsonl);
+        assert_eq!(
+            turns,
+            vec![
+                ("user".into(), "hello".into()),
+                ("assistant".into(), "hi".into()),
+                ("user".into(), "after rewind".into()),
+                ("assistant".into(), "still here".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn desktop_handoff_skill_exposes_bare_cli_command_and_safe_fallbacks() {
+        let skill = desktop_handoff_skill_body();
+        assert!(skill.contains("name: desktop"));
+        assert!(skill.contains("user-invocable: true"));
+        assert!(skill.contains(DESKTOP_HANDOFF_SKILL_MARKER));
+        assert!(skill.contains("$HOME/.grok-desktop/open-desktop.sh"));
+
+        let helper = desktop_handoff_script_body();
+        assert!(helper.contains("open -b com.grok.desktop"));
+        assert!(helper.contains("$HOME/Applications/Grok Build Desktop.app"));
+        assert!(helper.contains("$HOME/Desktop/Grok Build Desktop.app"));
+        assert!(helper.contains("/Applications/Grok Build Desktop.app"));
+
+        let script = iterm_launch_script("iTerm-stable", "\"echo test\"");
+        assert!(script.contains("set newWindow to (create window with default profile)"));
+        assert!(script.contains("current session of newWindow"));
+        assert!(!script.contains("current session of current window"));
+    }
+
+    #[test]
+    fn legacy_runner_keeps_desktop_rules_out_of_visible_user_prompt() {
+        let args = grok_args(
+            "hello from the user",
+            "coding",
+            Path::new("/tmp"),
+            GrokRunOptions::default(),
+        );
+        let prompt_index = args
+            .iter()
+            .position(|arg| arg == "-p")
+            .expect("prompt flag");
+        assert_eq!(
+            args.get(prompt_index + 1).map(String::as_str),
+            Some("hello from the user")
+        );
+        assert!(args.contains(&"--rules".to_string()));
+        assert!(!args[prompt_index + 1].contains("Grok Desktop instructions"));
+        assert!(!args[prompt_index + 1].contains("Workspace contract"));
+    }
 
     #[test]
     fn window_state_round_trips_saved_size() {

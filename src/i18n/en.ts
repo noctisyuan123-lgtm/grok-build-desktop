@@ -97,7 +97,6 @@ export const en = {
   'composerSection.modelUnverifiedTitle': '{model} — not in grok CLI list, may fall back',
   'composerSection.modelNotInCli': '{id} · not in CLI',
   'composerSection.customOption': 'Custom…',
-  'composerSection.codingWorkflow': 'Coding workflow',
   'composerSection.actionPolicy': 'Tool permissions',
   'composerSection.agentEffort': 'Agent effort',
   'composerSection.reasoningEffort': 'Reasoning effort',
@@ -439,6 +438,16 @@ export const en = {
     'Live run updates unavailable: {error}. Runs may not display output — restart the app to reconnect.',
   'notices.savedToLibrary': 'Saved to Prompt Library',
   'notices.librarySaveFailed': "Couldn't save — Prompt Library unavailable",
+  'notices.openedCliSessionLive':
+    'Opened Grok CLI on session {id}…. Both sides share one grok leader.',
+  'notices.openedCli':
+    'Opened Grok CLI (new session). Send a message here first if you want a shared head, then /cli again.',
+  'notices.syncedDesktopSession': 'Synced this chat from the shared Grok session. Live sync is on.',
+  'notices.liveListening': 'Listening for CLI updates on session {id}…',
+  'notices.noSessionToSync':
+    'No session to sync. Chat once in Desktop (or /cli with a session), then try again.',
+  'notices.hostSlashFailed': '{command} failed: {error}',
+  'notices.hostSlashUnavailable': '{command} needs the Tauri desktop window.',
 
   // ── App constants (mode copy, presets, policies) ──────────────────────────
   'mode.standard.title': 'Grok Chat',
@@ -489,6 +498,8 @@ export const en = {
   'reasoning.maxDetail': 'Maximum reasoning budget',
   'model.grokBuildDetail': 'Recommended Grok Build CLI coding agent',
   'model.grokBuildPinnedDetail': 'Pinned Grok Build API model',
+  'model.grok46Detail': 'Current Grok 4.6 default',
+  'model.grok45Detail': 'Grok 4.5',
   'model.grok43Detail': 'Flagship reasoning model for complex implementation',
   'model.grok43LatestDetail': 'Latest Grok 4.3 alias when the CLI supports it',
   'model.grokLatestDetail': 'Follow the current xAI default alias',

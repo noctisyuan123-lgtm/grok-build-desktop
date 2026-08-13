@@ -48,6 +48,25 @@ describe('MessageItem sanitization', () => {
     expect((window as unknown as Record<string, unknown>).__pwned).toBeUndefined();
   });
 
+  it('re-parses restored HTML when live-imported fallback text grows', async () => {
+    streamStore.setHtml('msg:partial', '<p>first paragraph</p>');
+    const view = render(
+      <MessageItem runId="msg:partial" fallbackText="first paragraph" />,
+    );
+    expect(screen.getByText('first paragraph')).toBeInTheDocument();
+    streamStore.setHtml('msg:partial', '<p>first paragraph</p><p>rest after tools</p>');
+    view.rerender(
+      <MessageItem
+        runId="msg:partial"
+        fallbackText="first paragraph\n\nrest after tools"
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText(/rest after tools/)).toBeInTheDocument();
+  });
+
   it('copies a fenced code block through the VS Code preview control', async () => {
     const user = userEvent.setup();
     applyRunEvent('copy-code', { type: 'text', data: 'code' });

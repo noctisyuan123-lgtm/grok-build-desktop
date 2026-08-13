@@ -116,7 +116,6 @@ export function InspectorDrawer({
     startGrokLogin,
   } = runners;
   const {
-    modelPreset,
     customModel,
     setCustomModel,
     effortLevel,
@@ -138,7 +137,9 @@ export function InspectorDrawer({
     activeModel,
     activeModelMeta,
     activeReasoningLabel,
-    changeModelPreset,
+    selectModel,
+    selectedModelValue,
+    modelOptions,
   } = modelConfig;
 
   const currentPolicy = actionPolicies[actionPolicy];
@@ -257,16 +258,15 @@ export function InspectorDrawer({
                     <span>{t('inspector.model')}</span>
                     <select
                       aria-label={t('inspector.modelPresetAria')}
-                      onChange={(event) =>
-                        changeModelPreset(event.currentTarget.value as GrokModelId)
-                      }
-                      value={modelPreset}
+                      onChange={(event) => selectModel(event.currentTarget.value)}
+                      value={selectedModelValue}
                     >
-                      {(Object.keys(grokModelPresets) as GrokModelId[]).map((model) => (
+                      {modelOptions.map((model) => (
                         <option key={model} value={model}>
-                          {grokModelPresets[model].label}
+                          {grokModelPresets[model as GrokModelId]?.label ?? model}
                         </option>
                       ))}
+                      <option value="custom">{grokModelPresets.custom.label}</option>
                     </select>
                   </label>
                   <label>
@@ -329,7 +329,7 @@ export function InspectorDrawer({
                       ))}
                     </select>
                   </label>
-                  {modelPreset === 'custom' ? (
+                  {selectedModelValue === 'custom' ? (
                     <label className="engine-wide">
                       <span>{t('inspector.customId')}</span>
                       <input

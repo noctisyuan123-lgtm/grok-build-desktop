@@ -16,8 +16,8 @@ function render(initial: Partial<ModelConfigDeps> = {}) {
 describe('useModelConfig defaults and persistence', () => {
   it('starts from safe defaults with empty storage', () => {
     const { result } = render();
-    expect(result.current.modelPreset).toBe('grok-build');
-    expect(result.current.activeModel).toBe('grok-build');
+    expect(result.current.modelPreset).toBe('grok-4.6');
+    expect(result.current.activeModel).toBe('grok-4.6');
     expect(result.current.effortLevel).toBe('medium');
     expect(result.current.reasoningEffort).toBe('off');
     expect(result.current.bestOfN).toBe(1);
@@ -27,14 +27,17 @@ describe('useModelConfig defaults and persistence', () => {
 
   it('restores persisted values (effort/web/subagents only after the safe-defaults migration)', () => {
     window.localStorage.setItem(storageKeys.safeRuntimeDefaults, 'true');
-    window.localStorage.setItem(storageKeys.modelPreset, 'grok-latest');
+    window.localStorage.setItem(storageKeys.modelPreset, 'grok-4.5');
     window.localStorage.setItem(storageKeys.effortLevel, 'xhigh');
     window.localStorage.setItem(storageKeys.reasoningEffort, 'high');
     window.localStorage.setItem(storageKeys.permissionMode, 'plan');
     window.localStorage.setItem(storageKeys.bestOfN, '3');
     window.localStorage.setItem(storageKeys.webSearchEnabled, 'true');
-    const { result } = render({ mode: 'standard' });
-    expect(result.current.modelPreset).toBe('grok-latest');
+    const { result } = render({
+      mode: 'standard',
+      availableModels: ['grok-4.6', 'grok-4.5'],
+    });
+    expect(result.current.modelPreset).toBe('grok-4.5');
     expect(result.current.effortLevel).toBe('xhigh');
     expect(result.current.reasoningEffort).toBe('high');
     expect(result.current.permissionMode).toBe('plan');
@@ -54,7 +57,7 @@ describe('useModelConfig defaults and persistence', () => {
     window.localStorage.setItem(storageKeys.modelPreset, 'gpt-4');
     window.localStorage.setItem(storageKeys.bestOfN, '99');
     const { result } = render();
-    expect(result.current.modelPreset).toBe('grok-build');
+    expect(result.current.modelPreset).toBe('grok-4.6');
     expect(result.current.bestOfN).toBe(1);
   });
 
@@ -78,11 +81,32 @@ describe('active model derivation', () => {
   });
 
   it('changeModelPreset snaps reasoning to the preset default', () => {
-    const { result } = render({ mode: 'standard' });
+    const { result } = render({
+      mode: 'standard',
+      availableModels: ['grok-4.3', 'grok-build'],
+    });
     act(() => result.current.changeModelPreset('grok-4.3'));
     expect(result.current.reasoningEffort).toBe('high');
     act(() => result.current.changeModelPreset('grok-build'));
     expect(result.current.reasoningEffort).toBe('off');
+  });
+
+  it('selectModel binds CLI-only ids to the dropdown value instead of Custom…', () => {
+    const { result } = render({
+      mode: 'coding',
+      availableModels: ['grok-4.6', 'grok-4.5'],
+    });
+    act(() => result.current.selectModel('grok-4.5'));
+    expect(result.current.modelPreset).toBe('grok-4.5');
+    expect(result.current.activeModel).toBe('grok-4.5');
+    expect(result.current.selectedModelValue).toBe('grok-4.5');
+
+    act(() => result.current.selectModel('grok-4.6'));
+    expect(result.current.activeModel).toBe('grok-4.6');
+    expect(result.current.selectedModelValue).toBe('grok-4.6');
+
+    act(() => result.current.selectModel('custom'));
+    expect(result.current.selectedModelValue).toBe('custom');
   });
 });
 
@@ -92,12 +116,21 @@ describe('CLI-verified model options', () => {
     expect(result.current.modelOptions).toEqual(['grok-build', 'grok-9-preview']);
   });
 
-  it('falls back to grok-build in coding mode and the declared presets in chat', () => {
+  it('falls back to the current grok.com catalog when the CLI is silent', () => {
     const coding = render({ mode: 'coding', availableModels: [] });
-    expect(coding.result.current.modelOptions).toEqual(['grok-build']);
+    expect(coding.result.current.modelOptions).toEqual(['grok-4.6', 'grok-4.5']);
     const chat = render({ mode: 'standard', availableModels: [] });
-    expect(chat.result.current.modelOptions).toContain('grok-4.3');
+    expect(chat.result.current.modelOptions).toEqual(['grok-4.6', 'grok-4.5']);
     expect(chat.result.current.modelOptions).not.toContain('custom');
+  });
+
+  it('reuses the last CLI catalog after a silent probe', () => {
+    window.localStorage.setItem(
+      storageKeys.availableModels,
+      JSON.stringify(['grok-4.6', 'grok-4.5', 'grok-4']),
+    );
+    const { result } = render({ mode: 'coding', availableModels: [] });
+    expect(result.current.modelOptions).toEqual(['grok-4.6', 'grok-4.5', 'grok-4']);
   });
 
   it('filters CLI noise tokens out of the options', () => {
@@ -105,10 +138,13 @@ describe('CLI-verified model options', () => {
     expect(result.current.modelOptions).toEqual(['grok-build']);
   });
 
-  it('flags an unverified active model', () => {
-    window.localStorage.setItem(storageKeys.modelPreset, 'grok-4.3');
-    const { result } = render({ mode: 'standard', availableModels: ['grok-build'] });
-    expect(result.current.modelIsVerified).toBe(false);
+  it('treats a CLI-listed selection as verified', () => {
+    const { result } = render({
+      mode: 'standard',
+      availableModels: ['grok-4.6', 'grok-4.5'],
+    });
+    act(() => result.current.selectModel('grok-4.5'));
+    expect(result.current.modelIsVerified).toBe(true);
   });
 });
 
@@ -127,17 +163,17 @@ describe('coding-mode auto-snap', () => {
     expect(result.current.modelPreset).toBe('custom');
     expect(result.current.customModel).toBe('grok-9-new');
     expect(result.current.activeModel).toBe('grok-9-new');
+    expect(result.current.selectedModelValue).toBe('grok-9-new');
   });
 
-  it('leaves the selection alone in chat mode, with an unreporting CLI, or for custom', () => {
-    window.localStorage.setItem(storageKeys.modelPreset, 'grok-4.3');
-    const chat = render({ mode: 'standard', availableModels: ['grok-build'] });
-    expect(chat.result.current.modelPreset).toBe('grok-4.3');
-
+  it('snaps a stale preset onto the fallback catalog when the CLI is silent', () => {
     window.localStorage.setItem(storageKeys.modelPreset, 'grok-4.3');
     const silent = render({ mode: 'coding', availableModels: [] });
-    expect(silent.result.current.modelPreset).toBe('grok-4.3');
+    expect(silent.result.current.modelPreset).toBe('grok-4.6');
+    expect(silent.result.current.selectedModelValue).toBe('grok-4.6');
+  });
 
+  it('leaves a custom id alone', () => {
     window.localStorage.setItem(storageKeys.modelPreset, 'custom');
     window.localStorage.setItem(storageKeys.customModel, 'my-model');
     const custom = render({ mode: 'coding', availableModels: ['grok-build'] });

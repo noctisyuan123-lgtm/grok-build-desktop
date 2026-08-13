@@ -53,6 +53,9 @@ const modelConfigStub = {
   activeModelMeta: { label: 'Grok Build', detail: 'stub detail' },
   activeReasoningLabel: 'Auto',
   changeModelPreset: vi.fn(),
+  selectModel: vi.fn(),
+  selectedModelValue: 'grok-build',
+  modelOptions: ['grok-build'],
 } as unknown as ReturnType<typeof useModelConfig>;
 
 function renderDrawer(overrides: { setInspectorTab?: (tab: string) => void } = {}) {

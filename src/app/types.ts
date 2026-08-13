@@ -27,6 +27,8 @@ export type DockPosition = 'right' | 'bottom';
 export type GrokModelId =
   | 'grok-build'
   | 'grok-build-0.1'
+  | 'grok-4.6'
+  | 'grok-4.5'
   | 'grok-4.3'
   | 'grok-4.3-latest'
   | 'grok-latest'
@@ -181,6 +183,8 @@ export function isGrokModelId(value: unknown): value is GrokModelId {
   return (
     value === 'grok-build' ||
     value === 'grok-build-0.1' ||
+    value === 'grok-4.6' ||
+    value === 'grok-4.5' ||
     value === 'grok-4.3' ||
     value === 'grok-4.3-latest' ||
     value === 'grok-latest' ||

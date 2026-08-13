@@ -92,6 +92,19 @@ describe('storedMessages', () => {
     expect(messages[0].id).toBe('m10');
     expect(messages[messages.length - 1]?.id).toBe('m129');
   });
+
+  it('coerces orphaned streaming assistant rows to stopped on hydrate', () => {
+    window.localStorage.setItem(
+      storageKeys.messages,
+      JSON.stringify([
+        message('u1'),
+        message('a1', { role: 'assistant', content: 'partial', status: 'streaming' }),
+      ]),
+    );
+    const messages = storedMessages();
+    expect(messages[1]?.status).toBe('stopped');
+    expect(messages[1]?.content).toBe('partial');
+  });
 });
 
 describe('storedActiveTabMessages', () => {

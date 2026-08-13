@@ -78,14 +78,18 @@ function MessageItemImpl({
   // Lazy-import like streamStore does — markdownWorker's only other importers
   // are dynamic, and mixing a static import here would fold the module into
   // the main chunk (Vite warns about exactly that).
+  const parsedFallbackRef = useRef<string>('');
   useEffect(() => {
-    if (!snap && runId && fallbackText && html === undefined) {
-      import('../lib/markdownWorker')
-        .then(({ scheduleMarkdownParse }) => scheduleMarkdownParse(runId, fallbackText))
-        .catch(() => {
-          /* worker unavailable; the plain-text fallback below renders */
-        });
-    }
+    if (snap || !runId || !fallbackText) return;
+    // Re-parse when live-imported CLI text grows. The first poll often lands
+    // the pre-tool paragraph; later chunks keep the same synthetic runId.
+    if (html !== undefined && parsedFallbackRef.current === fallbackText) return;
+    parsedFallbackRef.current = fallbackText;
+    import('../lib/markdownWorker')
+      .then(({ scheduleMarkdownParse }) => scheduleMarkdownParse(runId, fallbackText))
+      .catch(() => {
+        /* worker unavailable; the plain-text fallback below renders */
+      });
   }, [snap, runId, fallbackText, html]);
 
   if (!snap) {

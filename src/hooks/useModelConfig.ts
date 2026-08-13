@@ -16,6 +16,7 @@ import {
   type ReasoningEffort,
 } from '../app/types';
 import { grokModelPresets, reasoningEfforts, storageKeys } from '../app/constants';
+import { parseStoredModelIds, resolveModelOptions } from '../app/format';
 
 export interface ModelConfigDeps {
   mode: Mode;
@@ -23,10 +24,10 @@ export interface ModelConfigDeps {
   availableModels: string[];
 }
 
-export function useModelConfig({ mode, availableModels }: ModelConfigDeps) {
+export function useModelConfig({ availableModels }: ModelConfigDeps) {
   const [modelPreset, setModelPreset] = useState<GrokModelId>(() => {
     const stored = window.localStorage.getItem(storageKeys.modelPreset);
-    return isGrokModelId(stored) ? stored : 'grok-build';
+    return isGrokModelId(stored) ? stored : 'grok-4.6';
   });
   const [customModel, setCustomModel] = useState(
     () => window.localStorage.getItem(storageKeys.customModel) ?? '',
@@ -65,6 +66,9 @@ export function useModelConfig({ mode, availableModels }: ModelConfigDeps) {
   const [selfCheck, setSelfCheck] = useState(
     () => window.localStorage.getItem(storageKeys.selfCheck) === 'true',
   );
+  // True only after the user explicitly picks Custom… so the <select> can
+  // stay on that sentinel even when the leftover custom id is also a CLI model.
+  const [pickingCustom, setPickingCustom] = useState(false);
 
   const activeModel = modelPreset === 'custom' ? customModel.trim() || 'grok-build' : modelPreset;
   const activeModelMeta = grokModelPresets[modelPreset];
@@ -72,8 +76,27 @@ export function useModelConfig({ mode, availableModels }: ModelConfigDeps) {
     reasoningEffort === 'off' ? 'auto' : reasoningEfforts[reasoningEffort].label;
 
   function changeModelPreset(nextModel: GrokModelId) {
+    setPickingCustom(nextModel === 'custom');
     setModelPreset(nextModel);
-    setReasoningEffort(grokModelPresets[nextModel].defaultReasoning);
+    // Unknown / future ids can be cast into this helper from older call sites.
+    // Never throw — a missing preset must not freeze the model picker.
+    setReasoningEffort(grokModelPresets[nextModel]?.defaultReasoning ?? 'off');
+  }
+
+  /** Pick a CLI model id, a known preset, or the Custom… sentinel. */
+  function selectModel(nextId: string) {
+    if (nextId === 'custom') {
+      setPickingCustom(true);
+      setModelPreset('custom');
+      return;
+    }
+    setPickingCustom(false);
+    if (isGrokModelId(nextId)) {
+      changeModelPreset(nextId);
+      return;
+    }
+    setModelPreset('custom');
+    setCustomModel(nextId);
   }
 
   useEffect(() => {
@@ -116,47 +139,53 @@ export function useModelConfig({ mode, availableModels }: ModelConfigDeps) {
     window.localStorage.setItem(storageKeys.selfCheck, String(selfCheck));
   }, [selfCheck]);
 
-  const modelOptions = useMemo(() => {
-    const fromCli = availableModels.filter(
-      (value) => value && value !== 'models' && value !== 'available',
-    );
-    const declared = Object.keys(grokModelPresets).filter((id) => id !== 'custom');
-    // The grok CLI is authoritative about which models THIS login can actually
-    // run. When it reported them (the normal case), offer ONLY those — hardcoded
-    // presets grok doesn't know (grok-build-0.1, grok-4.3, grok-latest, …) make
-    // grok exit "unknown model id" and reply NOTHING, so they must never be
-    // selectable. Power users who know a real id can still type it via "Custom…".
-    if (fromCli.length > 0) return fromCli;
-    // CLI reported nothing (offline / parse miss): best-effort fallback so the
-    // dropdown isn't empty. Coding locks to grok-build; chat shows the presets.
-    return mode === 'coding' ? ['grok-build'] : declared;
-  }, [availableModels, mode]);
+  const storedModels = useMemo(
+    () => parseStoredModelIds(window.localStorage.getItem(storageKeys.availableModels)),
+    // Re-read when the live CLI list changes so a successful probe replaces
+    // the last-known catalog used during the empty-list frame.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [availableModels],
+  );
+  const modelOptions = useMemo(
+    () => resolveModelOptions(availableModels, storedModels),
+    [availableModels, storedModels],
+  );
   const modelIsVerified =
     availableModels.length === 0 ||
     availableModels.includes(activeModel) ||
     modelPreset === 'custom';
 
-  // Only auto-snap in CODE mode, where the list is intentionally restricted —
-  // if a stale grok-4.3 selection lingers there, jump to the coding agent.
-  // Chat mode leaves the user's pick alone.
   useEffect(() => {
-    if (mode !== 'coding') return;
-    if (availableModels.length === 0) return; // CLI didn't report — leave as-is
+    const fromCli = resolveModelOptions(availableModels, []);
+    if (availableModels.length === 0) return;
+    if (fromCli.length === 0) return;
+    window.localStorage.setItem(storageKeys.availableModels, JSON.stringify(fromCli));
+  }, [availableModels]);
+
+  // Snap a stale hardcoded preset (grok-build, grok-4.3, …) onto the first
+  // catalog id so the dropdown value exists. Custom typed ids stay put.
+  useEffect(() => {
     if (modelPreset === 'custom') return;
-    if (modelOptions.includes(modelPreset)) return;
+    if (modelOptions.includes(modelPreset) || modelOptions.includes(activeModel)) return;
     const fallback = modelOptions[0];
     if (!fallback) return;
     if (isGrokModelId(fallback)) {
       changeModelPreset(fallback);
     } else {
-      // The CLI reported ids outside the hardcoded preset union (e.g. a new
-      // model generation). Route through "custom" so the <select> value and
-      // the --model arg stay in sync — otherwise the dropdown displays the
-      // first CLI model while runs silently send the stale preset.
+      setPickingCustom(false);
       setModelPreset('custom');
       setCustomModel(fallback);
     }
-  }, [mode, availableModels, modelOptions, modelPreset]);
+  }, [availableModels, modelOptions, modelPreset, activeModel]);
+
+  // Bind <select> to the actual engine id when it is in the option list.
+  // CLI-only ids (grok-4.6, …) live on the custom preset; showing "Custom…"
+  // there made the picker look stuck after every change.
+  const selectedModelValue = pickingCustom
+    ? 'custom'
+    : modelOptions.includes(activeModel)
+      ? activeModel
+      : 'custom';
 
   return {
     modelPreset,
@@ -183,6 +212,8 @@ export function useModelConfig({ mode, availableModels }: ModelConfigDeps) {
     activeModelMeta,
     activeReasoningLabel,
     changeModelPreset,
+    selectModel,
+    selectedModelValue,
     modelOptions,
     modelIsVerified,
   };

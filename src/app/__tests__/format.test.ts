@@ -9,6 +9,8 @@ import {
   makeId,
   nativeUnavailable,
   parseAvailableModels,
+  parseStoredModelIds,
+  resolveModelOptions,
   statusTone,
   terminalClass,
   terminalPrefix,
@@ -57,6 +59,19 @@ describe('parseAvailableModels', () => {
     expect(parseAvailableModels(output)).toEqual(['grok-build', 'grok-4-fast-reasoning']);
   });
 
+  it('strips the (default) marker used by grok 1.0 models output', () => {
+    const output = [
+      'You are logged in with grok.com.',
+      '',
+      'Default model: grok-4.6',
+      '',
+      'Available models:',
+      '  * grok-4.6 (default)',
+      '  - grok-4.5',
+    ].join('\n');
+    expect(parseAvailableModels(output)).toEqual(['grok-4.6', 'grok-4.5']);
+  });
+
   it('skips prose lines before the first bullet but stops after the list ends', () => {
     const output = [
       'Available models',
@@ -66,6 +81,23 @@ describe('parseAvailableModels', () => {
       '- grok-latest',
     ].join('\n');
     expect(parseAvailableModels(output)).toEqual(['grok-build']);
+  });
+});
+
+describe('resolveModelOptions', () => {
+  it('prefers the live CLI list, then last-known, then the current catalog', () => {
+    expect(resolveModelOptions(['grok-4.6', 'grok-4.5'], ['stale'])).toEqual([
+      'grok-4.6',
+      'grok-4.5',
+    ]);
+    expect(resolveModelOptions([], ['grok-4.6', 'grok-4'])).toEqual(['grok-4.6', 'grok-4']);
+    expect(resolveModelOptions([], [])).toEqual(['grok-4.6', 'grok-4.5']);
+  });
+
+  it('reads a persisted catalog and rejects junk', () => {
+    expect(parseStoredModelIds('["grok-4.6","custom","nope space"]')).toEqual(['grok-4.6']);
+    expect(parseStoredModelIds('not-json')).toEqual([]);
+    expect(parseStoredModelIds(null)).toEqual([]);
   });
 });
 

@@ -136,6 +136,18 @@ impl RunQueue {
         self.tx.subscribe()
     }
 
+    /// Stop and reap ACP children so `/cli` or rewind can load the same
+    /// session only after the previous client has released and flushed it.
+    pub async fn evict_acp_hosts(&self) {
+        let hosts = {
+            let mut hosts = self.acp_hosts.lock().await;
+            hosts.drain().map(|(_, host)| host).collect::<Vec<_>>()
+        };
+        for mut host in hosts {
+            host.shutdown().await;
+        }
+    }
+
     pub async fn enqueue(
         &self,
         prompt: String,
@@ -170,11 +182,7 @@ impl RunQueue {
             // Lane-local depth: runs already waiting on this lane plus the
             // active run on this lane (if any). Other lanes do not inflate
             // "you're next" for this session.
-            let ahead_waiting = inner
-                .waiting
-                .iter()
-                .filter(|r| r.lane_id == lane)
-                .count();
+            let ahead_waiting = inner.waiting.iter().filter(|r| r.lane_id == lane).count();
             let lane_busy = inner.active_lanes.contains_key(&lane);
             position = ahead_waiting + usize::from(lane_busy);
             inner.waiting.push_back(rec);
@@ -294,10 +302,7 @@ impl RunQueue {
             .map(|slot| slot.run_id.clone())
             .collect();
         active_ids.sort();
-        (
-            active_ids,
-            inner.waiting.iter().cloned().collect(),
-        )
+        (active_ids, inner.waiting.iter().cloned().collect())
     }
 
     pub async fn pending_count(&self) -> usize {
@@ -341,9 +346,11 @@ impl RunQueue {
             let skipped_id;
             {
                 let mut inner = self.inner.lock().await;
-                let Some(idx) = inner.waiting.iter().position(|r| {
-                    !inner.active_lanes.contains_key(&r.lane_id)
-                }) else {
+                let Some(idx) = inner
+                    .waiting
+                    .iter()
+                    .position(|r| !inner.active_lanes.contains_key(&r.lane_id))
+                else {
                     return None;
                 };
                 let rec = inner.waiting.remove(idx).expect("index from position");
@@ -755,7 +762,10 @@ impl RunQueue {
                     kind: QueueMessageKind::Event { event, raw },
                 });
                 // Return host to the lane pool for the next serial turn.
-                self.acp_hosts.lock().await.insert(rec.lane_id.clone(), host);
+                self.acp_hosts
+                    .lock()
+                    .await
+                    .insert(rec.lane_id.clone(), host);
                 self.finalize(&rec.id, RunState::Done, None).await;
             }
             Ok(_) => {

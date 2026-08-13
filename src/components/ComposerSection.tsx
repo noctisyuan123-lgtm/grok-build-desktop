@@ -3,25 +3,28 @@
 // effort / reasoning / best-of-N) plus the inline Stop button. Extracted
 // from App.tsx unchanged; run-config state rides in as the grouped
 // useModelConfig result.
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { AlertTriangle, SlidersHorizontal } from 'lucide-react';
 import { Composer, type ComposerHandle } from './Composer';
 import { ContextUsageRing } from './ContextUsageRing';
 import { SubagentFloat } from './SubagentFloat';
+import {
+  ComposerChoiceList,
+  ComposerDropdownField,
+  ComposerMenuButton,
+  ComposerMenuSurface,
+  useComposerMenu,
+} from './ComposerPickers';
 import type { useModelConfig } from '../hooks/useModelConfig';
 import {
-  isGrokModelId,
   type ActionPolicy,
   type ChatMessage,
-  type EffortLevel,
   type Mode,
   type ReasoningEffort,
 } from '../app/types';
 import {
   actionPolicies,
-  codingPresets,
   defaultDrafts,
-  effortLevels,
   modeCopy,
   reasoningEfforts,
 } from '../app/constants';
@@ -48,8 +51,7 @@ export interface ComposerSectionProps {
   availableModels: string[];
   actionPolicy: ActionPolicy;
   setActionPolicy: (policy: ActionPolicy) => void;
-  codingWorkflow: string;
-  applyCodingPreset: (preset: (typeof codingPresets)[number]) => void;
+  onHostSlash?: (raw: string) => boolean | Promise<boolean>;
   grokIsRunning: boolean;
   activeRunId: string | null;
   /** UI session / tab id for concurrent lane scheduling. */
@@ -71,53 +73,47 @@ export function ComposerSection({
   availableModels,
   actionPolicy,
   setActionPolicy,
-  codingWorkflow,
-  applyCodingPreset,
+  onHostSlash,
   grokIsRunning,
   activeRunId,
   laneId,
   stopRun,
 }: ComposerSectionProps) {
   const {
-    modelPreset,
-    setModelPreset,
-    setCustomModel,
-    effortLevel,
-    setEffortLevel,
     reasoningEffort,
     setReasoningEffort,
-    bestOfN,
-    setBestOfN,
     activeModel,
-    changeModelPreset,
+    selectModel,
+    selectedModelValue,
     modelOptions,
-    modelIsVerified,
     activeModelMeta,
   } = modelConfig;
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const advancedRef = useRef<HTMLDivElement>(null);
+  const [openMenu, setOpenMenu] = useState<'model' | 'run' | null>(null);
+  const [runField, setRunField] = useState<'policy' | 'effort' | null>(null);
+  const closeMenus = useCallback(() => {
+    setOpenMenu(null);
+    setRunField(null);
+  }, []);
+  const menuRef = useComposerMenu(openMenu !== null, closeMenus);
   const hasCustomRunConfig =
-    codingWorkflow !== 'analyze' ||
-    actionPolicy !== 'patch' ||
-    effortLevel !== 'medium' ||
-    reasoningEffort !== activeModelMeta.defaultReasoning ||
-    bestOfN !== 1;
-
-  useEffect(() => {
-    if (!advancedOpen) return;
-    const closeOnPointer = (event: PointerEvent) => {
-      if (!advancedRef.current?.contains(event.target as Node)) setAdvancedOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setAdvancedOpen(false);
-    };
-    document.addEventListener('pointerdown', closeOnPointer);
-    document.addEventListener('keydown', closeOnEscape);
-    return () => {
-      document.removeEventListener('pointerdown', closeOnPointer);
-      document.removeEventListener('keydown', closeOnEscape);
-    };
-  }, [advancedOpen]);
+    actionPolicy !== 'patch' || reasoningEffort !== activeModelMeta.defaultReasoning;
+  const modelChoices = [
+    ...modelOptions.map((id) => ({
+      value: id,
+      label: availableModels.length === 0 || availableModels.includes(id) ? id : t('composerSection.modelNotInCli', { id }),
+    })),
+    { value: 'custom', label: t('composerSection.customOption') },
+  ];
+  const effortChoices = (Object.keys(reasoningEfforts) as ReasoningEffort[]).map((key) => ({
+    value: key,
+    label: key === 'off' ? 'Auto' : reasoningEfforts[key].label,
+    detail: reasoningEfforts[key].detail,
+  }));
+  const policyChoices = (Object.keys(actionPolicies) as ActionPolicy[]).map((policy) => ({
+    value: policy,
+    label: actionPolicies[policy].label,
+    detail: actionPolicies[policy].detail,
+  }));
   return (
     <div className="composer-row">
       {actionPolicy === 'autopilot' ? (
@@ -162,139 +158,99 @@ export function ComposerSection({
         onEnqueued={handleEnqueued}
         onError={(message) => setSessionNotice(t('composerSection.sendFailed', { message }))}
         onStop={grokIsRunning && activeRunId ? () => stopRun(activeRunId) : undefined}
+        onHostSlash={onHostSlash}
         controls={
-          <div className="composer-compact-controls">
-            <select
-              aria-label={t('composerSection.grokModel')}
-              className="model-select-footer"
-              title={
-                modelIsVerified
-                  ? t('composerSection.modelTitle', { model: activeModel })
-                  : t('composerSection.modelUnverifiedTitle', { model: activeModel })
-              }
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                if (isGrokModelId(value)) {
-                  changeModelPreset(value);
-                } else {
-                  setModelPreset('custom');
-                  setCustomModel(value);
-                }
-              }}
-              value={modelPreset === 'custom' ? 'custom' : modelPreset}
-            >
-              {modelOptions.map((id) => {
-                const verified = availableModels.length === 0 || availableModels.includes(id);
-                return (
-                  <option key={id} value={id}>
-                    {verified ? id : t('composerSection.modelNotInCli', { id })}
-                  </option>
-                );
-              })}
-              <option value="custom">{t('composerSection.customOption')}</option>
-            </select>
-            <div className="composer-advanced-wrap" ref={advancedRef}>
+          <div className="composer-compact-controls" ref={menuRef}>
+            <div className="cmp-wrap">
+              <ComposerMenuButton
+                label={t('composerSection.grokModel')}
+                open={openMenu === 'model'}
+                onToggle={() => setOpenMenu((current) => (current === 'model' ? null : 'model'))}
+              >
+                {selectedModelValue === 'custom' ? t('composerSection.customOption') : activeModel}
+              </ComposerMenuButton>
+              <ComposerMenuSurface
+                id="composer-model-menu"
+                label={t('composerSection.grokModel')}
+                open={openMenu === 'model'}
+                anchorRef={menuRef}
+              >
+                <ComposerChoiceList
+                  value={selectedModelValue}
+                  items={modelChoices}
+                  onChange={(value) => {
+                    selectModel(value);
+                    if (value !== 'custom') setOpenMenu(null);
+                  }}
+                />
+                {selectedModelValue === 'custom' ? (
+                  <label className="cmp-field">
+                    <span className="cmp-kicker">{t('settings.customModelId')}</span>
+                    <input
+                      aria-label={t('settings.customModelId')}
+                      value={modelConfig.customModel}
+                      placeholder={t('settings.customModelIdPlaceholder')}
+                      onChange={(event) => modelConfig.setCustomModel(event.currentTarget.value)}
+                    />
+                  </label>
+                ) : null}
+              </ComposerMenuSurface>
+            </div>
+            <div className="cmp-wrap">
               <button
-                className="composer-advanced-trigger"
+                className={openMenu === 'run' ? 'composer-advanced-trigger is-open' : 'composer-advanced-trigger'}
                 type="button"
                 aria-label={t('composerSection.runSettings')}
-                aria-expanded={advancedOpen}
+                aria-expanded={openMenu === 'run'}
                 aria-controls="composer-run-settings"
                 title={t('composerSection.runSettings')}
-                onClick={() => setAdvancedOpen((open) => !open)}
+                onClick={() => {
+                  setOpenMenu((current) => {
+                    if (current === 'run') {
+                      setRunField(null);
+                      return null;
+                    }
+                    setRunField(null);
+                    return 'run';
+                  });
+                }}
               >
                 <SlidersHorizontal size={14} />
                 {hasCustomRunConfig ? <span className="composer-config-dot" /> : null}
               </button>
-              {advancedOpen ? (
-                <div
-                  className="composer-advanced-popover"
-                  id="composer-run-settings"
-                  role="group"
-                  aria-label={t('composerSection.runSettings')}
-                >
-                  <strong>{t('composerSection.runSettings')}</strong>
-                  <label>
-                    <span>{t('composerSection.codingWorkflow')}</span>
-                    <select
-                      aria-label={t('composerSection.codingWorkflow')}
-                      onChange={(event) => {
-                        const preset = codingPresets.find(
-                          (item) => item.id === event.currentTarget.value,
-                        );
-                        if (preset) applyCodingPreset(preset);
-                      }}
-                      value={codingWorkflow}
-                    >
-                      {codingPresets.map((preset) => (
-                        <option key={preset.id} value={preset.id}>
-                          {preset.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span>{t('composerSection.actionPolicy')}</span>
-                    <select
-                      aria-label={t('composerSection.actionPolicy')}
-                      onChange={(event) =>
-                        setActionPolicy(event.currentTarget.value as ActionPolicy)
-                      }
-                      value={actionPolicy}
-                    >
-                      {(Object.keys(actionPolicies) as ActionPolicy[]).map((policy) => (
-                        <option key={policy} value={policy}>
-                          {actionPolicies[policy].label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span>{t('composerSection.agentEffort')}</span>
-                    <select
-                      aria-label={t('composerSection.agentEffort')}
-                      value={effortLevel}
-                      onChange={(event) => setEffortLevel(event.currentTarget.value as EffortLevel)}
-                    >
-                      {(Object.keys(effortLevels) as EffortLevel[]).map((key) => (
-                        <option key={key} value={key}>
-                          {effortLevels[key].label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span>{t('composerSection.reasoningEffort')}</span>
-                    <select
-                      aria-label={t('composerSection.reasoningEffort')}
-                      value={reasoningEffort}
-                      onChange={(event) =>
-                        setReasoningEffort(event.currentTarget.value as ReasoningEffort)
-                      }
-                    >
-                      {(Object.keys(reasoningEfforts) as ReasoningEffort[]).map((key) => (
-                        <option key={key} value={key}>
-                          {key === 'off' ? 'Auto' : reasoningEfforts[key].label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span>{t('composerSection.bestOfN')}</span>
-                    <select
-                      aria-label={t('composerSection.bestOfN')}
-                      value={bestOfN}
-                      onChange={(event) => setBestOfN(Number(event.currentTarget.value))}
-                    >
-                      {[1, 2, 3, 4, 5].map((n) => (
-                        <option key={n} value={n}>
-                          {n}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              ) : null}
+              <ComposerMenuSurface
+                id="composer-run-settings"
+                label={t('composerSection.runSettings')}
+                open={openMenu === 'run'}
+                anchorRef={menuRef}
+              >
+                <ComposerDropdownField
+                  label={t('composerSection.actionPolicy')}
+                  value={actionPolicy}
+                  items={policyChoices.map(({ value, label }) => ({ value, label }))}
+                  open={runField === 'policy'}
+                  onToggle={() =>
+                    setRunField((current) => (current === 'policy' ? null : 'policy'))
+                  }
+                  onChange={(value) => {
+                    setActionPolicy(value as ActionPolicy);
+                    setRunField(null);
+                  }}
+                />
+                <ComposerDropdownField
+                  label={t('composerSection.reasoningEffort')}
+                  value={reasoningEffort}
+                  items={effortChoices.map(({ value, label }) => ({ value, label }))}
+                  open={runField === 'effort'}
+                  onToggle={() =>
+                    setRunField((current) => (current === 'effort' ? null : 'effort'))
+                  }
+                  onChange={(value) => {
+                    setReasoningEffort(value as ReasoningEffort);
+                    setRunField(null);
+                  }}
+                />
+              </ComposerMenuSurface>
             </div>
           </div>
         }

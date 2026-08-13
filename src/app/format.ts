@@ -6,19 +6,62 @@ export function makeId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
 }
 
+const NOISE_MODEL_TOKENS = new Set(['models', 'available', 'default', 'custom']);
+
+/** Current grok.com catalog used when `grok models` has not reported yet. */
+export const FALLBACK_GROK_MODELS = ['grok-4.6', 'grok-4.5'];
+
+export function parseStoredModelIds(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (id): id is string =>
+        typeof id === 'string' &&
+        /^[\w./:@-]+$/.test(id) &&
+        !NOISE_MODEL_TOKENS.has(id.toLowerCase()),
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function resolveModelOptions(availableModels: readonly string[], stored: readonly string[]): string[] {
+  const fromCli = availableModels.filter(
+    (value) => value && !NOISE_MODEL_TOKENS.has(value.toLowerCase()),
+  );
+  if (fromCli.length > 0) return Array.from(new Set(fromCli));
+  if (stored.length > 0) return Array.from(new Set(stored));
+  return [...FALLBACK_GROK_MODELS];
+}
+
 export function parseAvailableModels(output: string): string[] {
   if (!output.trim()) return [];
+  const models = new Set<string>();
+  const defaultId = output.match(/^\s*Default model:\s*([\w./:@-]+)/im)?.[1];
+  if (defaultId) models.add(defaultId);
+
   const lines = output.split('\n');
   const start = lines.findIndex((line) => /available models/i.test(line));
-  if (start < 0) return [];
-  const models = new Set<string>();
+  if (start < 0) return Array.from(models);
+  let sawItem = false;
   for (let index = start + 1; index < lines.length; index += 1) {
-    const match = lines[index].match(/^\s*[*\-•]\s*([\w./:@-]+)/);
-    if (!match) {
-      if (models.size > 0) break;
+    const line = lines[index];
+    if (!line.trim()) {
+      if (sawItem) break;
       continue;
     }
+    const match =
+      line.match(/^\s*[*\-•·●✓✔]\s*([\w./:@-]+)/) ??
+      line.match(/^\s+(grok[\w./:@-]*)\b/i);
+    if (!match) {
+      if (sawItem) break;
+      continue;
+    }
+    if (NOISE_MODEL_TOKENS.has(match[1].toLowerCase())) continue;
     models.add(match[1]);
+    sawItem = true;
   }
   return Array.from(models);
 }

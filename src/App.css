@@ -8213,47 +8213,54 @@ body,
   display: flex;
   gap: 4px;
   min-width: 0;
-}
-.composer-compact-controls > select {
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  color: var(--text-2);
-  font-size: 10.5px;
-  height: 26px;
-  margin: 0;
-  max-width: 112px;
-  padding: 0 20px 0 7px;
-}
-.composer-compact-controls > select:hover,
-.composer-compact-controls > select:focus {
-  background: rgba(255, 255, 255, 0.045);
-  border-color: rgba(255, 255, 255, 0.07);
-  color: var(--text-1);
-}
-.composer-compact-controls > select.model-select-footer {
-  max-width: 118px;
-}
-.composer-advanced-wrap {
   position: relative;
 }
+.cmp-wrap {
+  position: static;
+}
+.cmp-trigger,
 .composer-advanced-trigger,
 .composer-compact-controls .mini-run {
   align-items: center;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 7px;
   color: var(--text-2);
   cursor: pointer;
   display: inline-flex;
+  font: inherit;
+  gap: 4px;
   height: 26px;
-  justify-content: center;
+  max-width: 168px;
   min-height: 26px;
-  padding: 0;
+  padding: 0 6px;
   position: relative;
+}
+.cmp-trigger-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cmp-trigger {
+  font-size: 11.5px;
+  letter-spacing: -0.01em;
+  padding-right: 4px;
+}
+.cmp-trigger svg,
+.composer-advanced-trigger svg {
+  color: var(--text-3);
+  flex: 0 0 auto;
+}
+.composer-advanced-trigger {
+  justify-content: center;
+  padding: 0;
   width: 26px;
 }
+.cmp-trigger:hover,
+.cmp-trigger.is-open,
 .composer-advanced-trigger:hover,
+.composer-advanced-trigger.is-open,
 .composer-advanced-trigger[aria-expanded='true'],
 .composer-compact-controls .mini-run:hover {
   background: rgba(255, 255, 255, 0.055);
@@ -8270,51 +8277,166 @@ body,
   top: 3px;
   width: 5px;
 }
-.composer-advanced-popover {
-  background: rgba(31, 31, 31, 0.98);
-  border: 1px solid #3a3a3a;
-  border-radius: 11px;
-  bottom: calc(100% + 8px);
-  box-shadow: 0 14px 42px rgba(0, 0, 0, 0.42);
+.cmp-surface {
+  animation: ctx-menu-in 110ms var(--ease-out);
+  background: #202020;
+  border: 1px solid #343434;
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
   display: grid;
-  gap: 9px;
-  left: -8px;
-  min-width: 260px;
-  padding: 12px;
-  position: absolute;
-  z-index: 120;
+  gap: 2px;
+  /* Height capped in JS to remaining viewport; scroll instead of window crop. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 6px;
+  position: fixed;
+  transform-origin: bottom right;
+  visibility: hidden;
+  width: 260px;
+  z-index: 400;
+  -webkit-overflow-scrolling: touch;
 }
-.composer-advanced-popover > strong {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 0 2px 2px;
+.cmp-dd {
+  display: grid;
 }
-.composer-advanced-popover label {
+.cmp-dd-trigger {
   align-items: center;
-  display: grid;
-  gap: 12px;
-  grid-template-columns: minmax(0, 1fr) 132px;
-}
-.composer-advanced-popover label > span {
-  color: var(--text-2);
-  font-size: 10.5px;
-}
-.composer-advanced-popover select {
-  background: #282828;
-  border: 1px solid #3a3a3a;
-  border-radius: 6px;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
   color: var(--text-1);
-  font-size: 10.5px;
-  height: 28px;
-  margin: 0;
-  min-width: 0;
-  padding: 0 7px;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  gap: 10px;
+  justify-content: space-between;
+  min-height: 0;
+  padding: 8px 10px;
+  text-align: left;
   width: 100%;
 }
-@media (max-width: 760px) {
-  .composer-compact-controls > select.model-select-footer {
-    display: none;
-  }
+.cmp-dd-trigger:not(:disabled):active {
+  transform: none;
+}
+.cmp-dd-trigger:hover,
+.cmp-dd.is-open > .cmp-dd-trigger {
+  background: rgba(255, 255, 255, 0.06);
+}
+.cmp-dd-meta {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-width: 0;
+}
+.cmp-dd-label {
+  color: var(--text-3);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.cmp-dd-value {
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+}
+.cmp-dd-trigger svg {
+  color: var(--text-3);
+  flex: 0 0 auto;
+  transition: transform 120ms var(--ease-out);
+}
+/* Floating option list — always opens to the right of the field. */
+.cmp-flyout {
+  animation: ctx-menu-in 110ms var(--ease-out);
+  background: #202020;
+  border: 1px solid #343434;
+  border-radius: 10px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 4px;
+  position: fixed;
+  transform-origin: top left;
+  visibility: hidden;
+  z-index: 450;
+  -webkit-overflow-scrolling: touch;
+}
+.cmp-flyout .cmp-kicker {
+  display: none;
+}
+.cmp-group {
+  display: grid;
+  gap: 1px;
+}
+.cmp-kicker {
+  color: var(--text-3);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 4px 8px 5px;
+  text-transform: uppercase;
+}
+.cmp-option {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text-1);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  gap: 10px;
+  justify-content: flex-start;
+  min-height: 0;
+  padding: 7px 8px;
+  text-align: left;
+  width: 100%;
+}
+.cmp-option:not(:disabled):active {
+  transform: none;
+}
+.cmp-option:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.cmp-option.is-selected {
+  background: rgba(255, 255, 255, 0.09);
+}
+.cmp-option svg {
+  color: var(--text-2);
+  flex: 0 0 auto;
+}
+.cmp-option-copy {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 1px;
+  min-width: 0;
+}
+.cmp-option-title {
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+}
+.cmp-option-detail {
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1.3;
+}
+.cmp-field {
+  display: grid;
+  gap: 4px;
+  padding: 2px 2px 4px;
+}
+.cmp-field input {
+  background: rgba(8, 10, 12, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 12.5px;
+  height: 32px;
+  padding: 0 10px;
 }
 
 /* ===== Light-theme composer + user bubble =================================
@@ -8347,23 +8469,45 @@ body,
 .theme-light .composer-attach:hover:not(:disabled) {
   background: rgba(31, 29, 25, 0.06);
 }
-.theme-light .composer-compact-controls > select:hover,
-.theme-light .composer-compact-controls > select:focus {
-  background: rgba(31, 29, 25, 0.05);
-  border-color: rgba(31, 29, 25, 0.12);
-}
+.theme-light .cmp-trigger:hover,
+.theme-light .cmp-trigger.is-open,
 .theme-light .composer-advanced-trigger:hover,
+.theme-light .composer-advanced-trigger.is-open,
 .theme-light .composer-advanced-trigger[aria-expanded='true'],
 .theme-light .composer-compact-controls .mini-run:hover {
   background: rgba(31, 29, 25, 0.055);
   border-color: rgba(31, 29, 25, 0.12);
 }
-.theme-light .composer-advanced-popover {
+.theme-light .cmp-surface,
+.theme-light .cmp-flyout {
   background: var(--bg-3);
   border-color: var(--border-2);
-  box-shadow: 0 14px 42px rgba(31, 29, 25, 0.18);
+  box-shadow: 0 16px 40px rgba(31, 29, 25, 0.14);
 }
-.theme-light .composer-advanced-popover select {
+.theme-light .cmp-kicker,
+.theme-light .cmp-dd-label,
+.theme-light .cmp-option-detail {
+  color: var(--text-3);
+}
+.theme-light .cmp-option,
+.theme-light .cmp-option-title,
+.theme-light .cmp-dd-value,
+.theme-light .cmp-dd-trigger {
+  color: var(--text-1);
+}
+.theme-light .cmp-dd-trigger:hover,
+.theme-light .cmp-dd.is-open > .cmp-dd-trigger,
+.theme-light .cmp-option:hover {
+  background: rgba(31, 29, 25, 0.05);
+}
+.theme-light .cmp-option.is-selected {
+  background: rgba(31, 29, 25, 0.08);
+}
+.theme-light .cmp-option svg,
+.theme-light .cmp-dd-trigger svg {
+  color: var(--text-2);
+}
+.theme-light .cmp-field input {
   background: var(--bg-1);
   border-color: var(--border-2);
 }

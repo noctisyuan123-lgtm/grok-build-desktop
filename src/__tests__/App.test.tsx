@@ -202,6 +202,338 @@ describe('composer submit → queued run → streamed reply', () => {
     expect(tauri.unknownCommands).toEqual([]);
   });
 
+  it('checkpoints partial assistant text into storage while the run is still live', async () => {
+    const ctx = await bootApp();
+    const { tauri } = ctx;
+    const runId = await submitPrompt(ctx, 'Keep going');
+
+    await act(async () => {
+      await tauri.emitQueue(runId, []);
+      await tauri.emitRunState(runId, 'Running', { startedAt: Date.now() });
+      await tauri.emitRunEvent(runId, { type: 'text', data: 'partial before quit' });
+    });
+
+    // Mid-stream checkpoint is debounced (~300ms) so React does not thrash.
+    await waitFor(
+      () => {
+        const stored = JSON.parse(
+          window.localStorage.getItem(storageKeys.messages) ?? '[]',
+        ) as Array<{ role: string; content: string; status?: string }>;
+        const assistant = stored.find((m) => m.role === 'assistant');
+        expect(assistant?.content).toBe('partial before quit');
+        expect(assistant?.status).toBe('streaming');
+      },
+      { timeout: 2000 },
+    );
+  });
+
+  it('hands one session to CLI, imports CLI turns, and keeps Desktop on the shared head', async () => {
+    const exported = [
+      '## User',
+      '',
+      'Start together',
+      '',
+      '## Assistant',
+      '',
+      'Desktop reply',
+      '',
+      '## User',
+      '',
+      'Message from CLI',
+      '',
+      '## Assistant',
+      '',
+      'CLI reply',
+    ].join('\n');
+    const ctx = await bootApp({ export_grok_session: () => exported });
+    const runId = await submitPrompt(ctx, 'Start together');
+
+    await act(async () => {
+      await ctx.tauri.emitRunState(runId, 'Running', { startedAt: Date.now() });
+      await ctx.tauri.emitRunEvent(runId, { type: 'text', data: 'Desktop reply' });
+      await ctx.tauri.emitRunEvent(runId, {
+        type: 'end',
+        stopReason: 'EndTurn',
+        sessionId: 'shared-session',
+        requestId: 'shared-request',
+      });
+      await ctx.tauri.emitRunState(runId, 'Done', { endedAt: Date.now() });
+    });
+
+    const textarea = composerTextarea();
+    await ctx.user.type(textarea, '/cli');
+    await ctx.user.keyboard('{Enter}');
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('open_grok_cli'));
+    const openCli = [...ctx.tauri.calls].reverse().find((call) => call.cmd === 'open_grok_cli')!;
+    expect(openCli.args.sessionId).toBe('shared-session');
+    expect(ctx.tauri.runIds).toHaveLength(1);
+
+    // Linking starts the Desktop listener immediately; the shared export is
+    // imported without submitting the slash command as a model turn.
+    expect(await convo().findByText('Message from CLI')).toBeInTheDocument();
+    expect(await convo().findByText('CLI reply')).toBeInTheDocument();
+
+    await ctx.user.type(textarea, 'Message from Desktop');
+    await ctx.user.keyboard('{Enter}');
+    await waitFor(() => expect(ctx.tauri.runIds).toHaveLength(2));
+    const sharedEnqueue = [...ctx.tauri.calls]
+      .reverse()
+      .find((call) => call.cmd === 'enqueue_run')!;
+    const args = sharedEnqueue.args.args as string[];
+    expect(args[args.indexOf('--resume') + 1]).toBe('shared-session');
+    expect(args).toContain('--share-session');
+    expect(args).not.toContain('--fork-session');
+  });
+
+  it('does not restore an undone Desktop turn when CLI writes the shared session', async () => {
+    let exported = [
+      '## User',
+      '',
+      'Keep this',
+      '',
+      '## Assistant',
+      '',
+      'Kept.',
+      '',
+      '## User',
+      '',
+      'Undo me',
+      '',
+      '## Assistant',
+      '',
+      'Gone.',
+    ].join('\n');
+    const ctx = await bootApp({
+      export_grok_session: () => exported,
+      rewind_grok_session: (args) => ({
+        rewound: true,
+        sessionId: String(args.sessionId),
+        rebased: false,
+      }),
+    });
+    const first = await submitPrompt(ctx, 'Keep this');
+    await act(async () => {
+      await ctx.tauri.streamReply(first, ['Kept.']);
+    });
+    const second = await submitPrompt(ctx, 'Undo me');
+    await act(async () => {
+      await ctx.tauri.streamReply(second, ['Gone.']);
+    });
+    const textarea = composerTextarea();
+    await ctx.user.type(textarea, '/cli');
+    await ctx.user.keyboard('{Enter}');
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('open_grok_cli'));
+
+    const undoButtons = await convo().findAllByRole('button', { name: t('message.undoResponse') });
+    const enabledUndo = undoButtons.find((button) => !(button as HTMLButtonElement).disabled);
+    await ctx.user.click(enabledUndo!);
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
+    expect(convo().queryByText('Gone.')).not.toBeInTheDocument();
+
+    exported = [
+      exported,
+      '',
+      '## User',
+      '',
+      'from CLI after undo',
+      '',
+      '## Assistant',
+      '',
+      'CLI saw the old turn',
+    ].join('\n');
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(await convo().findByText('from CLI after undo')).toBeInTheDocument();
+    expect(convo().queryByText('Undo me')).not.toBeInTheDocument();
+    expect(convo().queryByText('Gone.')).not.toBeInTheDocument();
+    expect(await convo().findByText('Keep this')).toBeInTheDocument();
+  });
+
+  it('undoes the latest duplicate Desktop prompt without dropping later CLI turns', async () => {
+    let exported = [
+      '## User',
+      '',
+      'continue',
+      '## Assistant',
+      '',
+      'First continue reply',
+      '## User',
+      '',
+      'continue',
+      '## Assistant',
+      '',
+      'Second continue reply',
+    ].join('\n');
+    const ctx = await bootApp({
+      export_grok_session: () => exported,
+      rewind_grok_session: (args) => ({
+        rewound: true,
+        sessionId: String(args.sessionId),
+        rebased: false,
+      }),
+    });
+    const first = await submitPrompt(ctx, 'continue');
+    await act(async () => {
+      await ctx.tauri.streamReply(first, ['First continue reply']);
+    });
+    const second = await submitPrompt(ctx, 'continue');
+    await act(async () => {
+      await ctx.tauri.streamReply(second, ['Second continue reply']);
+    });
+
+    const textarea = composerTextarea();
+    await ctx.user.type(textarea, '/cli');
+    await ctx.user.keyboard('{Enter}');
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('open_grok_cli'));
+
+    const undoButtons = await convo().findAllByRole('button', { name: t('message.undoResponse') });
+    const enabledUndo = undoButtons.find((button) => !(button as HTMLButtonElement).disabled);
+    await ctx.user.click(enabledUndo!);
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
+
+    exported = [
+      exported,
+      '## User',
+      '',
+      'from CLI after undo',
+      '## Assistant',
+      '',
+      'CLI reply after undo',
+    ].join('\n');
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+
+    expect(await convo().findByText('from CLI after undo')).toBeInTheDocument();
+    expect(await convo().findByText('CLI reply after undo')).toBeInTheDocument();
+    expect(await convo().findByText('First continue reply')).toBeInTheDocument();
+    expect(convo().queryByText('Second continue reply')).not.toBeInTheDocument();
+    expect(convo().getAllByText('continue')).toHaveLength(1);
+    const rewind = [...ctx.tauri.calls]
+      .reverse()
+      .find((call) => call.cmd === 'rewind_grok_session');
+    expect(rewind?.args.undoPrompt).toBe('continue');
+  });
+
+  it('moves the visible and live head to a rebased undo session', async () => {
+    let exported = [
+      '## User',
+      '',
+      'Keep this context',
+      '',
+      '## Assistant',
+      '',
+      'Context kept.',
+      '',
+      '## User',
+      '',
+      'Undo this turn',
+      '',
+      '## Assistant',
+      '',
+      'Undo this answer.',
+    ].join('\n');
+    const ctx = await bootApp({
+      export_grok_session: () => exported,
+      rewind_grok_session: () => {
+        exported = '';
+        return {
+          rewound: false,
+          sessionId: 'rebased-session',
+          rebased: true,
+        };
+      },
+    });
+    const first = await submitPrompt(ctx, 'Keep this context');
+    await act(async () => {
+      await ctx.tauri.streamReply(first, ['Context kept.']);
+    });
+    const second = await submitPrompt(ctx, 'Undo this turn');
+    await act(async () => {
+      await ctx.tauri.streamReply(second, ['Undo this answer.']);
+    });
+
+    await ctx.user.type(composerTextarea(), '/cli');
+    await ctx.user.keyboard('{Enter}');
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('open_grok_cli'));
+    const opensBeforeUndo = ctx.tauri.calls.filter((call) => call.cmd === 'open_grok_cli').length;
+
+    const undoButtons = await convo().findAllByRole('button', { name: t('message.undoResponse') });
+    const enabledUndo = undoButtons.find((button) => !(button as HTMLButtonElement).disabled);
+    await ctx.user.click(enabledUndo!);
+
+    await waitFor(() => {
+      const opens = ctx.tauri.calls.filter((call) => call.cmd === 'open_grok_cli');
+      expect(opens).toHaveLength(opensBeforeUndo + 1);
+      expect(opens.at(-1)?.args.sessionId).toBe('rebased-session');
+    });
+    expect(composerTextarea().value).toBe('Undo this turn');
+    expect(await convo().findByText('Context kept.')).toBeInTheDocument();
+    expect(convo().queryByText('Undo this answer.')).not.toBeInTheDocument();
+
+    const rewind = [...ctx.tauri.calls]
+      .reverse()
+      .find((call) => call.cmd === 'rewind_grok_session');
+    expect(rewind?.args.replayContext).toContain('Keep this context');
+    expect(rewind?.args.replayContext).toContain('Context kept.');
+
+    exported =
+      '## User\n\nCLI after rebase\n\n## Assistant\n\nCLI rebased reply.\n';
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(await convo().findByText('Keep this context')).toBeInTheDocument();
+    expect(await convo().findByText('Context kept.')).toBeInTheDocument();
+    expect(await convo().findByText('CLI after rebase')).toBeInTheDocument();
+    expect(await convo().findByText('CLI rebased reply.')).toBeInTheDocument();
+    expect(convo().queryByText('Undo this turn')).not.toBeInTheDocument();
+    expect(convo().queryByText('Undo this answer.')).not.toBeInTheDocument();
+
+    await ctx.user.keyboard('{Enter}');
+    await waitFor(() => expect(ctx.tauri.runIds).toHaveLength(3));
+    const enqueue = [...ctx.tauri.calls].reverse().find((call) => call.cmd === 'enqueue_run')!;
+    const args = enqueue.args.args as string[];
+    expect(args[args.indexOf('--resume') + 1]).toBe('rebased-session');
+  });
+
+  it('resumes a rebased head after undoing the only visible turn', async () => {
+    let exported = '## User\n\nOnly turn\n\n## Assistant\n\nOnly answer.\n';
+    const ctx = await bootApp({
+      export_grok_session: () => exported,
+      rewind_grok_session: () => {
+        exported = '';
+        return {
+          rewound: false,
+          sessionId: 'empty-rebased-session',
+          rebased: true,
+        };
+      },
+    });
+    const runId = await submitPrompt(ctx, 'Only turn');
+    await act(async () => {
+      await ctx.tauri.streamReply(runId, ['Only answer.']);
+    });
+    await ctx.user.type(composerTextarea(), '/cli');
+    await ctx.user.keyboard('{Enter}');
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('open_grok_cli'));
+
+    await ctx.user.click(await convo().findByRole('button', { name: t('message.undoResponse') }));
+    await waitFor(() => {
+      const open = [...ctx.tauri.calls].reverse().find((call) => call.cmd === 'open_grok_cli');
+      expect(open?.args.sessionId).toBe('empty-rebased-session');
+    });
+    expect(composerTextarea().value).toBe('Only turn');
+    expect(convo().queryByText('Only answer.')).not.toBeInTheDocument();
+
+    await ctx.user.keyboard('{Enter}');
+    await waitFor(() => expect(ctx.tauri.runIds).toHaveLength(2));
+    const enqueue = [...ctx.tauri.calls].reverse().find((call) => call.cmd === 'enqueue_run')!;
+    const args = enqueue.args.args as string[];
+    expect(args[args.indexOf('--resume') + 1]).toBe('empty-rebased-session');
+    expect(args).toContain('--share-session');
+  });
+
   it('stops a running run from the composer send position and marks the message stopped', async () => {
     const ctx = await bootApp();
     const { tauri, user } = ctx;
@@ -215,7 +547,9 @@ describe('composer submit → queued run → streamed reply', () => {
 
     // Stop occupies the send slot (icon-only square); no separate text Stop.
     expect(screen.queryByRole('button', { name: t('composer.send') })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: t('composer.sendEnqueue') })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: t('composer.sendEnqueue') }),
+    ).not.toBeInTheDocument();
     const stop = await screen.findByRole('button', { name: t('composerSection.stopRun') });
     expect(stop).toHaveClass('composer-send', 'composer-stop');
     expect(stop.querySelector('.composer-stop-square')).toBeInTheDocument();
@@ -438,7 +772,9 @@ describe('session tabs and history', () => {
     expect(convo().queryByText('Prior reply stays in history only.')).not.toBeInTheDocument();
 
     // Prior chat remains a distinct HISTORY row (not split into the new surface).
-    expect(await screen.findByRole('button', { name: /Prior conversation body/ })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('button', { name: /Prior conversation body/ }),
+    ).toBeInTheDocument();
   });
 
   it('queues a new session without inheriting another session run args or Stop control', async () => {
@@ -455,9 +791,10 @@ describe('session tabs and history', () => {
       });
     });
     // Current session owns the run → Stop in the send slot.
-    expect(
-      await screen.findByRole('button', { name: t('composerSection.stopRun') }),
-    ).toHaveClass('composer-send', 'composer-stop');
+    expect(await screen.findByRole('button', { name: t('composerSection.stopRun') })).toHaveClass(
+      'composer-send',
+      'composer-stop',
+    );
     expect(await convo().findByText('Streaming only in session A')).toBeInTheDocument();
 
     // New empty session while A is still running.
@@ -469,7 +806,9 @@ describe('session tabs and history', () => {
     expect(convo().queryByText('Streaming only in session A')).not.toBeInTheDocument();
     // Other session's run must not replace this session's send button, and
     // concurrent lanes mean this free session still shows Send (not Enqueue).
-    expect(screen.queryByRole('button', { name: t('composerSection.stopRun') })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: t('composerSection.stopRun') }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: t('composer.send') })).toBeInTheDocument();
 
     const runB = await submitPrompt(ctx, 'Fresh session B prompt');

@@ -16,7 +16,6 @@ import {
   isToolRun,
   type ActionPolicy,
   type ChatMessage,
-  type ChatMessageStatus,
   type Mode,
   type SessionState,
   type ThemeMode,
@@ -28,6 +27,7 @@ import {
   storedMessages,
   storedRunHistory,
 } from '../app/storage';
+import { coerceStreamingMessagesStopped } from '../lib/mergeStreamMessages';
 
 export interface SessionPersistenceDeps {
   setComposerValue: (value: string) => void;
@@ -164,17 +164,14 @@ export function useSessionPersistence({
           setLastRun(restoredLastRun);
 
           const restoredMessages = Array.isArray(restored.messages)
-            ? restored.messages.filter(isChatMessage).slice(-120)
+            ? coerceStreamingMessagesStopped(
+                restored.messages.filter(isChatMessage).slice(-120),
+              )
             : [];
           if (restoredMessages.length > 0) {
-            const cleaned = restoredMessages.map((message) =>
-              message.role === 'assistant' && message.status === 'streaming'
-                ? { ...message, status: 'stopped' as ChatMessageStatus }
-                : message,
-            );
             // Same staleness rule as codingCwd above: only adopt the file's
             // conversation when nothing hydrated locally.
-            setMessages((current) => (current.length === 0 ? cleaned : current));
+            setMessages((current) => (current.length === 0 ? restoredMessages : current));
           }
 
           const effectiveMessageCount = Math.max(restoredMessages.length, storedMessages().length);

@@ -52,6 +52,8 @@ describe('simple union guards', () => {
 
   it('isGrokModelId', () => {
     expect(isGrokModelId('grok-build')).toBe(true);
+    expect(isGrokModelId('grok-4.6')).toBe(true);
+    expect(isGrokModelId('grok-4.5')).toBe(true);
     expect(isGrokModelId('custom')).toBe(true);
     expect(isGrokModelId('grok-5')).toBe(false);
   });

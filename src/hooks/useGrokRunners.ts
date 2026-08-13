@@ -275,7 +275,7 @@ export function useGrokRunners(deps: GrokRunnerDeps) {
       }
       const run = await invoke<ToolRun>('list_grok_models');
       setModelsRun(run);
-      const parsed = parseAvailableModels(run.output);
+      const parsed = parseAvailableModels([run.output, run.stderr].filter(Boolean).join('\n'));
       if (parsed.length > 0) setAvailableModels(parsed);
     } catch (error) {
       setModelsRun({

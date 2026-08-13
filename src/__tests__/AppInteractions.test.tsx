@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event';
 import { VirtuosoMockContext } from 'react-virtuoso';
 import App from '../App';
 import { detachTauriListeners, streamStore } from '../lib/streamStore';
-import { codingPresets } from '../app/constants';
+import { reasoningEfforts } from '../app/constants';
 import { t } from '../i18n';
 import { installTauriAppMock, type CommandHandler, type TauriAppMock } from '../test/tauriAppMock';
 
@@ -87,14 +87,42 @@ describe('keyboard shortcuts', () => {
 });
 
 describe('compact composer controls', () => {
-  it('applies a coding workflow preset to the composer', async () => {
-    const { user } = await bootApp();
-    await user.click(screen.getByRole('button', { name: t('composerSection.runSettings') }));
-    const workflowSelect = screen.getByLabelText(t('composerSection.codingWorkflow'));
+  it('switches CLI-only models and effort so enqueue gets one reasoning flag', async () => {
+    const { tauri, user } = await bootApp({
+      list_grok_models: () => ({
+        ok: true,
+        command: 'grok models',
+        cwd: '',
+        exit_code: 0,
+        duration_ms: 1,
+        timed_out: false,
+        output: 'Available models:\n  * grok-4.6 (default)\n  - grok-4.5\n',
+        stderr: '',
+      }),
+    });
 
-    const preset = codingPresets.find((p) => p.id === 'tests')!;
-    await user.selectOptions(workflowSelect, 'tests');
-    expect(composerTextarea().value).toBe(preset.prompt);
+    const modelTrigger = await screen.findByRole('button', { name: t('composerSection.grokModel') });
+    await waitFor(() => expect(modelTrigger).toHaveTextContent('grok-4.6'));
+    await user.click(modelTrigger);
+    await user.click(screen.getByRole('option', { name: 'grok-4.5' }));
+    expect(modelTrigger).toHaveTextContent('grok-4.5');
+
+    await user.click(screen.getByRole('button', { name: t('composerSection.runSettings') }));
+    await user.click(screen.getByRole('button', { name: t('composerSection.reasoningEffort') }));
+    await user.click(screen.getByRole('option', { name: reasoningEfforts.xhigh.label }));
+
+    const textarea = composerTextarea();
+    await user.clear(textarea);
+    await user.type(textarea, 'use the selected model');
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(tauri.calls.some((call) => call.cmd === 'enqueue_run')).toBe(true));
+
+    const enqueue = [...tauri.calls].reverse().find((call) => call.cmd === 'enqueue_run')!;
+    const args = enqueue.args.args as string[];
+    expect(args[args.indexOf('--model') + 1]).toBe('grok-4.5');
+    expect(args).not.toContain('--effort');
+    expect(args[args.indexOf('--reasoning-effort') + 1]).toBe('xhigh');
+    expect(args.filter((part) => part === '--reasoning-effort')).toHaveLength(1);
   });
 
   it('switches mode from the sidebar segment and preserves typed drafts', async () => {

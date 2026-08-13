@@ -54,21 +54,30 @@ describe('buildGrokArgs', () => {
     expect(flagValue(args, '--max-turns')).toBe('12');
   });
 
-  it('passes model and effort', () => {
+  it('passes model and a single reasoning-effort flag', () => {
     const args = buildGrokArgs(config({ activeModel: 'grok-latest', effortLevel: 'high' }));
     expect(flagValue(args, '--model')).toBe('grok-latest');
-    expect(flagValue(args, '--effort')).toBe('high');
+    // grok 1.0 aliases --effort to --reasoning-effort; never send both.
+    expect(args).not.toContain('--effort');
+    expect(flagValue(args, '--reasoning-effort')).toBe('high');
   });
 
-  it('omits reasoning-effort when off and maps max to xhigh', () => {
-    expect(buildGrokArgs(config({ reasoningEffort: 'off' }))).not.toContain('--reasoning-effort');
+  it('prefers explicit reasoning effort and maps max to xhigh', () => {
     expect(
-      flagValue(buildGrokArgs(config({ reasoningEffort: 'high' })), '--reasoning-effort'),
+      flagValue(
+        buildGrokArgs(config({ effortLevel: 'low', reasoningEffort: 'high' })),
+        '--reasoning-effort',
+      ),
     ).toBe('high');
-    // "max" is NOT a valid grok value — it must be translated, never sent raw.
     expect(flagValue(buildGrokArgs(config({ reasoningEffort: 'max' })), '--reasoning-effort')).toBe(
       'xhigh',
     );
+    expect(flagValue(buildGrokArgs(config({ effortLevel: 'max' })), '--reasoning-effort')).toBe(
+      'xhigh',
+    );
+    const both = buildGrokArgs(config({ effortLevel: 'medium', reasoningEffort: 'xhigh' }));
+    expect(both.filter((part) => part === '--reasoning-effort')).toHaveLength(1);
+    expect(both).not.toContain('--effort');
   });
 
   it('maps autopilot to --always-approve and suppresses --permission-mode', () => {
@@ -97,17 +106,15 @@ describe('buildGrokArgs', () => {
     expect(buildGrokArgs(config({ mode: 'coding' }))).toContain('--rules');
   });
 
-  it('passes best-of-n only when above 1', () => {
+  it('never sends --best-of-n (removed in grok 1.0)', () => {
     expect(buildGrokArgs(config({ bestOfN: 1 }))).not.toContain('--best-of-n');
-    expect(flagValue(buildGrokArgs(config({ bestOfN: 3 })), '--best-of-n')).toBe('3');
+    expect(buildGrokArgs(config({ bestOfN: 3 }))).not.toContain('--best-of-n');
   });
 
-  it('never combines --no-subagents with --best-of-n (grok rejects the pair)', () => {
+  it('still honors --no-subagents when Best-of-N is left above 1 in old storage', () => {
     const fanned = buildGrokArgs(config({ subagentsEnabled: false, bestOfN: 3 }));
-    expect(fanned).toContain('--best-of-n');
-    expect(fanned).not.toContain('--no-subagents');
-    const single = buildGrokArgs(config({ subagentsEnabled: false, bestOfN: 1 }));
-    expect(single).toContain('--no-subagents');
+    expect(fanned).toContain('--no-subagents');
+    expect(fanned).not.toContain('--best-of-n');
   });
 
   it('maps the remaining toggles to their flags', () => {
@@ -138,6 +145,22 @@ describe('buildGrokArgs', () => {
     const queued = buildGrokArgs(config({ continueLatestSession: true }));
     expect(queued).toContain('-c');
     expect(queued).toContain('--fork-session');
+  });
+
+  it('shares the session head without forking when live-linked to CLI', () => {
+    const shared = buildGrokArgs(
+      config({ resumeSessionId: 'live-session', shareSession: true }),
+    );
+    expect(flagValue(shared, '--resume')).toBe('live-session');
+    expect(shared).toContain('--share-session');
+    expect(shared).not.toContain('--fork-session');
+
+    const sharedContinue = buildGrokArgs(
+      config({ continueLatestSession: true, shareSession: true }),
+    );
+    expect(sharedContinue).toContain('-c');
+    expect(sharedContinue).toContain('--share-session');
+    expect(sharedContinue).not.toContain('--fork-session');
   });
 
   it('never combines explicit resume with queue-time -c', () => {

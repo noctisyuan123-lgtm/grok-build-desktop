@@ -79,6 +79,11 @@ interface Props {
    * enqueues a follow-up — stop is click-only.
    */
   onStop?: () => void;
+  /**
+   * Host-handled slash commands (e.g. `/cli`, `/desktop`). Return true when
+   * the prompt was fully handled and must not be sent to grok.
+   */
+  onHostSlash?: (raw: string) => boolean | Promise<boolean>;
 }
 
 /**
@@ -123,6 +128,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     onTextChange,
     controls,
     onStop,
+    onHostSlash,
   }: Props,
   outerRef,
 ) {
@@ -389,6 +395,16 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     setMention(null);
     notePendingSubmitStart();
     try {
+      // Host slash commands stay in the desktop shell (CLI handoff, etc.).
+      if (rawText.startsWith('/') && onHostSlash && (await onHostSlash(rawText))) {
+        el.value = '';
+        recordDraftHistory('');
+        onTextChangeRef.current?.('');
+        notePendingSubmitEnd();
+        setSubmitting(false);
+        requestAnimationFrame(() => ref.current?.focus());
+        return;
+      }
       const attachmentFallback = t('composer.attachmentOnlyPrompt');
       const expandedText = await expandMentionsInPrompt(rawText || attachmentFallback);
       const attachmentList = attachments.map((item) => `- ${item.name}`).join('\n');

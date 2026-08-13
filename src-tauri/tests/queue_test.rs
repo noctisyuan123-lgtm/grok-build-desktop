@@ -86,7 +86,8 @@ async fn enqueue_runs_serial_and_emits_events() {
         })
         .count();
     assert_eq!(
-        done_count, 2,
+        done_count,
+        2,
         "expected 2 Done state events, got {} (events: {:?})",
         done_count,
         events.len()
@@ -544,7 +545,13 @@ async fn clear_waiting_emits_a_terminal_state_for_every_run() {
     let (q, mut rx) = RunQueue::new(db, fake_grok_path()).await;
     let q = Arc::new(q);
     let (first, _) = q
-        .enqueue("first".into(), "/tmp".into(), vec!["--ok".into()], None, None)
+        .enqueue(
+            "first".into(),
+            "/tmp".into(),
+            vec!["--ok".into()],
+            None,
+            None,
+        )
         .await
         .unwrap();
     let (second, _) = q

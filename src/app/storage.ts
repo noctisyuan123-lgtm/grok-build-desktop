@@ -1,4 +1,5 @@
 // localStorage hydration helpers shared by App boot and its hooks.
+import { coerceStreamingMessagesStopped } from '../lib/mergeStreamMessages';
 import { isChatMessage, isToolRun, type ChatMessage } from './types';
 import { storageKeys, tabsActiveKey, tabsStorageKey } from './constants';
 
@@ -41,7 +42,9 @@ export function storedLastRun() {
 }
 
 export function storedMessages() {
-  return readJsonStorage<unknown[]>(storageKeys.messages, []).filter(isChatMessage).slice(-120);
+  return coerceStreamingMessagesStopped(
+    readJsonStorage<unknown[]>(storageKeys.messages, []).filter(isChatMessage).slice(-120),
+  );
 }
 
 /**
@@ -53,6 +56,9 @@ export function storedMessages() {
  * mount-time tab-mirror effect from merging two conversations. Returns null
  * when no tabs are stored (legacy/first run) so callers can fall back to the
  * flat key.
+ *
+ * Orphaned `status: "streaming"` rows are coerced to `stopped` — a restart
+ * can never resume the in-memory streamStore.
  */
 export function storedActiveTabMessages(): ChatMessage[] | null {
   try {
@@ -63,7 +69,9 @@ export function storedActiveTabMessages(): ChatMessage[] | null {
     const activeId = window.localStorage.getItem(tabsActiveKey);
     const active = parsed.find((t) => t && t.id === activeId) ?? parsed[0];
     if (!active || !Array.isArray(active.messages)) return null;
-    return (active.messages as unknown[]).filter(isChatMessage).slice(-120);
+    return coerceStreamingMessagesStopped(
+      (active.messages as unknown[]).filter(isChatMessage).slice(-120),
+    );
   } catch {
     return null;
   }

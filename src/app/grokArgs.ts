@@ -36,6 +36,12 @@ export interface GrokRunConfig {
    * instruction context ahead of the replacement prompt.
    */
   replayMessages?: ReplayMessage[];
+  /**
+   * When live-linked with CLI (`/cli` / `/desktop`), resume the same session
+   * head without `--fork-session` so both surfaces write one shared transcript.
+   * Normal Desktop turns still fork so Undo can isolate heads.
+   */
+  shareSession?: boolean;
 }
 
 /**
@@ -102,18 +108,28 @@ export function buildGrokRules(
   return rules.join('\n');
 }
 
+/** grok 1.0 treats `--effort` as an alias of `--reasoning-effort`. */
+function mapGrokEffort(value: string): string {
+  // grok accepts: none|minimal|low|medium|high|xhigh. The UI's "Max" is not
+  // a valid value — sending it makes grok exit 2 and reply nothing.
+  return value === 'max' ? 'xhigh' : value;
+}
+
+export function resolveGrokEffort(config: Pick<GrokRunConfig, 'effortLevel' | 'reasoningEffort'>): string | null {
+  if (config.reasoningEffort && config.reasoningEffort !== 'off') {
+    return mapGrokEffort(config.reasoningEffort);
+  }
+  if (config.effortLevel) return mapGrokEffort(config.effortLevel);
+  return null;
+}
+
 export function buildGrokArgs(config: GrokRunConfig): string[] {
   const args: string[] = ['--no-alt-screen', '--output-format', 'streaming-json'];
   if (config.activeModel) args.push('--model', config.activeModel);
-  if (config.effortLevel) args.push('--effort', config.effortLevel);
-  if (config.reasoningEffort && config.reasoningEffort !== 'off') {
-    // grok's --reasoning-effort accepts: none|minimal|low|medium|high|xhigh.
-    // The UI's "Max" is NOT a valid grok value — sending it makes grok exit
-    // with code 2 ("invalid reasoning effort: max") and reply NOTHING (this
-    // was the "grok 压根不回我" bug). Map Max → xhigh (grok's real maximum).
-    const r = config.reasoningEffort === 'max' ? 'xhigh' : config.reasoningEffort;
-    args.push('--reasoning-effort', r);
-  }
+  // One flag only. Sending both `--effort` and `--reasoning-effort` is the
+  // same clap option twice and grok exits 2.
+  const effort = resolveGrokEffort(config);
+  if (effort) args.push('--reasoning-effort', effort);
   // Action policy → REAL grok permission behavior.
   //   review   → Plan contract (carried by --rules); no permission flag
   //   patch    → respect the advanced Settings permission-mode override (incl.
@@ -124,7 +140,7 @@ export function buildGrokArgs(config: GrokRunConfig): string[] {
   } else if (config.permissionMode && config.permissionMode !== 'default') {
     args.push('--permission-mode', config.permissionMode);
   }
-  if (config.bestOfN > 1) args.push('--best-of-n', String(config.bestOfN));
+  // grok 1.0 dropped `--best-of-n`. Sending it exits 2 ("unexpected argument").
   // Behavioural guidance at the system-prompt level (grok-native), instead of
   // a preamble in the user turn. Coding mode only; chat stays freeform.
   // After Undo, ACP cannot rewind the loaded session, so we start fresh and
@@ -139,10 +155,7 @@ export function buildGrokArgs(config: GrokRunConfig): string[] {
   if (ruleParts.length > 0) args.push('--rules', ruleParts.join('\n\n'));
   if (config.experimentalMemory) args.push('--experimental-memory');
   if (!config.webSearchEnabled) args.push('--disable-web-search');
-  // grok rejects `--no-subagents` together with `--best-of-n` ("cannot be
-  // used with") — best-of-n fans work out to subagents. So only disable
-  // subagents when we're NOT running best-of-n. (Another grok-exit-2 cause.)
-  if (!config.subagentsEnabled && config.bestOfN <= 1) args.push('--no-subagents');
+  if (!config.subagentsEnabled) args.push('--no-subagents');
   if (config.selfCheck) args.push('--check');
   args.push('--max-turns', '12');
   if (config.mode === 'coding' && config.codingCwd.trim()) {
@@ -152,10 +165,15 @@ export function buildGrokArgs(config: GrokRunConfig): string[] {
   // force a clean session (ACP cannot drop the undone turn from a loaded
   // head) and rely on replayMessages for earlier visible context. `-c` is
   // only a queue-time fallback before the parent run has returned its id.
+  // Live CLI↔Desktop link uses the same head (no fork) so both sides listen.
   if (!config.forceNewSession && config.resumeSessionId) {
-    args.push('--resume', config.resumeSessionId, '--fork-session');
+    args.push('--resume', config.resumeSessionId);
+    if (config.shareSession) args.push('--share-session');
+    else args.push('--fork-session');
   } else if (!config.forceNewSession && config.continueLatestSession) {
-    args.push('-c', '--fork-session');
+    args.push('-c');
+    if (config.shareSession) args.push('--share-session');
+    else args.push('--fork-session');
   }
   return args;
 }

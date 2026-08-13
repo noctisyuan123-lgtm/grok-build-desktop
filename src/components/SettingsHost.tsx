@@ -59,7 +59,6 @@ export function SettingsHost({
   grokVersionLine,
 }: SettingsHostProps) {
   const {
-    modelPreset,
     customModel,
     setCustomModel,
     effortLevel,
@@ -79,7 +78,8 @@ export function SettingsHost({
     selfCheck,
     setSelfCheck,
     activeModel,
-    changeModelPreset,
+    selectModel,
+    selectedModelValue,
     modelOptions,
   } = modelConfig;
   return (
@@ -94,12 +94,15 @@ export function SettingsHost({
       setDockPosition={setDockPosition}
       sidebarCollapsed={sidebarCollapsed}
       setSidebarCollapsed={setSidebarCollapsed}
-      modelOptions={modelOptions.map((id) => ({
-        value: id,
-        label: grokModelPresets[id as GrokModelId]?.label ?? id,
-      }))}
-      modelPreset={modelPreset}
-      onModelPreset={(id) => changeModelPreset(id as GrokModelId)}
+      modelOptions={[
+        ...modelOptions.map((id) => ({
+          value: id,
+          label: grokModelPresets[id as GrokModelId]?.label ?? id,
+        })),
+        { value: 'custom', label: grokModelPresets.custom.label },
+      ]}
+      modelPreset={selectedModelValue}
+      onModelPreset={selectModel}
       customModel={customModel}
       setCustomModel={setCustomModel}
       activeModel={activeModel}
