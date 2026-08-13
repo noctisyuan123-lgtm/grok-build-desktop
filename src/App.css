@@ -2290,9 +2290,12 @@ select:focus {
 
 .history-list button.history-row strong {
   font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, Ubuntu, 'Droid Sans',
-    sans-serif;
-  font-size: 12px;
+    'Iowan Old Style',
+    'Noto Serif SC',
+    'Noto Serif CJK SC',
+    'Songti SC',
+    serif;
+  font-size: 13px;
   font-weight: 500;
 }
 
@@ -5947,7 +5950,13 @@ body[data-theme='light'] .hljs-comment {
   justify-content: flex-start;
   min-height: 35px;
   padding: 6px 10px;
-  font-size: 14px;
+  font-family:
+    'Iowan Old Style',
+    'Noto Serif SC',
+    'Noto Serif CJK SC',
+    'Songti SC',
+    serif;
+  font-size: 15px;
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
