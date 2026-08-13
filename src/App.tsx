@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { invoke } from '@tauri-apps/api/core';
@@ -188,6 +189,37 @@ function App() {
       setContextMenu(null);
     },
   });
+  const inflightRunKey = useSyncExternalStore(
+    streamStore.subscribe,
+    streamStore.getInflightRunIdsSnapshot,
+    () => '',
+  );
+  const workingSessionIds = useMemo(() => {
+    const inflightRunIds = new Set(inflightRunKey ? inflightRunKey.split('\0') : []);
+    const working = new Set<string>();
+    for (const tab of tabs) {
+      if (
+        tab.messages.some(
+          (message) =>
+            typeof message.runId === 'string' && inflightRunIds.has(message.runId),
+        )
+      ) {
+        working.add(tab.id);
+      }
+    }
+    // The active tab is mirrored into flat App state one effect later; include
+    // it directly so the indicator appears in the same render as a new run.
+    if (
+      tabs.some((tab) => tab.id === activeTabId) &&
+      messages.some(
+        (message) =>
+          typeof message.runId === 'string' && inflightRunIds.has(message.runId),
+      )
+    ) {
+      working.add(activeTabId);
+    }
+    return working;
+  }, [activeTabId, inflightRunKey, messages, tabs]);
   // New session must break any CLI live link — otherwise the next send resumes
   // the previous grok session head and the poll paints the old transcript here.
   function handleTabCreate() {
@@ -1248,6 +1280,7 @@ function App() {
         setSettingsOpen={setSettingsOpen}
         customizeOpen={customizeOpen}
         setCustomizeOpen={setCustomizeOpen}
+        workingSessionIds={workingSessionIds}
         busyRunner={busyRunner}
         refreshStatuses={refreshStatuses}
         runDoctor={runDoctor}

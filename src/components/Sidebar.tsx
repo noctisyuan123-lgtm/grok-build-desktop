@@ -51,6 +51,8 @@ export interface SidebarProps {
   setSettingsOpen: (open: boolean) => void;
   customizeOpen: boolean;
   setCustomizeOpen: (open: boolean) => void;
+  /** Session/tab ids with a queued or running Grok turn. */
+  workingSessionIds?: ReadonlySet<string>;
   busyRunner: string | null;
   refreshStatuses: () => void;
   runDoctor: () => void;
@@ -76,6 +78,7 @@ export function Sidebar({
   setSettingsOpen,
   customizeOpen,
   setCustomizeOpen,
+  workingSessionIds,
   busyRunner,
   refreshStatuses,
   runDoctor,
@@ -301,6 +304,9 @@ export function Sidebar({
         aria-current={item.active ? 'true' : undefined}
       >
         <span className="history-row-main">
+          <span className="history-activity-slot" aria-hidden="true">
+            {workingSessionIds?.has(item.id) ? <span className="history-activity-dot" /> : null}
+          </span>
           <strong>
             {item.pinned ? <Pin size={11} className="pin-dot" /> : null}
             {item.title}
@@ -440,6 +446,7 @@ export function Sidebar({
                   <div className="project-list-label">Projects</div>
                   {historyView.projectGroups.map(([path, rows]) => {
                     const collapsed = collapsedProjects.has(path);
+                    const projectWorking = rows.some((row) => workingSessionIds?.has(row.id));
                     return (
                       <div className="history-group project-history-group" key={`hp-${path}`}>
                         <button
@@ -450,6 +457,9 @@ export function Sidebar({
                           onClick={() => toggleProject(path)}
                         >
                           <Folder size={17} />
+                          <span className="history-activity-slot" aria-hidden="true">
+                            {collapsed && projectWorking ? <span className="history-activity-dot" /> : null}
+                          </span>
                           <span>{projectName(path)}</span>
                         </button>
                         {!collapsed ? rows.map(renderHistoryRow) : null}

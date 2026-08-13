@@ -42,7 +42,7 @@ function seedTabs() {
   window.localStorage.setItem(tabsActiveKey, 't1');
 }
 
-function Harness() {
+function Harness({ workingSessionIds }: { workingSessionIds?: ReadonlySet<string> } = {}) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([message('m100', 'fix the login flake')]);
   const [codingCwd, setCodingCwd] = useState('/a');
@@ -100,6 +100,7 @@ function Harness() {
         setSettingsOpen={setSettingsOpen}
         customizeOpen={false}
         setCustomizeOpen={() => {}}
+        workingSessionIds={workingSessionIds}
         busyRunner={null}
         refreshStatuses={() => {}}
         runDoctor={() => {}}
@@ -161,6 +162,7 @@ describe('Sidebar conversations list', () => {
   it('lists every conversation and marks the open one active', () => {
     render(<Harness />);
     expect(historyRow('fix the login flake')).toHaveAttribute('aria-current', 'true');
+    expect(historyRow('fix the login flake')).toHaveClass('active');
     expect(historyRow('write release notes')).not.toHaveAttribute('aria-current');
   });
 
@@ -199,6 +201,18 @@ describe('Sidebar conversations list', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     await user.click(toggle);
     expect(within(project).queryByText('fix the login flake')).not.toBeInTheDocument();
+  });
+
+  it('marks working sessions, promoting the marker to a collapsed project', async () => {
+    const user = userEvent.setup();
+    render(<Harness workingSessionIds={new Set(['t1'])} />);
+    const project = screen.getByText('a').closest('.project-history-group') as HTMLElement;
+    expect(project.querySelector('.project-section-head .history-activity-dot')).toBeTruthy();
+
+    await user.click(within(project).getByRole('button', { name: 'a' }));
+    const row = within(project).getByRole('button', { name: /fix the login flake/ });
+    expect(row.querySelector('.history-activity-dot')).toBeTruthy();
+    expect(project.querySelectorAll('.history-activity-dot')).toHaveLength(1);
   });
 
   it('keeps one global Search action in primary navigation', () => {

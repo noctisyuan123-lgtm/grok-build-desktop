@@ -88,6 +88,23 @@ class StreamStore {
   getHtml = (id: string): string | undefined => this.html.get(id);
   getQueueSnapshot = (): QueueSnapshot => this.queue;
   /**
+   * Stable primitive snapshot for sidebar/session indicators. The queue event
+   * covers queued work while run patches cover the running -> finished edge;
+   * returning a string lets useSyncExternalStore detect activity changes
+   * without allocating a fresh Set on every render.
+   */
+  getInflightRunIdsSnapshot = (): string => {
+    const ids = new Set<string>();
+    for (const id of this.queue.activeIds) ids.add(id);
+    for (const item of this.queue.items) {
+      if (item.state === 'Queued' || item.state === 'Running') ids.add(item.id);
+    }
+    for (const [id, run] of this.runs) {
+      if (run.state === 'queued' || run.state === 'running') ids.add(id);
+    }
+    return Array.from(ids).sort().join('\0');
+  };
+  /**
    * Snapshot for a single concurrent active. Prefers `activeIds[0]`, then the
    * legacy `active` field. Session-scoped UI should look up runs by message
    * `runId` instead of this global head.

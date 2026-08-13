@@ -79,6 +79,20 @@ describe('streamStore', () => {
     expect(streamStore.getQueueSnapshot().items.length).toBe(1);
   });
 
+  it('exposes a stable key for queued and running work only', () => {
+    applyStateChange('r1', { state: 'Running' });
+    applyStateChange('r2', { state: 'Done' });
+    replaceQueue({
+      active: 'r1',
+      items: [{ id: 'r3', prompt: 'queued', state: 'Queued', enqueuedAt: 1 }],
+    });
+    expect(streamStore.getInflightRunIdsSnapshot().split('\0')).toEqual(['r1', 'r3']);
+
+    applyStateChange('r1', { state: 'Done' });
+    replaceQueue({ active: null, activeIds: [], items: [] });
+    expect(streamStore.getInflightRunIdsSnapshot()).toBe('');
+  });
+
   it('subscriber notified on event', () => {
     let calls = 0;
     const unsub = streamStore.subscribe(() => calls++);
