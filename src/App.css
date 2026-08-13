@@ -5938,7 +5938,7 @@ body[data-theme='light'] .hljs-comment {
   color: var(--text-4);
 }
 .project-history-group + .project-history-group {
-  margin-top: 5px;
+  margin-top: 2px;
 }
 .history-section-head.project-section-head {
   align-items: center;
