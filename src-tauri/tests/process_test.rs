@@ -16,6 +16,16 @@ fn fake_grok_path() -> PathBuf {
     p
 }
 
+#[test]
+fn default_proxy_env_only_injects_known_proxy_values() {
+    let vars = process::default_proxy_env();
+    assert!(vars.iter().all(|(name, value)| match *name {
+        "HTTP_PROXY" | "HTTPS_PROXY" | "ALL_PROXY" => *value == "http://127.0.0.1:7892",
+        "NO_PROXY" => *value == "localhost,127.0.0.1,::1",
+        _ => false,
+    }));
+}
+
 #[tokio::test]
 async fn spawns_and_reads_lines() {
     let path = fake_grok_path();

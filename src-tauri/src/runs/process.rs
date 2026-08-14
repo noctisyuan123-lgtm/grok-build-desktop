@@ -13,6 +13,31 @@ pub struct SpawnedGrok {
     pub pgid: i32,
 }
 
+/// Finder-launched desktop apps don't inherit the interactive shell's proxy
+/// variables. Keep Grok's locally spawned workers usable when TUN mode is off,
+/// while letting an explicit user proxy setting take precedence.
+pub fn default_proxy_env() -> Vec<(&'static str, &'static str)> {
+    const PROXY: &str = "http://127.0.0.1:7892";
+    const NO_PROXY: &str = "localhost,127.0.0.1,::1";
+
+    let mut vars = Vec::new();
+    for (upper, lower) in [
+        ("HTTP_PROXY", "http_proxy"),
+        ("HTTPS_PROXY", "https_proxy"),
+        ("ALL_PROXY", "all_proxy"),
+    ] {
+        if std::env::var_os(upper).is_none() && std::env::var_os(lower).is_none() {
+            vars.push((upper, PROXY));
+        }
+    }
+    for (upper, lower) in [("NO_PROXY", "no_proxy")] {
+        if std::env::var_os(upper).is_none() && std::env::var_os(lower).is_none() {
+            vars.push((upper, NO_PROXY));
+        }
+    }
+    vars
+}
+
 /// grok 0.2.3 takes a file lock on ~/.grok/auth.json.lock when it starts up.
 /// If a previous grok process was killed (e.g. by our cancel-run or an OS
 /// kill), the lock file is left behind containing "<pid>:<timestamp>". The
@@ -82,6 +107,7 @@ pub fn spawn(cmd_path: &Path, args: &[String], cwd: &Path) -> std::io::Result<Sp
     command
         .args(args)
         .current_dir(&resolved_cwd)
+        .envs(default_proxy_env())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -127,6 +153,7 @@ pub fn spawn(cmd_path: &Path, args: &[String], cwd: &Path) -> std::io::Result<Sp
     command
         .args(args)
         .current_dir(&resolved_cwd)
+        .envs(default_proxy_env())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

@@ -2053,6 +2053,7 @@ fn ensure_desktop_leader(program: &str) -> Result<(), String> {
             "--leader-socket",
             &socket_arg,
         ])
+        .envs(crate::runs::process::default_proxy_env())
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(log_err));

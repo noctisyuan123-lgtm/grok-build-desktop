@@ -374,6 +374,7 @@ impl AcpHost {
         command
             .args(config.launch_args())
             .current_dir(resolved_cwd)
+            .envs(process::default_proxy_env())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
