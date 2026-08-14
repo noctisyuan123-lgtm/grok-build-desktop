@@ -2809,7 +2809,7 @@ button.status-cluster.status-action:disabled {
   color: #d4d4d4;
   font-family:
     'JetBrains Mono Variable', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  font-size: 0.84rem;
+  font-size: 1.1rem;
   line-height: 1.55;
   padding: 0;
   tab-size: 2;
@@ -4421,7 +4421,7 @@ button.status-cluster.status-action:disabled {
   background: var(--grok-bg-1);
   border: 1px solid var(--grok-border-1);
   font-family: 'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-  font-size: 12.5px;
+  font-size: 1.1rem;
   line-height: 1.55;
   margin: 8px 0;
 }
@@ -4664,6 +4664,7 @@ button.status-cluster.status-action:disabled {
 .message.message-assistant .markdown-body pre code {
   color: inherit;
   display: inline-block;
+  font-size: 1.1rem;
   tab-size: 4;
 }
 
