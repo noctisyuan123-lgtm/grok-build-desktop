@@ -2285,11 +2285,12 @@ select:focus {
 .primary-nav .nav-list {
   background: transparent;
   border: 0;
+  gap: 0;
   padding: 0;
 }
 
 .primary-nav .nav-list button {
-  min-height: 34px;
+  min-height: 30px;
 }
 
 .primary-nav .nav-list small {
@@ -2319,7 +2320,7 @@ select:focus {
 }
 
 .history-list button.history-row strong {
-  font-family: 'Iowan Old Style', 'Noto Serif SC', 'Noto Serif CJK SC', 'Songti SC', serif;
+  font-family: inherit;
   font-size: 13px;
   font-weight: 500;
 }
@@ -3007,10 +3008,9 @@ button.status-cluster.status-action:disabled {
    bottom composer layout takes over without remounting a second input. */
 .conversation-panel.is-empty {
   justify-content: center;
-  /* A little more top weight puts the compact prompt just below visual
-     centre, matching the quieter Cursor-style empty stage. */
-  padding-bottom: clamp(20px, 4vh, 48px);
-  padding-top: clamp(68px, 13vh, 136px);
+  /* Keep the empty-stage prompt slightly above the window's visual centre. */
+  padding-bottom: clamp(56px, 12vh, 120px);
+  padding-top: clamp(48px, 6vh, 72px);
 }
 
 .conversation-panel.is-empty .conversation-scroll {
@@ -3037,6 +3037,10 @@ button.status-cluster.status-action:disabled {
   min-height: 42px;
   padding-bottom: 2px;
   padding-top: 9px;
+}
+
+.conversation-panel.is-empty .composer-context-footer {
+  bottom: -12px;
 }
 
 .conversation-panel.is-empty .empty-state {
