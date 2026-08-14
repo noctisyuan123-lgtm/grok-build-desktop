@@ -86,7 +86,7 @@ describe('App boot', () => {
     expect(document.querySelector('.status-bar-idle')).not.toBeInTheDocument();
 
     // Connection labels are intentionally omitted from the minimal chrome.
-    expect(document.querySelector('.brand-wordmark')).toHaveTextContent('Grok');
+    expect(document.querySelector('.brand-wordmark')).not.toBeInTheDocument();
     expect(document.querySelector('.account-text')).not.toBeInTheDocument();
     expect(document.querySelector('.conn-pill')).not.toBeInTheDocument();
 
@@ -113,6 +113,25 @@ describe('App boot', () => {
     expect(screen.getByRole('button', { name: t('emptyState.workspaceAria') })).toHaveTextContent(
       'project',
     );
+  });
+
+  it('opens the exact conversation sent by the CLI /desktop handoff', async () => {
+    let consumed = false;
+    const sessionId = '019ff6a0-9578-7870-81c6-3ab79d0f80ad';
+    const ctx = await bootApp({
+      consume_desktop_handoff: () => {
+        if (consumed) return null;
+        consumed = true;
+        return { sessionId, cwd: '/mock/project', requestedAt: Date.now() };
+      },
+      export_grok_session: () => '## User\n\nCLI prompt\n\n## Assistant\n\nCLI answer\n',
+    });
+
+    await waitFor(() => expect(convo().getByText('CLI answer')).toBeInTheDocument());
+    expect(
+      [...ctx.tauri.calls].reverse().find((call) => call.cmd === 'export_grok_session')?.args
+        .sessionId,
+    ).toBe(sessionId);
   });
 });
 
@@ -478,8 +497,7 @@ describe('composer submit → queued run → streamed reply', () => {
     expect(rewind?.args.replayContext).toContain('Keep this context');
     expect(rewind?.args.replayContext).toContain('Context kept.');
 
-    exported =
-      '## User\n\nCLI after rebase\n\n## Assistant\n\nCLI rebased reply.\n';
+    exported = '## User\n\nCLI after rebase\n\n## Assistant\n\nCLI rebased reply.\n';
     await act(async () => {
       window.dispatchEvent(new Event('focus'));
     });

@@ -10,6 +10,10 @@ function message(id: string, content = `msg ${id}`): ChatMessage {
   return { id, role: 'user', content, ts: 1000 };
 }
 
+function sessionMessage(id: string, sessionId: string): ChatMessage {
+  return { id, role: 'assistant', content: `reply ${id}`, ts: 1000, meta: { sessionId } };
+}
+
 /** Compose the flat session state the way App does, then hang tabs off it. */
 function useHarness(initialMessages: ChatMessage[] = []) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
@@ -107,6 +111,53 @@ describe('switchToSession', () => {
     act(() => result.current.switchToSession('t1'));
     expect(result.current.activeTabId).toBe('t1');
     expect(result.current.messages.map((m) => m.id)).toEqual(['a1']);
+  });
+});
+
+describe('openGrokSessionTab', () => {
+  it('switches to the tab that already owns the requested Grok session', () => {
+    const tabs = [
+      { id: 't1', name: 'alpha', cwd: '/repo/alpha', createdAt: 1, messages: [message('a1')] },
+      {
+        id: 't2',
+        name: 'beta',
+        cwd: '/repo/beta',
+        createdAt: 2,
+        messages: [sessionMessage('b1', '019ff6a0-9578-7870-81c6-3ab79d0f80ad')],
+      },
+    ];
+    window.localStorage.setItem(tabsStorageKey, JSON.stringify(tabs));
+    window.localStorage.setItem(tabsActiveKey, 't1');
+    const { result } = renderHook(() => useHarness([message('a1')]));
+
+    let opened = '';
+    act(() => {
+      opened = result.current.openGrokSessionTab('019ff6a0-9578-7870-81c6-3ab79d0f80ad');
+    });
+
+    expect(opened).toBe('t2');
+    expect(result.current.activeTabId).toBe('t2');
+    expect(result.current.messages[0]?.meta?.sessionId).toBe(
+      '019ff6a0-9578-7870-81c6-3ab79d0f80ad',
+    );
+  });
+
+  it('creates a clean tab when the CLI session is not in Desktop history', () => {
+    seedTabs();
+    const { result } = renderHook(() => useHarness([message('a1')]));
+
+    let opened = '';
+    act(() => {
+      opened = result.current.openGrokSessionTab(
+        '019ff6a0-9578-7870-81c6-3ab79d0f80ad',
+        '/repo/from-cli',
+      );
+    });
+
+    expect(result.current.tabs).toHaveLength(3);
+    expect(opened).toBe(result.current.activeTabId);
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.codingCwd).toBe('/repo/from-cli');
   });
 });
 

@@ -12,6 +12,15 @@ export interface ComposerAttachment {
   dataUrl: string;
 }
 
+/** Durable message metadata. The bytes live in the session's assets folder. */
+export interface PersistedAttachmentRef {
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  assetId: string;
+}
+
 export type AcpAttachmentBlock =
   | { type: 'image'; data: string; mimeType: string }
   | {
@@ -26,9 +35,21 @@ interface NativeAttachment {
   data_url: string;
 }
 
-function attachmentId(name: string): string {
+function attachmentId(): string {
   const random = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
-  return `${name}-${random}`;
+  // Keep the durable asset filename path-safe. The display name is stored
+  // separately, so it does not need to be part of the identity.
+  return random;
+}
+
+export function toPersistedAttachmentRef(attachment: ComposerAttachment): PersistedAttachmentRef {
+  return {
+    id: attachment.id,
+    name: attachment.name,
+    mimeType: attachment.mimeType,
+    sizeBytes: attachment.sizeBytes,
+    assetId: attachment.id,
+  };
 }
 
 export function fileToAttachment(file: File): Promise<ComposerAttachment> {
@@ -41,7 +62,7 @@ export function fileToAttachment(file: File): Promise<ComposerAttachment> {
         return;
       }
       resolve({
-        id: attachmentId(file.name),
+        id: attachmentId(),
         name: file.name,
         mimeType: file.type || 'application/octet-stream',
         sizeBytes: file.size,
@@ -58,7 +79,7 @@ export async function readNativeAttachment(path: string): Promise<ComposerAttach
     maxBytes: MAX_ATTACHMENT_BYTES,
   });
   return {
-    id: attachmentId(raw.name),
+    id: attachmentId(),
     name: raw.name,
     mimeType: raw.mime_type,
     sizeBytes: raw.size_bytes,

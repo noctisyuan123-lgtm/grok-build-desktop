@@ -70,6 +70,11 @@ struct ActiveSlot {
     pgid: Option<i32>,
 }
 
+struct PrewarmedSession {
+    key: String,
+    id: String,
+}
+
 pub struct RunQueue {
     pub db: Db,
     inner: Arc<Mutex<Inner>>,
@@ -78,6 +83,7 @@ pub struct RunQueue {
     /// Per-lane ACP hosts. A host is *taken* out of the map for the duration
     /// of a turn so concurrent lanes never share a mutex across a turn.
     acp_hosts: Arc<Mutex<HashMap<String, AcpHost>>>,
+    prewarmed_sessions: Arc<Mutex<HashMap<String, PrewarmedSession>>>,
 }
 
 struct Inner {
@@ -124,6 +130,7 @@ impl RunQueue {
             notify: Arc::new(Notify::new()),
             tx,
             acp_hosts: Arc::new(Mutex::new(HashMap::new())),
+            prewarmed_sessions: Arc::new(Mutex::new(HashMap::new())),
         };
         (queue, rx)
     }
@@ -146,6 +153,45 @@ impl RunQueue {
         for mut host in hosts {
             host.shutdown().await;
         }
+    }
+
+    /// Start and initialize the lane's persistent ACP host ahead of the first
+    /// prompt. The map lock deliberately stays held while connecting so a
+    /// send racing with the prewarm cannot start a second host for the lane.
+    pub async fn prewarm(
+        &self,
+        lane_id: String,
+        cwd: String,
+        args: Vec<String>,
+    ) -> Result<bool, String> {
+        let grok_path = self.inner.lock().await.grok_path.clone();
+        if !core::should_use_acp(&grok_path) {
+            return Ok(false);
+        }
+        let config = CoreConfig::from_legacy_args(&args);
+        let resolved_cwd = std::path::PathBuf::from(cwd);
+        let mut hosts = self.acp_hosts.lock().await;
+        if hosts
+            .get_mut(&lane_id)
+            .is_some_and(|host| host.matches(&grok_path, &config))
+        {
+            return Ok(true);
+        }
+        // Drop a stale host before replacing it with the requested config.
+        let _ = hosts.remove(&lane_id);
+        let mut host = AcpHost::connect(&grok_path, &resolved_cwd, &config).await?;
+        if config.resume_session_id.is_none() {
+            let id = host.prewarm_session(&resolved_cwd, &config).await?;
+            self.prewarmed_sessions.lock().await.insert(
+                lane_id.clone(),
+                PrewarmedSession {
+                    key: prewarm_session_key(&resolved_cwd, &config),
+                    id,
+                },
+            );
+        }
+        hosts.insert(lane_id, host);
+        Ok(true)
     }
 
     pub async fn enqueue(
@@ -732,6 +778,17 @@ impl RunQueue {
             }
         }
         let mut host = host.expect("ACP host initialized");
+        let prewarmed_session_id = if config.resume_session_id.is_none() {
+            let key = prewarm_session_key(cwd, &config);
+            self.prewarmed_sessions
+                .lock()
+                .await
+                .remove(&rec.lane_id)
+                .filter(|warm| warm.key == key)
+                .map(|warm| warm.id)
+        } else {
+            None
+        };
         {
             let mut inner = self.inner.lock().await;
             if let Some(slot) = inner.active_lanes.get_mut(&rec.lane_id) {
@@ -741,7 +798,14 @@ impl RunQueue {
             }
         }
         let result = host
-            .run_turn(&rec.id, &rec.prompt, cwd, &config, &self.tx)
+            .run_turn(
+                &rec.id,
+                &rec.prompt,
+                cwd,
+                &config,
+                &self.tx,
+                prewarmed_session_id.as_deref(),
+            )
             .await;
         let cancelled = self.inner.lock().await.cancelled.contains(&rec.id);
         match result {
@@ -824,4 +888,12 @@ impl RunQueue {
         // Wake worker so another waiting run on this (or any) idle lane can start.
         self.notify.notify_one();
     }
+}
+
+fn prewarm_session_key(cwd: &std::path::Path, config: &CoreConfig) -> String {
+    format!(
+        "{}\0{}",
+        cwd.to_string_lossy(),
+        config.rules.as_deref().unwrap_or_default()
+    )
 }

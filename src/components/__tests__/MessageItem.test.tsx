@@ -50,16 +50,11 @@ describe('MessageItem sanitization', () => {
 
   it('re-parses restored HTML when live-imported fallback text grows', async () => {
     streamStore.setHtml('msg:partial', '<p>first paragraph</p>');
-    const view = render(
-      <MessageItem runId="msg:partial" fallbackText="first paragraph" />,
-    );
+    const view = render(<MessageItem runId="msg:partial" fallbackText="first paragraph" />);
     expect(screen.getByText('first paragraph')).toBeInTheDocument();
     streamStore.setHtml('msg:partial', '<p>first paragraph</p><p>rest after tools</p>');
     view.rerender(
-      <MessageItem
-        runId="msg:partial"
-        fallbackText="first paragraph\n\nrest after tools"
-      />,
+      <MessageItem runId="msg:partial" fallbackText="first paragraph\n\nrest after tools" />,
     );
     await act(async () => {
       await Promise.resolve();
@@ -70,10 +65,7 @@ describe('MessageItem sanitization', () => {
   it('copies a fenced code block through the VS Code preview control', async () => {
     const user = userEvent.setup();
     applyRunEvent('copy-code', { type: 'text', data: 'code' });
-    streamStore.setHtml(
-      exteriorMarkdownKey('copy-code', 0),
-      renderMarkdown('```sh\necho ok\n```'),
-    );
+    streamStore.setHtml(exteriorMarkdownKey('copy-code', 0), renderMarkdown('```sh\necho ok\n```'));
     render(<MessageItem runId="copy-code" />);
 
     await user.click(screen.getByRole('button', { name: 'Copy code block' }));
@@ -451,10 +443,7 @@ describe('MessageItem rendering states', () => {
     // streamStore / markdown worker keys full accumulated text under bare runId.
     // Exterior final must use a separate cache key so polluted run html cannot
     // re-surface intermediate responds below Worked for.
-    streamStore.setHtml(
-      'msg:mid-as-final',
-      '<p>快速复核 weclaw 现状。能用 weclaw，但半残。</p>',
-    );
+    streamStore.setHtml('msg:mid-as-final', '<p>快速复核 weclaw 现状。能用 weclaw，但半残。</p>');
     const { container } = render(
       <MessageItem
         runId="msg:mid-as-final"
@@ -502,7 +491,9 @@ describe('MessageItem rendering states', () => {
     await user.click(screen.getByRole('button', { name: 'Thought briefly · Responded' }));
     expect(screen.getByText('快速复核 weclaw 现状。')).toBeInTheDocument();
     // Still only one exterior final, and it did not grow mid text.
-    expect(container.querySelector('.markdown-streaming')).toHaveTextContent('能用 weclaw，但半残。');
+    expect(container.querySelector('.markdown-streaming')).toHaveTextContent(
+      '能用 weclaw，但半残。',
+    );
     expect(container.querySelector('.markdown-streaming')).not.toHaveTextContent('快速复核');
   });
 
@@ -802,7 +793,9 @@ describe('MessageItem rendering states', () => {
     expect(screen.getByRole('button', { name: 'Thought briefly' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Thought and used 1 tool' })).toBeInTheDocument();
     // Prior mid is not buried inside a collapsed phase body.
-    expect(screen.getByText('Mid one: checking weclaw.').closest('.transcript-phase-body')).toBeNull();
+    expect(
+      screen.getByText('Mid one: checking weclaw.').closest('.transcript-phase-body'),
+    ).toBeNull();
   });
 
   it('moves an intermediate response back into the work rail when a tool starts', async () => {

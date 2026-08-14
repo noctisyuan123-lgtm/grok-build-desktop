@@ -38,6 +38,8 @@ import { modeCopy, primaryNavItems } from '../app/constants';
 import { statusTone } from '../app/format';
 import { t } from '../i18n';
 
+const PROJECT_LIST_COLLAPSED_KEY = 'grok-desktop-project-list-collapsed-v3';
+
 export interface SidebarProps {
   history: ReturnType<typeof useHistoryOrganization>;
   sessionFirstPrompt: (id: string) => string | null;
@@ -112,6 +114,9 @@ export function Sidebar({
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(
     () => new Set(historyView.projectGroups.map(([path]) => path)),
   );
+  const [projectsCollapsed, setProjectsCollapsed] = useState(
+    () => window.localStorage.getItem(PROJECT_LIST_COLLAPSED_KEY) !== 'expanded',
+  );
   const seenProjectPaths = useRef(new Set(historyView.projectGroups.map(([path]) => path)));
   useEffect(() => {
     const newPaths = historyView.projectGroups
@@ -132,6 +137,14 @@ export function Sidebar({
       const next = new Set(current);
       if (next.has(path)) next.delete(path);
       else next.add(path);
+      return next;
+    });
+  }
+
+  function toggleProjects() {
+    setProjectsCollapsed((current) => {
+      const next = !current;
+      window.localStorage.setItem(PROJECT_LIST_COLLAPSED_KEY, next ? 'collapsed' : 'expanded');
       return next;
     });
   }
@@ -319,254 +332,244 @@ export function Sidebar({
 
   return (
     <>
+      <button
+        className="sidebar-collapse-button sidebar-titlebar-toggle"
+        type="button"
+        aria-label={
+          sidebarCollapsed ? t('palette.action.expandSidebar') : t('palette.action.collapseSidebar')
+        }
+        title={`${sidebarCollapsed ? t('palette.action.expandSidebar') : t('palette.action.collapseSidebar')} (⌘B)`}
+        aria-pressed={sidebarCollapsed}
+        onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+      >
+        {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+      </button>
       <aside className="app-sidebar">
-      <div className="brand">
-        <div className="brand-top">
-          {/* Wordmark only — the icon + title/subtitle stack read as clutter.
-              Geist (the bundled display face) carries the Grok wordmark here;
-              BrandGlyph still serves as the account avatar below. */}
-          <span className="brand-wordmark">Grok</span>
-          <div className="brand-actions">
-            {!sidebarCollapsed ? (
+        <div className="brand">
+          {/* Chat/Code switch, moved up from the composer footer so the input
+            card stays clean. Same state, same ⌘1/⌘2 shortcuts. */}
+          <div className="mode-segment" role="group" aria-label={t('sidebar.modeSwitchAria')}>
+            {(Object.keys(modeCopy) as Mode[]).map((item) => (
               <button
-                className="sidebar-collapse-button"
+                aria-pressed={mode === item}
+                className={mode === item ? 'active' : ''}
+                key={item}
+                onClick={() => switchMode(item)}
+                title={`${modeSegmentLabels[item]} (${modeCopy[item].shortcut})`}
                 type="button"
-                aria-label={t('palette.action.collapseSidebar')}
-                title={`${t('palette.action.collapseSidebar')} (⌘B)`}
-                aria-pressed="false"
-                onClick={() => setSidebarCollapsed(true)}
               >
-                <PanelLeftClose size={16} />
+                {modeSegmentLabels[item]}
               </button>
-            ) : null}
+            ))}
           </div>
         </div>
-        {/* Chat/Code switch, moved up from the composer footer so the input
-            card stays clean. Same state, same ⌘1/⌘2 shortcuts. */}
-        <div className="mode-segment" role="group" aria-label={t('sidebar.modeSwitchAria')}>
-          {(Object.keys(modeCopy) as Mode[]).map((item) => (
+
+        <section className="nav-section primary-nav" aria-label={t('sidebar.primaryNav')}>
+          <div className="nav-list">
+            {primaryNavItems.map((item) => {
+              // Each nav item maps to a single, deterministic action — no
+              // "this kinda does X" semantics. If the action isn't obvious
+              // from the label, the meta line below it explains.
+              const handle = () => {
+                if (item.id === 'new-session') {
+                  // CREATES a fresh tab (empty messages, clean cwd) and
+                  // switches to it. handleTabCreate already wipes drafts,
+                  // notices, and last-run card — Claude-Desktop-style
+                  // "clean slate". Then put the cursor in the composer.
+                  handleTabCreate();
+                  focusComposer();
+                } else if (item.id === 'search') {
+                  // Open the ⌘K command palette pre-focused. The host of
+                  // visible "search-y" things (recent prompts, palette,
+                  // files) is unified here.
+                  setPaletteOpen(true);
+                } else if (item.id === 'customize') {
+                  setCustomizeOpen(true);
+                }
+              };
+              // The active highlight should follow what's *actually* open,
+              // not hardcoded to "New Session". Otherwise every button looks
+              // selected and the user can't tell which panel is current.
+              const isActive =
+                (item.id === 'customize' && customizeOpen) || (item.id === 'search' && paletteOpen);
+              return (
+                <button
+                  className={isActive ? 'active' : ''}
+                  key={item.id}
+                  type="button"
+                  onClick={handle}
+                >
+                  {item.id === 'new-session' ? (
+                    <Plus size={16} />
+                  ) : item.id === 'search' ? (
+                    <Search size={16} />
+                  ) : (
+                    <Blocks size={16} />
+                  )}
+                  <span>{item.label}</span>
+                  <small>{item.meta}</small>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="nav-section history-nav">
+          <div className="nav-head">
+            <span>{t('sidebar.conversations')}</span>
+          </div>
+          <div className="history-list">
+            {recentPrompts.length === 0 ? (
+              // No fake "Try: …" placeholders. An empty state is honest and
+              // less misleading than disabled-looking rows that look real.
+              <div className="history-empty">
+                <span>{t('sidebar.emptyHistory')}</span>
+              </div>
+            ) : (
+              <>
+                {historyView.pinned.length > 0 ? (
+                  <div className="history-group">
+                    <div className="history-section-head">
+                      <Pin size={12} /> {t('sidebar.pinned')}
+                    </div>
+                    {historyView.pinned.map(renderHistoryRow)}
+                  </div>
+                ) : null}
+
+                {historyView.groups.map(([name, rows]) => (
+                  <div className="history-group" key={`hg-${name}`}>
+                    <div className="history-section-head">
+                      <FolderInput size={12} /> {name}
+                    </div>
+                    {rows.map(renderHistoryRow)}
+                  </div>
+                ))}
+
+                {historyView.projectGroups.length > 0 ? (
+                  <div className="project-list">
+                    <button
+                      type="button"
+                      className="project-list-label"
+                      aria-controls="project-list-content"
+                      aria-expanded={!projectsCollapsed}
+                      onClick={toggleProjects}
+                    >
+                      <span>Projects</span>
+                    </button>
+                    {!projectsCollapsed ? (
+                      <div id="project-list-content">
+                        {historyView.projectGroups.map(([path, rows]) => {
+                          const collapsed = collapsedProjects.has(path);
+                          const projectWorking = rows.some((row) => workingSessionIds?.has(row.id));
+                          return (
+                            <div className="history-group project-history-group" key={`hp-${path}`}>
+                              <button
+                                type="button"
+                                className="history-section-head project-section-head"
+                                title={path}
+                                aria-expanded={!collapsed}
+                                onClick={() => toggleProject(path)}
+                              >
+                                <span className="history-activity-slot" aria-hidden="true">
+                                  {collapsed && projectWorking ? (
+                                    <span className="history-activity-dot" />
+                                  ) : null}
+                                </span>
+                                <Folder size={18} className="project-folder-icon" aria-hidden="true" />
+                                <span>{projectName(path)}</span>
+                              </button>
+                              {!collapsed ? rows.map(renderHistoryRow) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {historyView.ungrouped.length > 0 ? (
+                  <div className="history-group">
+                    {historyView.pinned.length > 0 ||
+                    historyView.groups.length > 0 ||
+                    historyView.projectGroups.length > 0 ? (
+                      <div className="history-section-head">
+                        <History size={12} /> {t('sidebar.recent')}
+                      </div>
+                    ) : null}
+                    {historyView.ungrouped.map(renderHistoryRow)}
+                  </div>
+                ) : null}
+
+                {historyView.archived.length > 0 ? (
+                  <div className="history-group archived">
+                    <button
+                      type="button"
+                      className="history-section-head toggle"
+                      onClick={() => setShowArchived((v) => !v)}
+                    >
+                      <Archive size={12} />{' '}
+                      {t('sidebar.archivedCount', { count: historyView.archived.length })}
+                      <ChevronDown size={13} className={`chev${showArchived ? ' open' : ''}`} />
+                    </button>
+                    {showArchived ? historyView.archived.map(renderHistoryRow) : null}
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+          {historyNote ? <div className="history-toast">{historyNote}</div> : null}
+        </section>
+
+        <section className="sidebar-health" aria-label={t('sidebar.toolHealth')}>
+          <div className="nav-head">
+            <span>{t('sidebar.health')}</span>
             <button
-              aria-pressed={mode === item}
-              className={mode === item ? 'active' : ''}
-              key={item}
-              onClick={() => switchMode(item)}
-              title={`${modeSegmentLabels[item]} (${modeCopy[item].shortcut})`}
+              aria-label={t('sidebar.refreshStatus')}
+              className="sidebar-icon"
+              disabled={busyRunner !== null}
+              onClick={refreshStatuses}
               type="button"
             >
-              {modeSegmentLabels[item]}
+              {busyRunner === 'status' ? (
+                <Loader2 className="spin" size={15} />
+              ) : (
+                <RefreshCcw size={15} />
+              )}
             </button>
-          ))}
-        </div>
-      </div>
-
-      <section className="nav-section primary-nav" aria-label={t('sidebar.primaryNav')}>
-        <div className="nav-list">
-          {primaryNavItems.map((item) => {
-            // Each nav item maps to a single, deterministic action — no
-            // "this kinda does X" semantics. If the action isn't obvious
-            // from the label, the meta line below it explains.
-            const handle = () => {
-              if (item.id === 'new-session') {
-                // CREATES a fresh tab (empty messages, clean cwd) and
-                // switches to it. handleTabCreate already wipes drafts,
-                // notices, and last-run card — Claude-Desktop-style
-                // "clean slate". Then put the cursor in the composer.
-                handleTabCreate();
-                focusComposer();
-              } else if (item.id === 'search') {
-                // Open the ⌘K command palette pre-focused. The host of
-                // visible "search-y" things (recent prompts, palette,
-                // files) is unified here.
-                setPaletteOpen(true);
-              } else if (item.id === 'customize') {
-                setCustomizeOpen(true);
-              }
-            };
-            // The active highlight should follow what's *actually* open,
-            // not hardcoded to "New Session". Otherwise every button looks
-            // selected and the user can't tell which panel is current.
-            const isActive =
-              (item.id === 'customize' && customizeOpen) ||
-              (item.id === 'search' && paletteOpen);
-            return (
-              <button
-                className={isActive ? 'active' : ''}
-                key={item.id}
-                type="button"
-                onClick={handle}
-              >
-                {item.id === 'new-session' ? (
-                  <Plus size={16} />
-                ) : item.id === 'search' ? (
-                  <Search size={16} />
-                ) : (
-                  <Blocks size={16} />
-                )}
-                <span>{item.label}</span>
-                <small>{item.meta}</small>
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="nav-section history-nav">
-        <div className="nav-head">
-          <span>{t('sidebar.conversations')}</span>
-        </div>
-        <div className="history-list">
-          {recentPrompts.length === 0 ? (
-            // No fake "Try: …" placeholders. An empty state is honest and
-            // less misleading than disabled-looking rows that look real.
-            <div className="history-empty">
-              <span>{t('sidebar.emptyHistory')}</span>
-            </div>
-          ) : (
-            <>
-              {historyView.pinned.length > 0 ? (
-                <div className="history-group">
-                  <div className="history-section-head">
-                    <Pin size={12} /> {t('sidebar.pinned')}
-                  </div>
-                  {historyView.pinned.map(renderHistoryRow)}
-                </div>
-              ) : null}
-
-              {historyView.groups.map(([name, rows]) => (
-                <div className="history-group" key={`hg-${name}`}>
-                  <div className="history-section-head">
-                    <FolderInput size={12} /> {name}
-                  </div>
-                  {rows.map(renderHistoryRow)}
-                </div>
-              ))}
-
-              {historyView.projectGroups.length > 0 ? (
-                <div className="project-list">
-                  <div className="project-list-label">Projects</div>
-                  {historyView.projectGroups.map(([path, rows]) => {
-                    const collapsed = collapsedProjects.has(path);
-                    const projectWorking = rows.some((row) => workingSessionIds?.has(row.id));
-                    return (
-                      <div className="history-group project-history-group" key={`hp-${path}`}>
-                        <button
-                          type="button"
-                          className="history-section-head project-section-head"
-                          title={path}
-                          aria-expanded={!collapsed}
-                          onClick={() => toggleProject(path)}
-                        >
-                          <Folder size={17} />
-                          <span className="history-activity-slot" aria-hidden="true">
-                            {collapsed && projectWorking ? <span className="history-activity-dot" /> : null}
-                          </span>
-                          <span>{projectName(path)}</span>
-                        </button>
-                        {!collapsed ? rows.map(renderHistoryRow) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : null}
-
-              {historyView.ungrouped.length > 0 ? (
-                <div className="history-group">
-                  {historyView.pinned.length > 0 ||
-                  historyView.groups.length > 0 ||
-                  historyView.projectGroups.length > 0 ? (
-                    <div className="history-section-head">
-                      <History size={12} /> {t('sidebar.recent')}
-                    </div>
-                  ) : null}
-                  {historyView.ungrouped.map(renderHistoryRow)}
-                </div>
-              ) : null}
-
-              {historyView.archived.length > 0 ? (
-                <div className="history-group archived">
-                  <button
-                    type="button"
-                    className="history-section-head toggle"
-                    onClick={() => setShowArchived((v) => !v)}
-                  >
-                    <Archive size={12} />{' '}
-                    {t('sidebar.archivedCount', { count: historyView.archived.length })}
-                    <ChevronDown
-                      size={13}
-                      className={`chev${showArchived ? ' open' : ''}`}
-                    />
-                  </button>
-                  {showArchived ? historyView.archived.map(renderHistoryRow) : null}
-                </div>
-              ) : null}
-            </>
-          )}
-        </div>
-        {historyNote ? <div className="history-toast">{historyNote}</div> : null}
-      </section>
-
-      <section className="sidebar-health" aria-label={t('sidebar.toolHealth')}>
-        <div className="nav-head">
-          <span>{t('sidebar.health')}</span>
+          </div>
+          <div className={`health-pill ${statusTone(grokToolStatus)}`}>
+            <Zap size={15} />
+            <span>
+              {grokToolStatus?.installed ? t('sidebar.grokReady') : t('sidebar.grokMissing')}
+            </span>
+          </div>
           <button
-            aria-label={t('sidebar.refreshStatus')}
-            className="sidebar-icon"
+            className="doctor-button"
             disabled={busyRunner !== null}
-            onClick={refreshStatuses}
+            onClick={runDoctor}
             type="button"
           >
-            {busyRunner === 'status' ? (
-              <Loader2 className="spin" size={15} />
+            {busyRunner === 'doctor' ? (
+              <Loader2 className="spin" size={16} />
             ) : (
-              <RefreshCcw size={15} />
+              <ClipboardCheck size={16} />
             )}
+            <span>{t('common.doctor')}</span>
           </button>
-        </div>
-        <div className={`health-pill ${statusTone(grokToolStatus)}`}>
-          <Zap size={15} />
-          <span>
-            {grokToolStatus?.installed ? t('sidebar.grokReady') : t('sidebar.grokMissing')}
-          </span>
-        </div>
-        <button
-          className="doctor-button"
-          disabled={busyRunner !== null}
-          onClick={runDoctor}
-          type="button"
-        >
-          {busyRunner === 'doctor' ? (
-            <Loader2 className="spin" size={16} />
-          ) : (
-            <ClipboardCheck size={16} />
-          )}
-          <span>{t('common.doctor')}</span>
-        </button>
-      </section>
+        </section>
 
-      <button
-        className="account-strip account-icon-button"
-        type="button"
-        aria-label={t('sidebar.openSettings')}
-        title={t('sidebar.settingsTitle')}
-        onClick={() => setSettingsOpen(true)}
-      >
-        <div className={`avatar${isGrokReady ? ' ready' : ''}`}>
-          <BrandGlyph size={17} />
-        </div>
-      </button>
-      </aside>
-      {sidebarCollapsed ? (
         <button
-          className="sidebar-expand-fab"
+          className="account-strip account-icon-button"
           type="button"
-          aria-label={t('palette.action.expandSidebar')}
-          title={`${t('palette.action.expandSidebar')} (⌘B)`}
-          aria-pressed="true"
-          onClick={() => setSidebarCollapsed(false)}
+          aria-label={t('sidebar.openSettings')}
+          title={t('sidebar.settingsTitle')}
+          onClick={() => setSettingsOpen(true)}
         >
-          <PanelLeftOpen size={13} />
+          <div className={`avatar${isGrokReady ? ' ready' : ''}`}>
+            <BrandGlyph size={17} />
+          </div>
         </button>
-      ) : null}
+      </aside>
     </>
   );
 }

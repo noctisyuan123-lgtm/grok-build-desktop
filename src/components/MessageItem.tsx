@@ -308,13 +308,9 @@ function TranscriptMessage({
                 //    readable in the rail — otherwise each new mid hides all
                 //    previous ones until the next tool/thought lands.
                 // 3) showResponseInRail — mid-respond beside folded process.
-                const collapseActivity =
-                  phase.activity.length > 0 && hasClosedResponse;
+                const collapseActivity = phase.activity.length > 0 && hasClosedResponse;
                 const foldResponseIntoPhase =
-                  !live &&
-                  hasClosedResponse &&
-                  !isExteriorFinal &&
-                  finalIndex >= 0;
+                  !live && hasClosedResponse && !isExteriorFinal && finalIndex >= 0;
                 const showResponseInRail =
                   hasClosedResponse && !isExteriorFinal && !foldResponseIntoPhase;
                 const responseNode =

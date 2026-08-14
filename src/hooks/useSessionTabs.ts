@@ -213,6 +213,77 @@ export function useSessionTabs(deps: SessionTabsDeps) {
     setSessionNotice(null);
   }
 
+  /**
+   * Select the tab that owns a Grok session, or create a clean tab for a
+   * session arriving from the CLI `/desktop` handoff. Returns the tab id so
+   * the caller can wait for React to commit the switch before importing the
+   * on-disk transcript.
+   */
+  function openGrokSessionTab(sessionId: string, cwd = ''): string {
+    const current = sessionStateRef.current;
+    const messagesFor = (tab: Tab) =>
+      tab.id === current.activeTabId ? current.messages : tab.messages;
+    const target = current.tabs.find((tab) =>
+      messagesFor(tab).some(
+        (message) => (message as unknown as ChatMessage).meta?.sessionId === sessionId,
+      ),
+    );
+
+    if (target) {
+      if (target.id !== current.activeTabId) {
+        setTabs((existing) =>
+          existing.map((tab) =>
+            tab.id === current.activeTabId
+              ? {
+                  ...tab,
+                  cwd: current.codingCwd,
+                  messages: current.messages as unknown as TabMessage[],
+                }
+              : tab,
+          ),
+        );
+        setActiveTabId(target.id);
+        setCodingCwd(target.cwd);
+        setMessages(target.messages as unknown as ChatMessage[]);
+      }
+      setSessionNotice(null);
+      return target.id;
+    }
+
+    const active = current.tabs.find((tab) => tab.id === current.activeTabId);
+    if (active && active.messages.length === 0 && current.messages.length === 0) {
+      if (cwd.trim() && active.cwd !== cwd.trim()) {
+        setCodingCwd(cwd.trim());
+        setTabs((existing) =>
+          existing.map((tab) => (tab.id === active.id ? { ...tab, cwd: cwd.trim() } : tab)),
+        );
+      }
+      return active.id;
+    }
+
+    const fresh = makeTab(cwd.trim(), [], defaultTabName(cwd.trim(), current.tabs.length));
+    setTabs((existing) => [
+      ...existing.map((tab) =>
+        tab.id === current.activeTabId
+          ? {
+              ...tab,
+              cwd: current.codingCwd,
+              messages: current.messages as unknown as TabMessage[],
+            }
+          : tab,
+      ),
+      fresh,
+    ]);
+    setActiveTabId(fresh.id);
+    setCodingCwd(fresh.cwd);
+    setMessages([]);
+    setDrafts({ standard: '', coding: '' });
+    setComposerValue('');
+    setSessionNotice(null);
+    setLastRun(null);
+    return fresh.id;
+  }
+
   // Delete a whole conversation. Works on ANY conversation (this is the fix for
   // "some conversations can't be deleted" — the old delete only hid a message
   // preview while the underlying message stayed). If the active conversation is
@@ -263,6 +334,7 @@ export function useSessionTabs(deps: SessionTabsDeps) {
     activeTabId,
     handleTabCreate,
     switchToSession,
+    openGrokSessionTab,
     deleteSession,
     sessionFirstPrompt,
   };

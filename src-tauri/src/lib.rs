@@ -53,12 +53,21 @@ const DEFAULT_WINDOW_WIDTH: u32 = 1120;
 const DEFAULT_WINDOW_HEIGHT: u32 = 780;
 const MIN_WINDOW_WIDTH: u32 = 480;
 const MIN_WINDOW_HEIGHT: u32 = 600;
+const DESKTOP_HANDOFF_FILE: &str = "desktop-handoff.json";
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedWindowState {
     width: u32,
     height: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopHandoffRequest {
+    session_id: String,
+    cwd: Option<String>,
+    requested_at: u128,
 }
 
 fn read_window_state(path: &Path) -> Option<PersistedWindowState> {
@@ -753,6 +762,56 @@ fn app_support_dir() -> PathBuf {
 
 fn session_state_path() -> PathBuf {
     app_support_dir().join("session_state.json")
+}
+
+fn attachment_asset_path(session_id: &str, asset_id: &str) -> Result<PathBuf, String> {
+    let valid_component = |value: &str| {
+        !value.is_empty()
+            && value != "."
+            && value != ".."
+            && value
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+    };
+    if !valid_component(session_id) || !valid_component(asset_id) {
+        return Err("Invalid attachment asset id.".to_string());
+    }
+    Ok(app_support_dir()
+        .join("sessions")
+        .join(session_id)
+        .join("assets")
+        .join(asset_id))
+}
+
+fn desktop_handoff_path() -> PathBuf {
+    let home = env::var("HOME").unwrap_or_default();
+    PathBuf::from(home)
+        .join(".grok-desktop")
+        .join(DESKTOP_HANDOFF_FILE)
+}
+
+/// Consume the one-shot request written by the CLI-side `/desktop` skill.
+/// Reading and removing it in one command makes this work both when Desktop
+/// is launched by the helper and when an existing Desktop window is already
+/// running and polls for a new request.
+#[tauri::command]
+fn consume_desktop_handoff() -> Result<Option<DesktopHandoffRequest>, String> {
+    let path = desktop_handoff_path();
+    let raw = match fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("read {}: {error}", path.display())),
+    };
+    let _ = fs::remove_file(&path);
+    let request = serde_json::from_str::<DesktopHandoffRequest>(&raw)
+        .map_err(|error| format!("parse {}: {error}", path.display()))?;
+    if uuid::Uuid::parse_str(request.session_id.trim()).is_err() {
+        return Err("desktop handoff contains an invalid session id".into());
+    }
+    if request.session_id.trim().is_empty() {
+        return Err("desktop handoff contains an empty session id".into());
+    }
+    Ok(Some(request))
 }
 
 fn grok_home_dir() -> PathBuf {
@@ -1798,26 +1857,105 @@ fn desktop_handoff_script_body() -> &'static str {
     r#"#!/bin/bash
 set -u
 
+# Find the interactive Grok TUI that owns this tool call. The TUI command line
+# contains the exact session id; using the process ancestry avoids confusing
+# another unrelated Grok session running at the same time.
+find_session_id() {
+  local pid="${PPID:-}"
+  local depth=0
+  while [ -n "$pid" ] && [ "$depth" -lt 12 ]; do
+    local command
+    command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    case "$command" in
+      *grok*--resume\ [0-9a-fA-F-][0-9a-fA-F-]*)
+        printf '%s\n' "$command" | sed -nE 's/.*--resume[[:space:]]+([0-9a-fA-F-]{36}).*/\1/p'
+        return 0
+        ;;
+    esac
+    pid="$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d ' ' || true)"
+    depth=$((depth + 1))
+  done
+
+  # The CLI also maintains this small active-session index. Use it only when
+  # it names exactly one live session, so a background TUI cannot be guessed.
+  local active="$HOME/.grok/active_sessions.json"
+  if [ -f "$active" ]; then
+    local ids
+    ids="$(sed -nE 's/.*"session_id"[[:space:]]*:[[:space:]]*"([0-9a-fA-F-]{36})".*/\1/p' "$active")"
+    if [ "$(printf '%s\n' "$ids" | sed '/^$/d' | wc -l | tr -d ' ')" = "1" ]; then
+      printf '%s\n' "$ids"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+SESSION_ID="$(find_session_id || true)"
+HANDOFF="$HOME/.grok-desktop/desktop-handoff.json"
+if [ -n "$SESSION_ID" ]; then
+  mkdir -p "$(dirname "$HANDOFF")"
+  # Python supplies correct JSON escaping for arbitrary workspace paths and
+  # replaces the request atomically so Desktop never reads a partial file.
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$HANDOFF" "$SESSION_ID" "$PWD" <<'PY'
+import json
+import os
+import sys
+
+path, session_id, cwd = sys.argv[1:]
+temporary = f"{path}.tmp.{os.getpid()}"
+with open(temporary, "w", encoding="utf-8") as handle:
+    json.dump(
+        {"sessionId": session_id, "cwd": cwd, "requestedAt": int(__import__("time").time() * 1000)},
+        handle,
+    )
+    handle.write("\n")
+os.replace(temporary, path)
+PY
+  else
+    echo "Could not write the Desktop handoff: python3 is unavailable." >&2
+    exit 1
+  fi
+else
+  echo "Could not determine the current Grok session; opening Desktop without selecting a conversation." >&2
+fi
+
 for app in \
   "$HOME/Applications/Grok Build Desktop.app" \
   "$HOME/Desktop/Grok Build Desktop.app"
 do
   if [ -d "$app" ] && open "$app" >/dev/null 2>&1; then
-    echo "Grok Build Desktop focused; live sync remains active."
+    if [ -n "$SESSION_ID" ]; then
+      echo "Grok Build Desktop opened on session ${SESSION_ID:0:8}; live sync remains active."
+    else
+      echo "Grok Build Desktop focused without a selected session."
+    fi
     exit 0
   fi
 done
 if open -b com.grok.desktop >/dev/null 2>&1; then
-  echo "Grok Build Desktop focused; live sync remains active."
+  if [ -n "$SESSION_ID" ]; then
+    echo "Grok Build Desktop opened on session ${SESSION_ID:0:8}; live sync remains active."
+  else
+    echo "Grok Build Desktop focused without a selected session."
+  fi
   exit 0
 fi
 if open -a "Grok Build Desktop" >/dev/null 2>&1; then
-  echo "Grok Build Desktop focused; live sync remains active."
+  if [ -n "$SESSION_ID" ]; then
+    echo "Grok Build Desktop opened on session ${SESSION_ID:0:8}; live sync remains active."
+  else
+    echo "Grok Build Desktop focused without a selected session."
+  fi
   exit 0
 fi
 if [ -d "/Applications/Grok Build Desktop.app" ] && \
    open "/Applications/Grok Build Desktop.app" >/dev/null 2>&1; then
-  echo "Grok Build Desktop focused; live sync remains active."
+  if [ -n "$SESSION_ID" ]; then
+    echo "Grok Build Desktop opened on session ${SESSION_ID:0:8}; live sync remains active."
+  else
+    echo "Grok Build Desktop focused without a selected session."
+  fi
   exit 0
 fi
 
@@ -3219,6 +3357,16 @@ async fn enqueue_run(
 }
 
 #[tauri::command]
+async fn prewarm_run(
+    queue: tauri::State<'_, std::sync::Arc<RunQueue>>,
+    cwd: String,
+    args: Vec<String>,
+    lane_id: String,
+) -> Result<bool, String> {
+    queue.prewarm(lane_id, cwd, args).await
+}
+
+#[tauri::command]
 async fn cancel_run(
     queue: tauri::State<'_, std::sync::Arc<RunQueue>>,
     run_id: String,
@@ -3514,6 +3662,67 @@ async fn read_attachment(path: String, max_bytes: usize) -> Result<AttachmentPay
     .map_err(|error| error.to_string())?
 }
 
+/// Persist the exact bytes of a sent attachment in the active tab's session
+/// assets directory. The chat transcript stores only the safe asset id and
+/// display metadata, matching the Codex session shape without putting image
+/// data URLs into localStorage or session_state.json.
+#[tauri::command]
+async fn save_attachment(
+    session_id: String,
+    asset_id: String,
+    data_url: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use base64::Engine as _;
+
+        let path = attachment_asset_path(&session_id, &asset_id)?;
+        let (header, encoded) = data_url
+            .split_once(',')
+            .ok_or_else(|| "Attachment data is not a data URL.".to_string())?;
+        if !header.ends_with(";base64") || encoded.is_empty() {
+            return Err("Attachment data is not base64 encoded.".to_string());
+        }
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .map_err(|error| format!("Attachment data is invalid: {error}"))?;
+        if bytes.len() > 10 * 1024 * 1024 {
+            return Err("Attachment is larger than 10 MB.".to_string());
+        }
+        let parent = path
+            .parent()
+            .ok_or_else(|| "Attachment asset directory is invalid.".to_string())?;
+        fs::create_dir_all(parent).map_err(|error| format!("Could not create assets directory: {error}"))?;
+        let temporary = path.with_extension("tmp");
+        fs::write(&temporary, bytes).map_err(|error| format!("Could not save attachment: {error}"))?;
+        fs::rename(&temporary, &path).map_err(|error| format!("Could not finalize attachment: {error}"))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Rehydrate one attachment into a preview-friendly data URL after restart.
+#[tauri::command]
+async fn load_attachment(
+    session_id: String,
+    asset_id: String,
+    mime_type: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use base64::Engine as _;
+
+        let path = attachment_asset_path(&session_id, &asset_id)?;
+        let metadata = fs::metadata(&path).map_err(|error| format!("Could not find attachment: {error}"))?;
+        if !metadata.is_file() || metadata.len() > 10 * 1024 * 1024 {
+            return Err("Attachment is not a readable file.".to_string());
+        }
+        let bytes = fs::read(&path).map_err(|error| format!("Could not read attachment: {error}"))?;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+        Ok(format!("data:{mime_type};base64,{encoded}"))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 // ── Event forwarder ─────────────────────────────────────────────────────────
 
 fn forward_queue_message(app: &tauri::AppHandle, msg: &QueueMessage) {
@@ -3588,6 +3797,13 @@ pub fn run() {
             preview_scheme_response(guard.as_ref(), request.uri().path())
         })
         .setup(|app| {
+            // Keep the CLI-side `/desktop` helper upgrade-safe. Older
+            // Desktop releases installed a helper that only focused the app;
+            // refreshing the managed skill on launch upgrades it without
+            // touching a user-authored skill with the same name.
+            if let Err(error) = ensure_desktop_handoff_skill() {
+                eprintln!("[grok-desktop] refresh /desktop handoff skipped: {error}");
+            }
             let app_handle = app.handle().clone();
             let resource_dir = app
                 .path()
@@ -3765,6 +3981,7 @@ pub fn run() {
             save_session_state,
             get_grok_auth_status,
             start_grok_login,
+            consume_desktop_handoff,
             open_grok_cli,
             open_grok_desktop,
             export_grok_session,
@@ -3800,6 +4017,7 @@ pub fn run() {
             run_doctor,
             pick_project_folder,
             enqueue_run,
+            prewarm_run,
             cancel_run,
             get_queue,
             clear_queue,
@@ -3811,6 +4029,8 @@ pub fn run() {
             glob_files,
             read_file_safe,
             read_attachment,
+            save_attachment,
+            load_attachment,
             desktop::desktop_list_apps,
             desktop::desktop_query,
             desktop::desktop_activate

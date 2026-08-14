@@ -434,6 +434,20 @@ impl AcpHost {
         self.pgid
     }
 
+    /// Create an empty session while the UI is idle so the first prompt does
+    /// not pay the session/new round-trip. The caller only uses this for a
+    /// lane that has no existing conversation head.
+    pub async fn prewarm_session(&mut self, cwd: &Path, config: &CoreConfig) -> Result<String, String> {
+        let resolved_cwd = if cwd.is_absolute() && cwd.is_dir() {
+            cwd.to_path_buf()
+        } else {
+            std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/"))
+        };
+        self.new_session(&resolved_cwd.to_string_lossy(), config).await
+    }
+
     /// Stop this ACP client and wait for it to release/flush its session.
     /// `/cli` handoff and shared-session rewind must not race a Drop-triggered
     /// background termination with the next `session/load`.
@@ -566,6 +580,7 @@ impl AcpHost {
         cwd: &Path,
         config: &CoreConfig,
         tx: &broadcast::Sender<QueueMessage>,
+        prewarmed_session_id: Option<&str>,
     ) -> Result<TurnResult, String> {
         // The chat surface is allowed to enqueue with an empty repository
         // path. ACP requires an absolute cwd for every session operation, so
@@ -579,7 +594,9 @@ impl AcpHost {
                 .unwrap_or_else(|| PathBuf::from("/"))
         };
         let cwd = resolved_cwd.to_string_lossy();
-        let session_id = if let Some(id) = &config.resume_session_id {
+        let session_id = if let Some(id) = prewarmed_session_id {
+            id.to_string()
+        } else if let Some(id) = &config.resume_session_id {
             if self.loaded_sessions.contains(id) {
                 id.clone()
             } else {

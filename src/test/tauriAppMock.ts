@@ -43,10 +43,7 @@ export interface TauriAppMock {
     raw?: Record<string, unknown>,
   ) => Promise<void>;
   /** Emit grok-desktop://queue-changed. */
-  emitQueue: (
-    active: string | null | string[],
-    queue?: unknown[],
-  ) => Promise<void>;
+  emitQueue: (active: string | null | string[], queue?: unknown[]) => Promise<void>;
   /** Play a full streamed run: Running → text chunks → end → Done → empty queue. */
   streamReply: (runId: string, chunks: string[]) => Promise<void>;
 }
@@ -110,6 +107,7 @@ export function installTauriAppMock(overrides: Record<string, CommandHandler> = 
     list_grok_models: () =>
       toolRun('grok models', 'Available models:\n- grok-build\n- grok-4-fast-reasoning\n'),
     get_queue: () => ({ active: null, activeIds: [], queue: [] }),
+    prewarm_run: () => true,
     enqueue_run: () => {
       runCounter += 1;
       const runId = `test-run-${runCounter}`;
@@ -162,6 +160,7 @@ export function installTauriAppMock(overrides: Record<string, CommandHandler> = 
     close_terminal_session: () => null,
     run_doctor: () => toolRun('doctor', 'All checks passed.'),
     start_grok_login: () => toolRun('grok login', 'Login window opened.'),
+    consume_desktop_handoff: () => null,
     open_grok_cli: () => null,
     open_grok_desktop: () => null,
     export_grok_session: () => '## User\n\nhello\n\n## Assistant\n\nhi\n',
@@ -202,11 +201,7 @@ export function installTauriAppMock(overrides: Record<string, CommandHandler> = 
   const emitRunEvent: TauriAppMock['emitRunEvent'] = (runId, event, raw = event) =>
     emit('grok-desktop://run-event', { runId, event, raw });
   const emitQueue: TauriAppMock['emitQueue'] = (active, queue = []) => {
-    const activeIds = Array.isArray(active)
-      ? active
-      : active
-        ? [active]
-        : [];
+    const activeIds = Array.isArray(active) ? active : active ? [active] : [];
     return emit('grok-desktop://queue-changed', {
       active: activeIds[0] ?? null,
       activeIds,

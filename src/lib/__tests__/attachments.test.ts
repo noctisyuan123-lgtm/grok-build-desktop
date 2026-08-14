@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { attachmentToAcpBlock, type ComposerAttachment } from '../attachments';
+import {
+  attachmentToAcpBlock,
+  toPersistedAttachmentRef,
+  type ComposerAttachment,
+} from '../attachments';
 
 function attachment(overrides: Partial<ComposerAttachment> = {}): ComposerAttachment {
   return {
@@ -13,6 +17,16 @@ function attachment(overrides: Partial<ComposerAttachment> = {}): ComposerAttach
 }
 
 describe('attachmentToAcpBlock', () => {
+  it('creates a durable reference without copying the data URL into history', () => {
+    expect(toPersistedAttachmentRef(attachment())).toEqual({
+      id: 'a1',
+      name: 'sample.png',
+      mimeType: 'image/png',
+      sizeBytes: 3,
+      assetId: 'a1',
+    });
+  });
+
   it('emits ACP image blocks with raw base64 rather than a data URL', () => {
     expect(attachmentToAcpBlock(attachment())).toEqual({
       type: 'image',

@@ -11,7 +11,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { Globe2, PanelRight, TerminalSquare } from 'lucide-react';
 import './App.css';
-import { cancelRun, ensureStreamListenersAttached } from './lib/grok';
+import { cancelRun, ensureStreamListenersAttached, prewarmRun } from './lib/grok';
 import { hasTauriRuntime } from './lib/runtime';
 import { streamStore } from './lib/streamStore';
 import { mergeStreamIntoMessages } from './lib/mergeStreamMessages';
@@ -27,6 +27,7 @@ import { InspectorDrawer } from './components/InspectorDrawer';
 import { Sidebar } from './components/Sidebar';
 import { EmptyState } from './components/EmptyState';
 import { PreviewPanel } from './components/PreviewPanel';
+import { AttachmentPreviewPanel } from './components/AttachmentPreviewPanel';
 import { TerminalDock } from './components/TerminalDock';
 import { Toolbelt } from './components/Toolbelt';
 import { TitleBar } from './components/TitleBar';
@@ -54,7 +55,11 @@ import { defaultDrafts, storageKeys, tabsActiveKey, tabsStorageKey } from './app
 import { t } from './i18n';
 import { makeId } from './app/format';
 import { buildConversationReplayBlock, buildGrokArgs } from './app/grokArgs';
-import type { ComposerAttachment } from './lib/attachments';
+import {
+  toPersistedAttachmentRef,
+  type ComposerAttachment,
+  type PersistedAttachmentRef,
+} from './lib/attachments';
 import {
   dropUndoneUserTurn,
   exportFingerprint,
@@ -74,6 +79,13 @@ const SIDEBAR_DEFAULT_WIDTH = 336;
 const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 440;
 
+type DesktopHandoff = {
+  sessionId: string;
+  cwd?: string | null;
+  requestedAt: number;
+  tabId: string;
+};
+
 function storedSidebarWidth(): number {
   const parsed = Number.parseInt(window.localStorage.getItem(SIDEBAR_WIDTH_KEY) ?? '', 10);
   // 260, 272, and 304 were shipped defaults in earlier builds. Treat them as
@@ -91,7 +103,11 @@ function mergeRebasedTranscript(base: ChatMessage[], imported: ChatMessage[]): C
   const maxOverlap = Math.min(base.length, imported.length);
   for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
     const baseStart = base.length - overlap;
-    if (imported.slice(0, overlap).every((message, index) => sameTurn(base[baseStart + index]!, message))) {
+    if (
+      imported
+        .slice(0, overlap)
+        .every((message, index) => sameTurn(base[baseStart + index]!, message))
+    ) {
       return [...base, ...imported.slice(overlap)];
     }
   }
@@ -119,6 +135,8 @@ function App() {
   const liveTabIdRef = useRef<string | null>(null);
   const liveExportFingerprintRef = useRef<string>('');
   const livePollInFlightRef = useRef(false);
+  const desktopHandoffBusyRef = useRef(false);
+  const [desktopHandoff, setDesktopHandoff] = useState<DesktopHandoff | null>(null);
   const suppressLiveRehydrateRef = useRef(false);
   const undoneUserContentRef = useRef<string | null>(null);
   // A rebase can leave no retained assistant bubble to carry sessionId (undo
@@ -135,6 +153,8 @@ function App() {
   const [messageAttachments, setMessageAttachments] = useState<
     Record<string, ComposerAttachment[]>
   >({});
+  const attachmentLoadKeyRef = useRef('');
+  const prewarmKeyRef = useRef('');
   // Session state (mode/drafts/cwd/theme/history/messages) + localStorage and
   // session_state.json persistence live in hooks/useSessionPersistence.ts.
   const {
@@ -158,6 +178,7 @@ function App() {
     setTotalRuns,
     messages,
     setMessages,
+    sessionLoaded,
     recordRun,
     appendMessage,
   } = useSessionPersistence({ setComposerValue, setSessionNotice });
@@ -170,6 +191,7 @@ function App() {
     activeTabId,
     handleTabCreate: createSessionTab,
     switchToSession,
+    openGrokSessionTab,
     deleteSession,
     sessionFirstPrompt,
   } = useSessionTabs({
@@ -200,8 +222,7 @@ function App() {
     for (const tab of tabs) {
       if (
         tab.messages.some(
-          (message) =>
-            typeof message.runId === 'string' && inflightRunIds.has(message.runId),
+          (message) => typeof message.runId === 'string' && inflightRunIds.has(message.runId),
         )
       ) {
         working.add(tab.id);
@@ -212,8 +233,7 @@ function App() {
     if (
       tabs.some((tab) => tab.id === activeTabId) &&
       messages.some(
-        (message) =>
-          typeof message.runId === 'string' && inflightRunIds.has(message.runId),
+        (message) => typeof message.runId === 'string' && inflightRunIds.has(message.runId),
       )
     ) {
       working.add(activeTabId);
@@ -230,6 +250,7 @@ function App() {
   // Undo window for destructive actions (delete conversation, clear history).
   const { undoToast, showUndoToast, undoNow } = useUndoToast();
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [attachmentPreview, setAttachmentPreview] = useState<ComposerAttachment | null>(null);
   const [contextOpen, setContextOpen] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -248,6 +269,10 @@ function App() {
   // Dedicated Tools / MCP hub (community-tool integration).
   const [toolsPageOpen, setToolsPageOpen] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);
+
+  useEffect(() => {
+    setAttachmentPreview(null);
+  }, [activeTabId]);
   // App-owned right-click menu (replaces the suppressed WebView menu).
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   // History organization (pin/rename/group/archive metadata, filter, derived
@@ -519,12 +544,9 @@ function App() {
   }
 
   function currentSessionId(list: typeof messages = messagesRef.current): string | null {
-    const visible = (
-      [...list]
-        .reverse()
-        .find((message) => message.role === 'assistant' && message.meta?.sessionId)?.meta
-        ?.sessionId ?? null
-    );
+    const visible =
+      [...list].reverse().find((message) => message.role === 'assistant' && message.meta?.sessionId)
+        ?.meta?.sessionId ?? null;
     if (visible) return visible;
     const rebased = rebasedSessionHeadRef.current;
     return rebased && rebased.tabId === activeTabId ? rebased.sessionId : null;
@@ -616,7 +638,7 @@ function App() {
           ? liveSessionId
           : messages.length === 0
             ? null
-            : peekCliHandoff() ?? peekLiveSession();
+            : (peekCliHandoff() ?? peekLiveSession());
       if (token === '/desktop') {
         // Claude-style: re-import shared grok session into this chat UI + keep listening.
         if (!sessionId) {
@@ -627,7 +649,9 @@ function App() {
           linkLiveSession(sessionId);
           const ok = await rehydrateFromGrokSession(sessionId);
           setSessionNotice(
-            ok ? t('notices.syncedDesktopSession') : t('notices.liveListening', { id: sessionId.slice(0, 8) }),
+            ok
+              ? t('notices.syncedDesktopSession')
+              : t('notices.liveListening', { id: sessionId.slice(0, 8) }),
           );
         } catch (error) {
           setSessionNotice(
@@ -675,6 +699,83 @@ function App() {
       return true;
     }
   }
+
+  // `/desktop` in Grok CLI writes a one-shot request before opening/focusing
+  // this app. Polling is intentional: macOS `open` only focuses an existing
+  // bundle and does not deliver the new session id to the already-running
+  // Tauri window.
+  useEffect(() => {
+    if (!hasTauriRuntime() || !sessionLoaded) return;
+    let cancelled = false;
+    const consume = async () => {
+      if (cancelled || desktopHandoffBusyRef.current || desktopHandoff) return;
+      desktopHandoffBusyRef.current = true;
+      try {
+        const request = await invoke<{
+          sessionId: string;
+          cwd?: string | null;
+          requestedAt: number;
+        } | null>('consume_desktop_handoff');
+        if (!cancelled && request?.sessionId) {
+          const tabId = openGrokSessionTab(request.sessionId, request.cwd ?? '');
+          setDesktopHandoff({ ...request, tabId });
+        } else {
+          desktopHandoffBusyRef.current = false;
+        }
+      } catch {
+        desktopHandoffBusyRef.current = false;
+      }
+    };
+    void consume();
+    const timer = window.setInterval(() => void consume(), 500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+    // openGrokSessionTab reads the latest tab/message state through its ref;
+    // this listener must remain mounted instead of restarting each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionLoaded]);
+
+  useEffect(() => {
+    if (!desktopHandoff || desktopHandoff.tabId !== activeTabId) return;
+    let cancelled = false;
+    const { sessionId, tabId } = desktopHandoff;
+    linkLiveSession(sessionId, tabId);
+    void rehydrateFromGrokSession(sessionId)
+      .then((ok) => {
+        if (!cancelled) {
+          setSessionNotice(
+            ok
+              ? t('notices.syncedDesktopSession')
+              : t('notices.liveListening', { id: sessionId.slice(0, 8) }),
+          );
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setSessionNotice(
+            t('notices.hostSlashFailed', {
+              command: '/desktop',
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          desktopHandoffBusyRef.current = false;
+          setDesktopHandoff(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+    // The handoff request is intentionally processed against the committed
+    // tab selected above; including these render-scoped helpers would restart
+    // the import whenever the transcript changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTabId, desktopHandoff]);
 
   function switchMode(nextMode: Mode) {
     if (nextMode === mode || busyRunner !== null) return;
@@ -740,6 +841,47 @@ function App() {
     });
   }
 
+  // Grok Core needs roughly a process + ACP initialize before it can accept
+  // the first prompt. Warm the active lane while the user is looking at the
+  // app so Send only waits for the actual session/prompt request. The queue
+  // keeps this host alive and reuses it for subsequent turns.
+  useEffect(() => {
+    if (!hasTauriRuntime() || !sessionLoaded || !activeTabId) return;
+    const args = buildRunArgs();
+    const key = `${activeTabId}\0${codingCwd}\0${args.join('\0')}`;
+    if (prewarmKeyRef.current === key) return;
+    prewarmKeyRef.current = key;
+    let cancelled = false;
+    void prewarmRun({ cwd: codingCwd, args, laneId: activeTabId }).catch((error) => {
+      if (cancelled || prewarmKeyRef.current !== key) return;
+      // Prewarm is best-effort; the normal enqueue path remains authoritative.
+      prewarmKeyRef.current = '';
+      console.debug('[grok-desktop] ACP prewarm unavailable', error);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // buildRunArgs intentionally snapshots the current run configuration;
+    // the explicit dependencies below trigger a new warm host when it changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    sessionLoaded,
+    activeTabId,
+    codingCwd,
+    mode,
+    activeModel,
+    effortLevel,
+    reasoningEffort,
+    actionPolicy,
+    permissionMode,
+    bestOfN,
+    experimentalMemory,
+    webSearchEnabled,
+    subagentsEnabled,
+    selfCheck,
+    liveSessionId,
+  ]);
+
   function handleEnqueued(info: {
     runId: string;
     position: number;
@@ -759,6 +901,7 @@ function App() {
         [userMessageId]: info.attachments,
       }));
     }
+    const persistedAttachments = info.attachments.map(toPersistedAttachmentRef);
     appendMessage({
       id: userMessageId,
       role: 'user',
@@ -769,7 +912,25 @@ function App() {
       content: info.rawText ?? info.prompt,
       ts: now,
       meta: { workflow: mode === 'coding' ? codingWorkflow : 'chat' },
+      attachments: persistedAttachments.length > 0 ? persistedAttachments : undefined,
     });
+    if (persistedAttachments.length > 0 && hasTauriRuntime()) {
+      void Promise.all(
+        info.attachments.map((attachment) =>
+          invoke<void>('save_attachment', {
+            sessionId: activeTabId,
+            assetId: attachment.id,
+            dataUrl: attachment.dataUrl,
+          }),
+        ),
+      ).catch((error) => {
+        setSessionNotice(
+          t('notices.saveFailed', {
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      });
+    }
     appendMessage({
       id: assistantMessageId,
       role: 'assistant',
@@ -785,6 +946,62 @@ function App() {
       return next;
     });
   }
+
+  // Attachment bytes live outside the transcript. Rehydrate only the active
+  // tab's references after boot or a conversation switch; transient data from
+  // a just-sent message remains visible if the first disk read races its save.
+  useEffect(() => {
+    setMessageAttachments({});
+    attachmentLoadKeyRef.current = '';
+  }, [activeTabId]);
+
+  useEffect(() => {
+    if (!sessionLoaded || !hasTauriRuntime() || !activeTabId) return;
+    const references: Array<{ messageId: string; attachment: PersistedAttachmentRef }> = [];
+    for (const message of messages) {
+      for (const attachment of message.attachments ?? []) {
+        references.push({ messageId: message.id, attachment });
+      }
+    }
+    const loadKey = `${activeTabId}:${references
+      .map(({ messageId, attachment }) => `${messageId}:${attachment.assetId}`)
+      .join('|')}`;
+    if (!references.length || loadKey === attachmentLoadKeyRef.current) return;
+    attachmentLoadKeyRef.current = loadKey;
+    let cancelled = false;
+    void Promise.all(
+      references.map(async ({ messageId, attachment }) => {
+        try {
+          const dataUrl = await invoke<string>('load_attachment', {
+            sessionId: activeTabId,
+            assetId: attachment.assetId,
+            mimeType: attachment.mimeType,
+          });
+          return {
+            messageId,
+            attachment: { ...attachment, dataUrl },
+          } satisfies { messageId: string; attachment: ComposerAttachment };
+        } catch {
+          return null;
+        }
+      }),
+    ).then((loaded) => {
+      if (cancelled) return;
+      setMessageAttachments((current) => {
+        const next = { ...current };
+        for (const item of loaded) {
+          if (!item) continue;
+          // A just-sent attachment has the authoritative in-memory data URL;
+          // disk hydration should only fill a missing entry.
+          if (!next[item.messageId]) next[item.messageId] = [item.attachment];
+        }
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTabId, messages, sessionLoaded]);
 
   function togglePanel(target: 'preview' | 'context' | 'terminal' | 'tools') {
     const next = !(target === 'preview'
@@ -1085,8 +1302,7 @@ function App() {
     };
     undoneUserContentRef.current = user.content;
     suppressLiveRehydrateRef.current = true;
-    const grokSessionId =
-      assistant.meta?.sessionId ?? currentSessionId() ?? liveSessionId;
+    const grokSessionId = assistant.meta?.sessionId ?? currentSessionId() ?? liveSessionId;
     messagesRef.current = preserved;
     setMessages(preserved);
     updatePrompt(user.content);
@@ -1333,7 +1549,11 @@ function App() {
                   }}
                 />
               ) : (
-                <MessageList messages={messageRefs} onUndoAssistant={undoAssistantResponse} />
+                <MessageList
+                  messages={messageRefs}
+                  onAttachmentClick={setAttachmentPreview}
+                  onUndoAssistant={undoAssistantResponse}
+                />
               )}
             </div>
 
@@ -1376,6 +1596,10 @@ function App() {
             staticPreview={staticPreview}
             previewBusy={previewBusy}
             onRefresh={() => refreshStaticPreview()}
+          />
+          <AttachmentPreviewPanel
+            attachment={attachmentPreview}
+            onClose={() => setAttachmentPreview(null)}
           />
           <InspectorDrawer
             open={contextOpen}

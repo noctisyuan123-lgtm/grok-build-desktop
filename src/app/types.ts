@@ -2,6 +2,7 @@
 import type { ToolRun } from '../lib/grok';
 import type { PlanEntry, TraceEvent } from '../lib/traceParser';
 import type { TranscriptSegment } from '../lib/streamStore';
+import type { PersistedAttachmentRef } from '../lib/attachments';
 
 export type Mode = 'standard' | 'coding';
 export type Runner =
@@ -111,6 +112,8 @@ export type ChatMessage = {
     /** Grok session head after this assistant turn. */
     sessionId?: string;
   };
+  /** Attachment metadata; bytes are stored under the tab's session assets. */
+  attachments?: PersistedAttachmentRef[];
 };
 
 export type SessionState = {

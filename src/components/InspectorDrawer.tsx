@@ -190,7 +190,10 @@ export function InspectorDrawer({
           })}
         </small>
       </summary>
-      <aside className="inspector" aria-label={t('inspector.ariaLabel')}>
+      <aside
+        className={`inspector${inspectorTab === 'context' ? ' inspector-context' : ''}`}
+        aria-label={t('inspector.ariaLabel')}
+      >
         <div className="inspector-tabs" role="tablist" aria-label={t('inspector.tablistAria')}>
           {inspectorTabs.map((tab) => (
             <button

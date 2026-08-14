@@ -184,15 +184,32 @@ describe('Sidebar conversations list', () => {
 
   it('shows project folders above sessions that share the same cwd', () => {
     render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
     const project = screen.getByText('a').closest('.project-history-group');
     expect(project).toBeInTheDocument();
-    expect(within(project as HTMLElement).queryByText('fix the login flake')).not.toBeInTheDocument();
+    expect(
+      within(project as HTMLElement).queryByText('fix the login flake'),
+    ).not.toBeInTheDocument();
     expect(screen.getByText('b').closest('.project-history-group')).toBeInTheDocument();
+  });
+
+  it('collapses and reopens the whole project bar', async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    const toggle = screen.getByRole('button', { name: 'Projects' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('a')).toBeInTheDocument();
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('a')).not.toBeInTheDocument();
   });
 
   it('collapses and reopens a project folder without losing its sessions', async () => {
     const user = userEvent.setup();
     render(<Harness />);
+    await user.click(screen.getByRole('button', { name: 'Projects' }));
     const project = screen.getByText('a').closest('.project-history-group') as HTMLElement;
     const toggle = within(project).getByRole('button', { name: 'a' });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
@@ -206,6 +223,7 @@ describe('Sidebar conversations list', () => {
   it('marks working sessions, promoting the marker to a collapsed project', async () => {
     const user = userEvent.setup();
     render(<Harness workingSessionIds={new Set(['t1'])} />);
+    await user.click(screen.getByRole('button', { name: 'Projects' }));
     const project = screen.getByText('a').closest('.project-history-group') as HTMLElement;
     expect(project.querySelector('.project-section-head .history-activity-dot')).toBeTruthy();
 

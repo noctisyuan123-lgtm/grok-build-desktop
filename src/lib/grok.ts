@@ -50,6 +50,15 @@ export async function enqueueRun(opts: {
   return invoke('enqueue_run', opts);
 }
 
+/** Start the persistent ACP host before the first user turn needs it. */
+export async function prewarmRun(opts: {
+  cwd: string;
+  args: string[];
+  laneId: string;
+}): Promise<boolean> {
+  return invoke('prewarm_run', opts);
+}
+
 export async function cancelRun(runId: string): Promise<boolean> {
   return invoke('cancel_run', { runId });
 }

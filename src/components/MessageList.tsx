@@ -6,6 +6,7 @@ import { isLongUserText } from '../lib/longText';
 import { useSessionActiveRun } from '../hooks/useActiveRun';
 import type { PlanEntry, TraceEvent } from '../lib/traceParser';
 import type { TranscriptSegment } from '../lib/streamStore';
+import type { ComposerAttachment } from '../lib/attachments';
 
 export interface MessageRef {
   runId: string;
@@ -30,12 +31,7 @@ export interface MessageRef {
   /** Keep the work fold open only while this turn is actively streaming. */
   autoExpandWork?: boolean;
   canUndo?: boolean;
-  attachments?: Array<{
-    id: string;
-    name: string;
-    mimeType: string;
-    dataUrl: string;
-  }>;
+  attachments?: ComposerAttachment[];
 }
 
 interface Props {
@@ -45,9 +41,16 @@ interface Props {
   focusId?: string | null;
   focusNonce?: number;
   onUndoAssistant?: (messageId: string) => void;
+  onAttachmentClick?: (attachment: ComposerAttachment) => void;
 }
 
-export function MessageList({ messages, focusId, focusNonce, onUndoAssistant }: Props) {
+export function MessageList({
+  messages,
+  focusId,
+  focusNonce,
+  onUndoAssistant,
+  onAttachmentClick,
+}: Props) {
   const ref = useRef<VirtuosoHandle>(null);
   // The message currently flashing after a history-click jump.
   const [flashId, setFlashId] = useState<string | null>(null);
@@ -56,6 +59,7 @@ export function MessageList({ messages, focusId, focusNonce, onUndoAssistant }: 
   // history is never yanked back down.
   const atBottomRef = useRef(true);
   const prevLenRef = useRef(messages.length);
+  const scrollFrameRef = useRef<number | null>(null);
   // Session-scoped active only. Concurrent runs in other tabs must not drive
   // auto-scroll (or appear to own) this transcript.
   const sessionRunIds = useMemo(
@@ -78,39 +82,54 @@ export function MessageList({ messages, focusId, focusNonce, onUndoAssistant }: 
     [messages.length],
   );
 
+  // Coalesce streaming resize notifications to one scroll per animation
+  // frame. This avoids the old fixed interval, which kept fighting wheel
+  // input and caused visible scroll jank.
+  const scheduleScrollToLast = useCallback(
+    (force = false) => {
+      if (scrollFrameRef.current != null) return;
+      scrollFrameRef.current = window.requestAnimationFrame(() => {
+        scrollFrameRef.current = null;
+        if (force || atBottomRef.current) scrollToLast(false);
+      });
+    },
+    [scrollToLast],
+  );
+
+  useEffect(
+    () => () => {
+      if (scrollFrameRef.current != null) window.cancelAnimationFrame(scrollFrameRef.current);
+    },
+    [],
+  );
+
   // A NEW message arrived (user pressed Enter, or the assistant placeholder
-  // was appended) → ALWAYS jump to the latest line, even if the user had
-  // scrolled up. This is the "send → jump to newest" behavior.
+  // was appended) → follow only when the user was already at the bottom.
   useEffect(() => {
     if (messages.length > prevLenRef.current) {
-      atBottomRef.current = true;
-      // rAF so Virtuoso has the new item measured before we scroll.
-      requestAnimationFrame(() => scrollToLast(false));
+      // A new turn follows only when the user was already at the bottom.
+      // Never yank someone back while they are reading older messages.
+      scheduleScrollToLast(atBottomRef.current);
     }
     prevLenRef.current = messages.length;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages.length]);
+  }, [messages.length, scheduleScrollToLast]);
 
   // The active run is STREAMING — its text/thought/html grows on the same
   // (last) message. Virtuoso's followOutput only fires on new items, not on
   // an item growing, so we pin to the bottom ourselves while at-bottom.
   useEffect(() => {
     if (!activeBelongsHere || !active) return;
-    if (atBottomRef.current) scrollToLast(false);
+    if (atBottomRef.current) scheduleScrollToLast();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeBelongsHere, active?.textChars, active?.thoughtChars, active?.htmlVersion, active?.state]);
-
-  // The typewriter buffer reveals text AFTER the raw tokens have all arrived,
-  // so the message keeps growing between token bursts with no snapshot change
-  // to trigger the effect above. While a run is actively running, gently keep
-  // the view pinned to the bottom (only if the user is already there).
-  useEffect(() => {
-    if (!activeBelongsHere || active?.state !== 'running') return;
-    const id = window.setInterval(() => {
-      if (atBottomRef.current) scrollToLast(false);
-    }, 180);
-    return () => window.clearInterval(id);
-  }, [activeBelongsHere, active?.state, scrollToLast]);
+  }, [
+    activeBelongsHere,
+    active?.textChars,
+    active?.thoughtChars,
+    active?.htmlVersion,
+    active?.state,
+    scheduleScrollToLast,
+  ]);
 
   // History-click jump: scroll the requested message into view (centered) and
   // flash it for ~1.3s so the user sees exactly which task they returned to.
@@ -139,7 +158,10 @@ export function MessageList({ messages, focusId, focusNonce, onUndoAssistant }: 
       // for one render and show the wrong run's response.
       computeItemKey={(_, msg) => msg.id || msg.runId}
       followOutput={(isAtBottom) => (isAtBottom ? 'auto' : false)}
-      atBottomThreshold={140}
+      // A 140px threshold treats a visible upward wheel gesture as "still at
+      // the bottom" and lets streaming updates pull the viewport back down.
+      // Keep this close to the actual edge so manual reading wins immediately.
+      atBottomThreshold={24}
       atBottomStateChange={(bottom) => {
         atBottomRef.current = bottom;
       }}
@@ -155,21 +177,28 @@ export function MessageList({ messages, focusId, focusNonce, onUndoAssistant }: 
             <div className={`message message-user${flash}`} data-message-id={msg.id}>
               {msg.attachments?.length ? (
                 <div className="message-attachments" aria-label="Attachments">
-                  {msg.attachments.map((attachment) =>
-                    attachment.mimeType.startsWith('image/') ? (
-                      <img
-                        className="message-attachment-image"
-                        key={attachment.id}
-                        src={attachment.dataUrl}
-                        alt={attachment.name}
-                        title={attachment.name}
-                      />
-                    ) : (
-                      <span className="message-attachment-file" key={attachment.id}>
-                        {attachment.name}
-                      </span>
-                    ),
-                  )}
+                  {msg.attachments.map((attachment) => (
+                    <button
+                      aria-label={`Preview ${attachment.name}`}
+                      className={`message-attachment-trigger${
+                        attachment.mimeType.startsWith('image/') ? ' is-image' : ' is-file'
+                      }`}
+                      key={attachment.id}
+                      title={`Preview ${attachment.name}`}
+                      type="button"
+                      onClick={() => onAttachmentClick?.(attachment)}
+                    >
+                      {attachment.mimeType.startsWith('image/') ? (
+                        <img
+                          className="message-attachment-image"
+                          src={attachment.dataUrl}
+                          alt={attachment.name}
+                        />
+                      ) : (
+                        <span className="message-attachment-file">{attachment.name}</span>
+                      )}
+                    </button>
+                  ))}
                 </div>
               ) : null}
               {msg.userText ? (

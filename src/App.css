@@ -259,6 +259,7 @@ pre {
   min-height: 0;
   overflow: hidden;
   padding: 14px;
+  position: relative;
 }
 .app-sidebar > * {
   flex: 0 0 auto;
@@ -292,6 +293,17 @@ pre {
   line-height: 1.15;
   padding-left: 2px;
   user-select: none;
+}
+
+/* The traffic lights occupy the top-left overlay area on macOS. Keep the
+   sidebar toggle beside them instead of consuming a row in the sidebar. */
+.brand-top {
+  min-height: 22px;
+}
+.brand-actions {
+  left: 70px;
+  position: absolute;
+  top: 14px;
 }
 
 /* Chat/Code segment — moved up from the composer footer. Translucent so the
@@ -2307,12 +2319,7 @@ select:focus {
 }
 
 .history-list button.history-row strong {
-  font-family:
-    'Iowan Old Style',
-    'Noto Serif SC',
-    'Noto Serif CJK SC',
-    'Songti SC',
-    serif;
+  font-family: 'Iowan Old Style', 'Noto Serif SC', 'Noto Serif CJK SC', 'Songti SC', serif;
   font-size: 13px;
   font-weight: 500;
 }
@@ -4390,8 +4397,8 @@ button.status-cluster.status-action:disabled {
 .message.message-assistant .message-body {
   color: var(--conversation-text);
   font-family: inherit;
-  font-size: 13px;
-  line-height: 21px;
+  font-size: 14px;
+  line-height: 22px;
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
@@ -4400,7 +4407,7 @@ button.status-cluster.status-action:disabled {
 
 .streaming-raw {
   font-family: 'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--grok-text-2);
 }
 .code-block {
@@ -4431,7 +4438,7 @@ button.status-cluster.status-action:disabled {
     -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, Ubuntu, 'Droid Sans',
     sans-serif;
   font-size: 14px;
-  line-height: 22px;
+  line-height: 24px;
   white-space: normal;
   word-break: normal;
 }
@@ -5959,26 +5966,58 @@ body[data-theme='light'] .hljs-comment {
   color: var(--text-4);
 }
 .project-history-group + .project-history-group {
-  margin-top: 2px;
+  margin-top: 0;
+}
+.project-list-label {
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  display: flex;
+  font-size: 13px;
+  font-weight: 500;
+  gap: 0;
+  letter-spacing: 0;
+  line-height: 1.2;
+  min-height: 0;
+  padding: 6px 10px 2px 18px;
+  position: static;
+  text-align: left;
+  text-transform: none;
+  width: 100%;
+}
+.history-list .project-list-label {
+  display: flex !important;
+  justify-content: flex-start;
+}
+.project-list-label svg {
+  color: var(--text-4);
+  display: block;
+  flex: 0 0 auto;
+}
+.project-list-label:hover {
+  color: var(--text-3);
+}
+#project-list-content {
+  margin-top: -1px;
 }
 .history-section-head.project-section-head {
   align-items: center;
   display: flex;
   grid-template-columns: none;
   justify-content: flex-start;
-  min-height: 35px;
-  padding: 6px 10px;
-  font-family:
-    'Iowan Old Style',
-    'Noto Serif SC',
-    'Noto Serif CJK SC',
-    'Songti SC',
-    serif;
+  gap: 7px;
+  min-height: 34px;
+  padding: 3px 10px 3px 18px;
+  position: relative;
+  font-family: inherit;
   font-size: 15px;
-  font-weight: 500;
+  font-weight: 400;
   letter-spacing: 0;
+  line-height: 1.25;
   text-transform: none;
-  color: var(--text-1);
+  color: var(--text-2);
   text-align: left;
   width: 100%;
 }
@@ -5986,14 +6025,38 @@ body[data-theme='light'] .hljs-comment {
   color: var(--text-2);
   flex: 0 0 auto;
 }
-.project-section-head span {
+.project-section-head > span:last-child {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.project-section-head > .history-activity-slot {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 5px;
+  height: 5px;
+  justify-content: center;
+  overflow: visible;
+  position: absolute;
+  left: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 5px;
+}
+.project-section-head > .history-activity-slot .history-activity-dot {
+  transform: none;
+}
+.project-folder-icon {
+  color: var(--text-2);
+  height: 16px;
+  width: 16px;
+}
 .project-history-group .history-row {
-  padding-left: 20px;
+  padding-left: 44px;
+}
+.project-history-group .history-row strong {
+  font-size: 12px;
 }
 .history-activity-dot {
   animation: history-activity-core 1.7s ease-in-out infinite alternate;
@@ -6810,6 +6873,60 @@ button.history-section-head.toggle:hover {
 .account-settings:active {
   background: var(--bg-4);
 }
+.sidebar-collapse-button,
+.sidebar-collapse-button:hover,
+.sidebar-collapse-button:active {
+  border: 0;
+}
+
+/* Keep the only sidebar toggle beside macOS' traffic lights. It stays
+   reachable while the sidebar is collapsed and has no button chrome. */
+.sidebar-titlebar-toggle {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 6px;
+  color: var(--text-2);
+  left: 70px;
+  position: fixed;
+  top: 0;
+  z-index: 90;
+}
+.sidebar-titlebar-toggle:hover,
+.sidebar-titlebar-toggle:active {
+  background: transparent !important;
+  border-color: transparent !important;
+  color: var(--text-1);
+}
+
+/* Conversation names should read as a compact list, not a stack of cards. */
+.history-list button.history-row {
+  align-items: center;
+  min-height: 31px;
+  padding: 3px 9px;
+}
+.history-list button.history-row > span {
+  align-items: center;
+  gap: 1px;
+}
+.history-list button.history-row > .history-row-main {
+  align-items: center;
+  align-self: center;
+}
+.history-list button.history-row > time {
+  align-self: center;
+}
+.history-list button.history-row strong {
+  line-height: 1.2;
+}
+
+/* Copy/Undo are quiet response actions; keep only the icon and hover tint. */
+.message-actions button.message-action,
+.message-actions button.message-action:hover,
+.message-actions button.message-action:active {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
 
 /* ===== Sidebar collapse (⌘B) ===== */
 .app-shell.sidebar-transition-ready {
@@ -6905,18 +7022,18 @@ button.history-section-head.toggle:hover {
 }
 .sidebar-expand-fab {
   align-items: center;
-  background: rgba(31, 31, 31, 0.82);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   color: var(--text-2);
   cursor: pointer;
   display: inline-flex;
   height: 24px;
   justify-content: center;
-  left: 10px;
+  left: 70px;
   padding: 0;
   position: fixed;
-  top: 50px;
+  top: 14px;
   transition:
     background 120ms ease,
     color 120ms ease;
@@ -7611,6 +7728,26 @@ select:focus-visible {
   max-width: min(74%, 920px);
 }
 
+.message-attachment-trigger {
+  appearance: none;
+  border: 0;
+  cursor: zoom-in;
+  display: block;
+  margin: 0;
+  max-width: 100%;
+  padding: 0;
+}
+
+.message-attachment-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.message-attachment-trigger.is-file {
+  border-radius: 10px;
+  cursor: pointer;
+}
+
 .message-attachment-image {
   background: #202020;
   border: 1px solid rgba(255, 255, 255, 0.09);
@@ -7621,6 +7758,11 @@ select:focus-visible {
   width: 88px;
 }
 
+.message-attachment-trigger:hover .message-attachment-image,
+.message-attachment-trigger:hover .message-attachment-file {
+  border-color: var(--accent);
+}
+
 .message-attachment-file {
   background: #222;
   border: 1px solid rgba(255, 255, 255, 0.07);
@@ -7628,6 +7770,181 @@ select:focus-visible {
   color: var(--text-muted);
   font-size: 12px;
   padding: 7px 10px;
+}
+
+.attachment-preview-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  bottom: 48px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
+  display: none;
+  flex-direction: column;
+  max-width: none;
+  overflow: hidden;
+  position: absolute;
+  right: 14px;
+  top: 70px;
+  width: min(460px, calc(100% - 28px));
+  z-index: 24;
+}
+
+.attachment-preview-panel.open {
+  display: flex;
+}
+
+.attachment-preview-head {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-height: 46px;
+  padding: 0 12px;
+}
+
+.attachment-preview-head > div:first-child {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.attachment-preview-head strong {
+  color: var(--text);
+  font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-preview-actions {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.attachment-preview-actions .icon-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  display: inline-flex;
+  justify-content: center;
+  min-height: 30px;
+  min-width: 30px;
+  padding: 0;
+}
+
+.attachment-preview-actions .icon-button:hover {
+  background: var(--button-hover);
+  color: var(--text);
+}
+
+.attachment-preview-body {
+  align-items: center;
+  background: var(--panel-muted);
+  display: flex;
+  justify-content: center;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px;
+}
+
+.attachment-preview-image {
+  display: block;
+  height: auto;
+  max-height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.attachment-preview-document {
+  align-self: stretch;
+  background: #fff;
+  border: 0;
+  min-height: 520px;
+  width: 100%;
+}
+
+.attachment-preview-text {
+  align-self: stretch;
+  color: var(--text);
+  font:
+    12px/1.55 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    monospace;
+  margin: 0;
+  max-height: 100%;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.attachment-preview-file {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 300px;
+  padding: 32px 12px;
+  text-align: center;
+}
+
+.attachment-preview-file strong {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.attachment-preview-file a {
+  align-items: center;
+  color: var(--accent);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+}
+
+.attachment-preview-file small {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.attachment-preview-meta {
+  border-top: 1px solid var(--line);
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 8px 12px;
+}
+
+/* Images are a visual lightbox, not a second full-height inspector. Keep the
+   frame centered over the workbench and let the bitmap determine its height. */
+.attachment-preview-panel.is-image {
+  bottom: auto;
+  left: 50%;
+  max-height: calc(100vh - 96px);
+  right: auto;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(760px, calc(100% - 40px));
+}
+
+.attachment-preview-panel.is-image .attachment-preview-body {
+  overflow: hidden;
+  padding: 6px;
+}
+
+.attachment-preview-panel.is-image .attachment-preview-image {
+  max-height: calc(100vh - 156px);
+  max-width: calc(100vw - 64px);
+}
+
+.attachment-preview-panel.is-image .attachment-preview-meta {
+  display: none;
 }
 
 .message.message-user .message-body {
@@ -8198,7 +8515,8 @@ body,
 }
 .message-action {
   align-items: center;
-  background: transparent;
+  appearance: none;
+  background: none;
   border: 0;
   border-radius: 4px;
   color: var(--grok-text-3);
@@ -8233,8 +8551,8 @@ body,
 }
 /* da69c2c's final computed conversation size, after the VS Code base rules. */
 .message.message-assistant .message-body.markdown-body {
-  font-size: 13px;
-  line-height: 21px;
+  font-size: 14px;
+  line-height: 22px;
 }
 /* The table remains the one intentional post-VS-Code customization. */
 .message.message-assistant .markdown-body table:not(.vlist-t) {
@@ -8997,7 +9315,8 @@ body,
 /* Do not narrow normal/transcript assistant responses — they share the full
    message column. Thought bodies stay compact for denser workflow reading. */
 .transcript-response.message-body {
-  animation: workflow-fade-in var(--workflow-fade-ms, 280ms) var(--workflow-ease-enter, ease-out) both;
+  animation: workflow-fade-in var(--workflow-fade-ms, 280ms) var(--workflow-ease-enter, ease-out)
+    both;
   margin: 0;
   max-width: none;
 }
@@ -9013,7 +9332,8 @@ body,
 
 /* Exterior final body: fade once on mount (stable key = no re-fire per token). */
 .message-body.markdown-streaming:not(.transcript-response):not(.transcript-thought-body) {
-  animation: workflow-fade-in var(--workflow-fade-ms, 280ms) var(--workflow-ease-enter, ease-out) both;
+  animation: workflow-fade-in var(--workflow-fade-ms, 280ms) var(--workflow-ease-enter, ease-out)
+    both;
 }
 
 .transcript-thought-body.message-body {
@@ -9058,16 +9378,16 @@ body,
 
 /* Closed workflow phase: one neutral summary above an intermediate response. */
 .transcript-phase-block {
-  animation: workflow-soft-enter var(--workflow-enter-ms, 340ms) var(--workflow-ease-enter, ease-out)
-    both;
+  animation: workflow-soft-enter var(--workflow-enter-ms, 340ms)
+    var(--workflow-ease-enter, ease-out) both;
   display: flex;
   flex-direction: column;
   gap: 1px;
 }
 
 .transcript-thought {
-  animation: workflow-soft-enter var(--workflow-enter-ms, 340ms) var(--workflow-ease-enter, ease-out)
-    both;
+  animation: workflow-soft-enter var(--workflow-enter-ms, 340ms)
+    var(--workflow-ease-enter, ease-out) both;
 }
 
 .transcript-phase-body {

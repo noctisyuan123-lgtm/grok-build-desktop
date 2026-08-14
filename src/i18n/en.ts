@@ -85,6 +85,11 @@ export const en = {
   'message.longTextDialog': 'Pasted text preview',
   'message.longTextLines': '{count} lines',
   'composer.attachmentOnlyPrompt': 'Please review the attached file(s).',
+  'attachmentPreview.title': 'Attachment preview',
+  'attachmentPreview.close': 'Close attachment preview',
+  'attachmentPreview.download': 'Download {name}',
+  'attachmentPreview.imageAlt': 'Preview of {name}',
+  'attachmentPreview.noInlinePreview': 'This file has no inline preview.',
 
   // ── Composer footer / autopilot banner ────────────────────────────────────
   'composerSection.autopilotTitle':
