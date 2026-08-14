@@ -5483,11 +5483,11 @@ body[data-theme='light'] .hljs-comment {
   min-height: 16px;
   padding: 0;
   pointer-events: none;
-  position: fixed;
+  position: absolute;
   /* Keep the indicator just below the composer, never inside its hit area. */
-  bottom: 3px;
-  /* Match the composer shell's 18px workspace + 14px composer inset. */
-  right: 32px;
+  bottom: -4px;
+  /* Anchor to the shared composer column instead of the full window. */
+  right: 12px;
   z-index: 5;
 }
 .composer-context-footer .context-usage {
@@ -5990,6 +5990,7 @@ body[data-theme='light'] .hljs-comment {
 .history-list .project-list-label {
   display: flex !important;
   justify-content: flex-start;
+  min-height: 0;
 }
 .project-list-label svg {
   color: var(--text-4);
@@ -8548,11 +8549,47 @@ body,
 }
 .message.message-user .message-body {
   font-size: 14px;
+  max-width: min(760px, 100%);
 }
 /* da69c2c's final computed conversation size, after the VS Code base rules. */
+.conversation-panel > .conversation-scroll {
+  margin-left: 0;
+  margin-right: 0;
+  width: 100%;
+}
+
+.conversation-panel > .queue-dock,
+.conversation-panel > .composer-row {
+  box-sizing: border-box;
+  margin-left: auto;
+  margin-right: auto;
+  width: min(760px, calc(100% - 48px));
+}
+
+.message.message-user,
+.message.message-assistant {
+  box-sizing: border-box;
+  margin-left: auto;
+  margin-right: auto;
+  width: min(760px, calc(100% - 48px));
+}
+
+.message.message-assistant .message-body {
+  max-width: min(760px, 100%);
+  margin-left: auto;
+  margin-right: auto;
+}
 .message.message-assistant .message-body.markdown-body {
   font-size: 14px;
   line-height: 22px;
+  max-width: min(760px, 100%);
+}
+.context-usage-ring,
+.context-usage-ring:hover,
+.context-usage-ring.is-open {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
 }
 /* The table remains the one intentional post-VS-Code customization. */
 .message.message-assistant .markdown-body table:not(.vlist-t) {
