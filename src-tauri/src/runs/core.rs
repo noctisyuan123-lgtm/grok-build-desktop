@@ -24,6 +24,7 @@ pub struct CoreConfig {
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub always_approve: bool,
+    pub experimental_memory: bool,
     pub review_only: bool,
     pub rules: Option<String>,
     pub resume_session_id: Option<String>,
@@ -38,6 +39,7 @@ impl CoreConfig {
             model: None,
             reasoning_effort: None,
             always_approve: false,
+            experimental_memory: false,
             review_only: false,
             rules: None,
             resume_session_id: None,
@@ -66,6 +68,7 @@ impl CoreConfig {
                     out.prompt_blocks = value.and_then(|raw| serde_json::from_str(&raw).ok())
                 }
                 "--always-approve" => out.always_approve = true,
+                "--experimental-memory" => out.experimental_memory = true,
                 "--rules" => {
                     out.review_only = value
                         .as_deref()
@@ -92,7 +95,15 @@ impl CoreConfig {
     }
 
     fn launch_args(&self) -> Vec<String> {
-        let mut args = vec!["agent".to_string()];
+        // `--experimental-memory` is a top-level Grok option, so it must be
+        // placed before the `agent` subcommand. Passing it after `agent` is
+        // rejected by grok 1.0.4, even though the Desktop run builder emits
+        // it alongside the other legacy options.
+        let mut args = Vec::new();
+        if self.experimental_memory {
+            args.push("--experimental-memory".to_string());
+        }
+        args.push("agent".to_string());
         if let Some(model) = &self.model {
             args.extend(["--model".to_string(), model.clone()]);
         }
@@ -290,6 +301,7 @@ pub async fn rewind_last_user_turn(
         model: None,
         reasoning_effort: None,
         always_approve: false,
+        experimental_memory: false,
         review_only: false,
         rules: None,
         resume_session_id: Some(session_id.to_string()),
@@ -317,6 +329,7 @@ pub async fn create_rebased_session(
         model: None,
         reasoning_effort: None,
         always_approve: false,
+        experimental_memory: false,
         review_only: false,
         rules: replay_rules
             .map(str::trim)
@@ -881,6 +894,25 @@ mod tests {
         assert!(!config.share_session);
         assert!(config.prompt_blocks.is_none());
         assert!(config.launch_args().contains(&"--no-leader".to_string()));
+    }
+
+    #[test]
+    fn forwards_experimental_memory_before_agent_subcommand() {
+        let enabled = CoreConfig::from_legacy_args(&["--experimental-memory".into()]);
+        let launch = enabled.launch_args();
+        assert!(enabled.experimental_memory);
+        assert_eq!(
+            launch.first().map(String::as_str),
+            Some("--experimental-memory")
+        );
+        assert_eq!(launch.get(1).map(String::as_str), Some("agent"));
+
+        let disabled = CoreConfig::from_legacy_args(&[]);
+        assert!(!disabled.experimental_memory);
+        assert_eq!(
+            disabled.launch_args().first().map(String::as_str),
+            Some("agent")
+        );
     }
 
     #[test]
