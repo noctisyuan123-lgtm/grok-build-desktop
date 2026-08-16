@@ -17,7 +17,7 @@ import { streamStore } from './lib/streamStore';
 import { mergeStreamIntoMessages } from './lib/mergeStreamMessages';
 import { shouldShowPlan } from './components/PlanTodoList';
 import { MessageList, type MessageRef } from './components/MessageList';
-import type { ComposerHandle } from './components/Composer';
+import type { ComposerFolder, ComposerHandle } from './components/Composer';
 import { QueueDock } from './components/QueueDock';
 import { CommandPalette, type PaletteAction } from './components/CommandPalette';
 import { ToolsPage } from './components/ToolsPage';
@@ -153,6 +153,7 @@ function App() {
   const [messageAttachments, setMessageAttachments] = useState<
     Record<string, ComposerAttachment[]>
   >({});
+  const [messageFolders, setMessageFolders] = useState<Record<string, ComposerFolder>>({});
   const attachmentLoadKeyRef = useRef('');
   const prewarmKeyRef = useRef('');
   // Session state (mode/drafts/cwd/theme/history/messages) + localStorage and
@@ -888,6 +889,7 @@ function App() {
     prompt: string;
     rawText?: string;
     attachments: ComposerAttachment[];
+    attachedFolder?: ComposerFolder;
   }) {
     // Post-Undo re-seed has been consumed. Later turns resume the new session.
     undoSessionPlanRef.current = null;
@@ -899,6 +901,12 @@ function App() {
       setMessageAttachments((current) => ({
         ...current,
         [userMessageId]: info.attachments,
+      }));
+    }
+    if (info.attachedFolder) {
+      setMessageFolders((current) => ({
+        ...current,
+        [userMessageId]: info.attachedFolder!,
       }));
     }
     const persistedAttachments = info.attachments.map(toPersistedAttachmentRef);
@@ -952,6 +960,7 @@ function App() {
   // a just-sent message remains visible if the first disk read races its save.
   useEffect(() => {
     setMessageAttachments({});
+    setMessageFolders({});
     attachmentLoadKeyRef.current = '';
   }, [activeTabId]);
 
@@ -1289,6 +1298,8 @@ function App() {
 
     const snapshot = messages;
     const previousDraft = composerRef.current?.getValue() ?? '';
+    const previousFolder = composerRef.current?.getAttachedFolder() ?? null;
+    const restoredFolder = messageFolders[user.id] ?? null;
     const preserved = messages.slice(0, assistantIndex - 1);
     // Keep still-visible turns as replay context; exclude the undone pair.
     // If ACP rewind fails, the next submit starts fresh and re-seeds these.
@@ -1306,6 +1317,7 @@ function App() {
     messagesRef.current = preserved;
     setMessages(preserved);
     updatePrompt(user.content);
+    composerRef.current?.setAttachedFolder(restoredFolder);
     composerRef.current?.focus();
     showUndoToast({
       text: t('message.turnUndone'),
@@ -1316,6 +1328,7 @@ function App() {
         messagesRef.current = snapshot;
         setMessages(snapshot);
         updatePrompt(previousDraft);
+        composerRef.current?.setAttachedFolder(previousFolder);
       },
     });
     if (hasTauriRuntime() && grokSessionId) {

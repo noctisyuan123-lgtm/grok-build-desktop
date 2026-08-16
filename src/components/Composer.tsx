@@ -28,9 +28,18 @@ import {
   type ComposerAttachment,
 } from '../lib/attachments';
 
+export interface ComposerFolder {
+  name: string;
+  path: string;
+}
+
 export interface ComposerHandle {
   /** Imperatively set the textarea value (used by starter cards / history click / drafts). */
   setValue: (text: string) => void;
+  /** Restore the folder card when an undone turn is put back into the composer. */
+  setAttachedFolder: (folder: ComposerFolder | null) => void;
+  /** Read the current folder card before a reversible composer operation. */
+  getAttachedFolder: () => ComposerFolder | null;
   /** Current textarea value. */
   getValue: () => string;
   /** Focus the textarea. */
@@ -58,6 +67,7 @@ interface Props {
     prompt: string;
     rawText: string;
     attachments: ComposerAttachment[];
+    attachedFolder?: ComposerFolder;
   }) => void;
   /** Called when enqueueing the prompt fails, with a human-readable message.
    *  The host surfaces it (session notice) — a silent console.error left the
@@ -145,7 +155,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   // the picker is open (the textarea keeps DOM focus the whole time).
   const [activeOptionId, setActiveOptionId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
-  const [attachedFolder, setAttachedFolder] = useState<{ name: string; path: string } | null>(null);
+  const [attachedFolder, setAttachedFolder] = useState<ComposerFolder | null>(null);
   const [folderPickerBusy, setFolderPickerBusy] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -349,10 +359,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         // the previous local text if the user immediately deletes.
         recordDraftHistory(text);
       },
+      setAttachedFolder,
+      getAttachedFolder: () => attachedFolder,
       getValue: () => ref.current?.value ?? '',
       focus: () => ref.current?.focus(),
     }),
-    [recordDraftHistory],
+    [attachedFolder, recordDraftHistory],
   );
 
   // Apply initialValue once on mount.
@@ -484,6 +496,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         // not leak filenames, URLs, or base64 into the visible message text.
         rawText,
         attachments,
+        ...(attachedFolder ? { attachedFolder } : {}),
       });
     } catch (err) {
       console.error('[grok-desktop] enqueue failed', err);

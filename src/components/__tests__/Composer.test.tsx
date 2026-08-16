@@ -267,6 +267,10 @@ describe('Composer submit', () => {
 
     await user.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(onEnqueued).toHaveBeenCalledTimes(1));
+    expect(onEnqueued.mock.calls[0][0].attachedFolder).toEqual({
+      name: 'IndexTTS-heartbeats',
+      path: '/repo/IndexTTS-heartbeats',
+    });
     expect(onEnqueued.mock.calls[0][0].prompt).toContain(
       'Attached folder:\n- IndexTTS-heartbeats (/repo/IndexTTS-heartbeats)',
     );

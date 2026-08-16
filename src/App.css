@@ -5492,7 +5492,7 @@ body[data-theme='light'] .hljs-comment {
   /* Keep the indicator just below the composer, never inside its hit area. */
   bottom: -4px;
   /* Anchor to the shared composer column instead of the full window. */
-  right: 12px;
+  right: 0;
   z-index: 5;
 }
 .composer-context-footer .context-usage {
@@ -6881,8 +6881,13 @@ button.history-section-head.toggle:hover {
 }
 .sidebar-collapse-button,
 .sidebar-collapse-button:hover,
-.sidebar-collapse-button:active {
+.sidebar-collapse-button:active,
+.sidebar-collapse-button:focus,
+.sidebar-collapse-button:focus-visible {
+  background: transparent !important;
   border: 0;
+  box-shadow: none;
+  outline: 0;
 }
 
 /* Keep the only sidebar toggle beside macOS' traffic lights. It stays
@@ -6898,10 +6903,14 @@ button.history-section-head.toggle:hover {
   z-index: 90;
 }
 .sidebar-titlebar-toggle:hover,
-.sidebar-titlebar-toggle:active {
+.sidebar-titlebar-toggle:active,
+.sidebar-titlebar-toggle:focus,
+.sidebar-titlebar-toggle:focus-visible {
   background: transparent !important;
   border-color: transparent !important;
+  box-shadow: none !important;
   color: var(--text-1);
+  outline: 0;
 }
 
 /* Conversation names should read as a compact list, not a stack of cards. */
@@ -6928,10 +6937,13 @@ button.history-section-head.toggle:hover {
 /* Copy/Undo are quiet response actions; keep only the icon and hover tint. */
 .message-actions button.message-action,
 .message-actions button.message-action:hover,
-.message-actions button.message-action:active {
+.message-actions button.message-action:active,
+.message-actions button.message-action:focus,
+.message-actions button.message-action:focus-visible {
   background: transparent;
   border: 0;
   box-shadow: none;
+  outline: 0;
 }
 
 /* ===== Sidebar collapse (⌘B) ===== */
@@ -8705,9 +8717,34 @@ body,
   max-width: min(760px, 100%);
 }
 /* da69c2c's final computed conversation size, after the VS Code base rules. */
+:root {
+  --conversation-content-max-width: 760px;
+  --conversation-content-gutter: 48px;
+}
+
 .conversation-panel > .conversation-scroll {
   margin-left: 0;
   margin-right: 0;
+  overflow: hidden;
+  width: 100%;
+}
+
+/* The conversation is the primary canvas. Remove only the workbench's outer
+   right gutter so its native scrollbar can sit against the window edge while
+   the left breathing room and the shared content rail remain unchanged. */
+.workbench {
+  padding-right: 0;
+}
+
+/* Virtuoso renders the real viewport as a child scroller. Keep the wrapper
+   from becoming a competing scrollport so the one visible scrollbar stays
+   flush with the conversation panel's outer edge. */
+.conversation-panel > .conversation-scroll > [data-virtuoso-scroller] {
+  box-sizing: border-box;
+  height: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   width: 100%;
 }
 
@@ -8716,7 +8753,10 @@ body,
   box-sizing: border-box;
   margin-left: auto;
   margin-right: auto;
-  width: min(760px, calc(100% - 48px));
+  width: min(
+    var(--conversation-content-max-width),
+    calc(100% - var(--conversation-content-gutter))
+  );
 }
 
 .message.message-user,
@@ -8724,18 +8764,34 @@ body,
   box-sizing: border-box;
   margin-left: auto;
   margin-right: auto;
-  width: min(760px, calc(100% - 48px));
+  width: min(
+    var(--conversation-content-max-width),
+    calc(100% - var(--conversation-content-gutter))
+  );
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .message.message-assistant .message-body {
-  max-width: min(760px, 100%);
-  margin-left: auto;
-  margin-right: auto;
+  max-width: 100%;
+  width: 100%;
+  margin-left: 0;
+  margin-right: 0;
 }
 .message.message-assistant .message-body.markdown-body {
   font-size: 14px;
   line-height: 22px;
-  max-width: min(760px, 100%);
+  max-width: 100%;
+  width: 100%;
+}
+.message.message-user .message-body {
+  max-width: 100%;
+}
+.message-attachments,
+.message-actions,
+.transcript-work {
+  max-width: 100%;
+  width: 100%;
 }
 .context-usage-ring,
 .context-usage-ring:hover,
@@ -8760,7 +8816,7 @@ body,
    live in an upward popover instead of a permanent full-width footer row. */
 .composer-row .composer {
   display: block;
-  padding: 10px 14px 14px;
+  padding: 10px 0 14px;
 }
 .composer-input-shell {
   background: #202020;
@@ -9517,6 +9573,14 @@ body,
   max-width: none;
 }
 
+/* The general assistant-body rule centers markdown with auto margins. A
+   mid-respond belongs to the workflow rail and must stay on its left edge. */
+.message.message-assistant .transcript-response.message-body {
+  margin-left: 0;
+  margin-right: 0;
+  max-width: none;
+}
+
 /* Mid-respond nested under a phase disclosure: separate from muted thought body. */
 .transcript-phase-body > .transcript-response.message-body,
 .transcript-phase-block > .transcript-response.message-body {
@@ -9534,7 +9598,8 @@ body,
 
 .transcript-thought-body.message-body {
   margin: 0;
-  max-width: 640px;
+  max-width: 100%;
+  width: 100%;
 }
 
 .transcript-thought > button,
