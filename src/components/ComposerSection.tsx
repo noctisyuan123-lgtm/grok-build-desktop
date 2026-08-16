@@ -19,12 +19,14 @@ import type { useModelConfig } from '../hooks/useModelConfig';
 import {
   type ActionPolicy,
   type ChatMessage,
+  type EffortLevel,
   type Mode,
   type ReasoningEffort,
 } from '../app/types';
 import {
   actionPolicies,
   defaultDrafts,
+  effortLevels,
   modeCopy,
   reasoningEfforts,
 } from '../app/constants';
@@ -80,23 +82,33 @@ export function ComposerSection({
   stopRun,
 }: ComposerSectionProps) {
   const {
+    effortLevel,
+    setEffortLevel,
     reasoningEffort,
     setReasoningEffort,
+    bestOfN,
+    setBestOfN,
     activeModel,
+    modelIsVerified,
     selectModel,
     selectedModelValue,
     modelOptions,
     activeModelMeta,
   } = modelConfig;
   const [openMenu, setOpenMenu] = useState<'model' | 'run' | null>(null);
-  const [runField, setRunField] = useState<'policy' | 'effort' | null>(null);
+  const [runField, setRunField] = useState<
+    'policy' | 'agent-effort' | 'effort' | 'best-of-n' | null
+  >(null);
   const closeMenus = useCallback(() => {
     setOpenMenu(null);
     setRunField(null);
   }, []);
   const menuRef = useComposerMenu(openMenu !== null, closeMenus);
   const hasCustomRunConfig =
-    actionPolicy !== 'patch' || reasoningEffort !== activeModelMeta.defaultReasoning;
+    actionPolicy !== 'patch' ||
+    effortLevel !== 'medium' ||
+    reasoningEffort !== activeModelMeta.defaultReasoning ||
+    bestOfN !== 1;
   const modelChoices = [
     ...modelOptions.map((id) => ({
       value: id,
@@ -108,6 +120,15 @@ export function ComposerSection({
     value: key,
     label: key === 'off' ? 'Auto' : reasoningEfforts[key].label,
     detail: reasoningEfforts[key].detail,
+  }));
+  const agentEffortChoices = (Object.keys(effortLevels) as EffortLevel[]).map((key) => ({
+    value: key,
+    label: effortLevels[key].label,
+    detail: effortLevels[key].detail,
+  }));
+  const bestOfNChoices = [1, 2, 3, 4, 5].map((value) => ({
+    value: String(value),
+    label: String(value),
   }));
   const policyChoices = (Object.keys(actionPolicies) as ActionPolicy[]).map((policy) => ({
     value: policy,
@@ -164,6 +185,12 @@ export function ComposerSection({
             <div className="cmp-wrap">
               <ComposerMenuButton
                 label={t('composerSection.grokModel')}
+                title={t(
+                  modelIsVerified
+                    ? 'composerSection.modelTitle'
+                    : 'composerSection.modelUnverifiedTitle',
+                  { model: activeModel },
+                )}
                 open={openMenu === 'model'}
                 onToggle={() => setOpenMenu((current) => (current === 'model' ? null : 'model'))}
               >
@@ -238,6 +265,19 @@ export function ComposerSection({
                   }}
                 />
                 <ComposerDropdownField
+                  label={t('composerSection.agentEffort')}
+                  value={effortLevel}
+                  items={agentEffortChoices}
+                  open={runField === 'agent-effort'}
+                  onToggle={() =>
+                    setRunField((current) => (current === 'agent-effort' ? null : 'agent-effort'))
+                  }
+                  onChange={(value) => {
+                    setEffortLevel(value as EffortLevel);
+                    setRunField(null);
+                  }}
+                />
+                <ComposerDropdownField
                   label={t('composerSection.reasoningEffort')}
                   value={reasoningEffort}
                   items={effortChoices.map(({ value, label }) => ({ value, label }))}
@@ -247,6 +287,19 @@ export function ComposerSection({
                   }
                   onChange={(value) => {
                     setReasoningEffort(value as ReasoningEffort);
+                    setRunField(null);
+                  }}
+                />
+                <ComposerDropdownField
+                  label={t('composerSection.bestOfN')}
+                  value={String(bestOfN)}
+                  items={bestOfNChoices}
+                  open={runField === 'best-of-n'}
+                  onToggle={() =>
+                    setRunField((current) => (current === 'best-of-n' ? null : 'best-of-n'))
+                  }
+                  onChange={(value) => {
+                    setBestOfN(Number(value));
                     setRunField(null);
                   }}
                 />

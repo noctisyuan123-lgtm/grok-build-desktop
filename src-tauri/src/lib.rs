@@ -3663,6 +3663,24 @@ async fn read_attachment(path: String, max_bytes: usize) -> Result<AttachmentPay
     .map_err(|error| error.to_string())?
 }
 
+/// Tell the renderer whether a native drag-and-drop path is a directory.
+/// Finder sends paths for both files and folders; folders are kept as local
+/// path context instead of being read into a file attachment payload.
+#[tauri::command]
+async fn path_is_directory(path: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let candidate = std::path::PathBuf::from(&path);
+        let canonical = candidate
+            .canonicalize()
+            .map_err(|error| format!("drop path is not readable: {error}"))?;
+        let metadata = std::fs::metadata(&canonical)
+            .map_err(|error| format!("drop path metadata failed: {error}"))?;
+        Ok(metadata.is_dir())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// Persist the exact bytes of a sent attachment in the active tab's session
 /// assets directory. The chat transcript stores only the safe asset id and
 /// display metadata, matching the Codex session shape without putting image
@@ -4030,6 +4048,7 @@ pub fn run() {
             glob_files,
             read_file_safe,
             read_attachment,
+            path_is_directory,
             save_attachment,
             load_attachment,
             desktop::desktop_list_apps,

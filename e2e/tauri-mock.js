@@ -122,6 +122,7 @@
     resume_pending_runs: () => 0,
     cancel_pending_runs: () => 0,
     pick_project_folder: () => '/mock/project',
+    path_is_directory: () => false,
     list_prompts: () => [],
     get_session_context_metrics: (args) => ({
       available: false,

@@ -229,12 +229,14 @@ export function ComposerDropdownField({
 
 export function ComposerMenuButton({
   label,
+  title,
   open,
   onToggle,
   children,
   trailing,
 }: {
   label: string;
+  title?: string;
   open: boolean;
   onToggle: () => void;
   children: ReactNode;
@@ -245,6 +247,7 @@ export function ComposerMenuButton({
       type="button"
       className={open ? 'cmp-trigger is-open' : 'cmp-trigger'}
       aria-label={label}
+      title={title}
       aria-expanded={open}
       onClick={onToggle}
     >

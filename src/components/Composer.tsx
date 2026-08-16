@@ -7,7 +7,8 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { ArrowUp, FileImage, FileText, Paperclip, X } from 'lucide-react';
+import { ArrowUp, FileImage, FileText, FolderOpen, Paperclip, X } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { enqueueRun } from '../lib/grok';
 import { useHasInflight } from '../hooks/useActiveRun';
@@ -144,6 +145,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   // the picker is open (the textarea keeps DOM focus the whole time).
   const [activeOptionId, setActiveOptionId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const [attachedFolder, setAttachedFolder] = useState<{ name: string; path: string } | null>(null);
+  const [folderPickerBusy, setFolderPickerBusy] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const onTextChangeRef = useRef(onTextChange);
@@ -244,6 +247,34 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     [addAttachments, onError],
   );
 
+  const attachFolderPath = useCallback((path: string) => {
+    const normalized = path.replace(/[\\/]+$/, '');
+    const name = normalized.split(/[\\/]/).filter(Boolean).at(-1) ?? normalized;
+    setAttachedFolder({ name, path });
+  }, []);
+
+  const chooseFolder = useCallback(async () => {
+    if (folderPickerBusy) return;
+    if (!hasTauriRuntime()) {
+      onError?.(t('notices.folderPickerUnavailable'));
+      return;
+    }
+    setFolderPickerBusy(true);
+    try {
+      const path = await invoke<string | null>('pick_project_folder', {
+        initial: cwd || null,
+      });
+      if (!path) return;
+      attachFolderPath(path);
+    } catch (error) {
+      onError?.(t('notices.folderPickerFailed', {
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    } finally {
+      setFolderPickerBusy(false);
+    }
+  }, [attachFolderPath, cwd, folderPickerBusy, onError]);
+
   // Finder drops are delivered by Tauri as native paths rather than DOM File
   // objects. Keep the normal HTML drop handlers too so browser/dev mode works.
   useEffect(() => {
@@ -272,13 +303,28 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         void Promise.all(
           event.payload.paths.map(async (path) => {
             try {
-              return await readNativeAttachment(path);
+              const isDirectory = await invoke<boolean>('path_is_directory', { path });
+              if (isDirectory) return { folderPath: path } as const;
+              return { attachment: await readNativeAttachment(path) } as const;
             } catch (error) {
               onError?.(error instanceof Error ? error.message : String(error));
               return null;
             }
           }),
-        ).then((items) => addAttachments(items.filter((item) => item !== null)));
+        ).then((items) => {
+          const folder = items.find(
+            (item): item is { folderPath: string } => item?.folderPath !== undefined,
+          );
+          if (folder) attachFolderPath(folder.folderPath);
+          addAttachments(
+            items
+              .filter(
+                (item): item is { attachment: ComposerAttachment } =>
+                  item?.attachment !== undefined,
+              )
+              .map((item) => item.attachment),
+          );
+        });
       })
       .then((stop) => {
         if (disposed) stop();
@@ -289,7 +335,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       disposed = true;
       unlisten?.();
     };
-  }, [addAttachments, onError]);
+  }, [addAttachments, attachFolderPath, onError]);
 
   useImperativeHandle(
     outerRef,
@@ -390,7 +436,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     const el = ref.current;
     if (!el) return;
     const rawText = el.value.trim();
-    if (!rawText && attachments.length === 0) return;
+    if (!rawText && attachments.length === 0 && !attachedFolder) return;
     setSubmitting(true);
     setMention(null);
     notePendingSubmitStart();
@@ -405,12 +451,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         requestAnimationFrame(() => ref.current?.focus());
         return;
       }
-      const attachmentFallback = t('composer.attachmentOnlyPrompt');
+      const attachmentFallback = attachedFolder && attachments.length === 0
+        ? t('composer.folderOnlyPrompt')
+        : t('composer.attachmentOnlyPrompt');
       const expandedText = await expandMentionsInPrompt(rawText || attachmentFallback);
       const attachmentList = attachments.map((item) => `- ${item.name}`).join('\n');
-      const prompt = attachments.length
-        ? `${expandedText}\n\nAttached files:\n${attachmentList}`
-        : expandedText;
+      const folderContext = attachedFolder
+        ? `\n\nAttached folder:\n- ${attachedFolder.name} (${attachedFolder.path})`
+        : '';
+      const prompt = `${attachments.length ? `${expandedText}\n\nAttached files:\n${attachmentList}` : expandedText}${folderContext}`;
       const args = argsBuilder();
       if (attachments.length > 0) {
         const blocks = [
@@ -425,6 +474,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       el.value = '';
       recordDraftHistory('');
       setAttachments([]);
+      setAttachedFolder(null);
       onTextChangeRef.current?.('');
       onEnqueued?.({
         runId: result.runId,
@@ -480,6 +530,26 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         />
       ) : null}
       {dragActive ? <div className="composer-drop-overlay">{t('composer.dropFiles')}</div> : null}
+      {attachedFolder ? (
+        <div className="composer-folder-attachment-row" aria-label={t('composer.folderAttachment')}>
+          <div className="composer-folder-attachment" title={attachedFolder.path}>
+            <span className="composer-folder-attachment-icon" aria-hidden="true">
+              <FolderOpen size={22} strokeWidth={1.55} />
+            </span>
+            <span className="composer-folder-attachment-copy">
+              <strong>{attachedFolder.name}</strong>
+              <small>{t('composer.folderType')}</small>
+            </span>
+            <button
+              type="button"
+              aria-label={t('composer.removeFolder', { name: attachedFolder.name })}
+              onClick={() => setAttachedFolder(null)}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      ) : null}
       {attachments.length > 0 ? (
         <div className="composer-attachments" aria-label={t('composer.attachments')}>
           {attachments.map((item) => (
@@ -633,6 +703,16 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             ) : (
               <Paperclip size={15} />
             )}
+          </button>
+          <button
+            className="composer-folder-attach"
+            type="button"
+            disabled={submitting || folderPickerBusy}
+            aria-label={t('composer.attachFolder')}
+            title={t('composer.attachFolder')}
+            onClick={() => void chooseFolder()}
+          >
+            <FolderOpen size={15} />
           </button>
           {controls}
           {onStop ? (

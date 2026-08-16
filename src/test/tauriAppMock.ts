@@ -119,6 +119,7 @@ export function installTauriAppMock(overrides: Record<string, CommandHandler> = 
     resume_pending_runs: () => 0,
     cancel_pending_runs: () => 0,
     pick_project_folder: () => '/mock/project',
+    path_is_directory: () => false,
     list_prompts: () => [],
     list_grok_mcp: () => toolRun('grok mcp list', 'No MCP servers configured.'),
     doctor_grok_mcp: () => toolRun('grok mcp doctor', 'All servers healthy.'),
