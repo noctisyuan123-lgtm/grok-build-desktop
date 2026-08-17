@@ -837,6 +837,16 @@ fn emit_notification(run_id: &str, tx: &broadcast::Sender<QueueMessage>, message
         .pointer("/params/update")
         .cloned()
         .unwrap_or_else(|| message.get("params").cloned().unwrap_or(Value::Null));
+    // ACP puts the session identity on the notification envelope, not inside
+    // the update payload. Preserve it so the renderer can keep child-agent
+    // thought/respond/tool traffic out of the parent transcript.
+    let session_id = message
+        .pointer("/params/sessionId")
+        .or_else(|| message.pointer("/params/session_id"))
+        .or_else(|| update.get("sessionId"))
+        .or_else(|| update.get("session_id"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
     let kind = update
         .get("sessionUpdate")
         .or_else(|| update.get("type"))
@@ -863,7 +873,11 @@ fn emit_notification(run_id: &str, tx: &broadcast::Sender<QueueMessage>, message
     };
     let _ = tx.send(QueueMessage {
         run_id: run_id.to_string(),
-        kind: QueueMessageKind::Event { event, raw: update },
+        kind: QueueMessageKind::Event {
+            event,
+            raw: update,
+            session_id,
+        },
     });
 }
 
@@ -1124,7 +1138,7 @@ mod tests {
         let tool = rx.recv().await.expect("tool event");
         assert!(matches!(
             tool.kind,
-            QueueMessageKind::Event { event: GrokEvent::Unknown, ref raw }
+            QueueMessageKind::Event { event: GrokEvent::Unknown, ref raw, .. }
                 if raw.get("toolCallId").and_then(Value::as_str) == Some("tool-1")
         ));
     }

@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { pickCurrentSubagent, SubagentFloat } from '../SubagentFloat';
@@ -7,6 +7,7 @@ import type { TraceEvent } from '../../lib/traceParser';
 
 beforeEach(() => {
   streamStore.__reset();
+  window.localStorage.removeItem('grok-desktop-subagent-drawer-width');
 });
 
 function subagent(overrides: Partial<TraceEvent> = {}): TraceEvent {
@@ -116,5 +117,53 @@ describe('SubagentFloat', () => {
     });
     rerender(<SubagentFloat sessionRunIds={['session-run']} />);
     expect(screen.getByText('Review backend')).toBeInTheDocument();
+  });
+
+  it('renders one composer card per subagent and opens its own transcript', async () => {
+    const user = userEvent.setup();
+    const second = subagent({
+      key: 'subagent:frontend',
+      label: 'Review frontend',
+      sessionId: 'child-2',
+      transcript: [{ key: 'response:0', kind: 'response', text: 'Frontend result' }],
+    });
+    const first = subagent({
+      sessionId: 'child-1',
+      transcript: [{ key: 'response:0', kind: 'response', text: 'Backend result' }],
+    });
+    streamStore.patchRun('session-run', {
+      state: 'done',
+      traces: [first, second],
+    });
+
+    render(<SubagentFloat sessionRunIds={['session-run']} />);
+    expect(screen.getAllByRole('button', { name: /Open subagent session/i })).toHaveLength(2);
+
+    await user.click(screen.getByRole('button', { name: /Open subagent session: Review frontend/i }));
+    expect(screen.getByRole('dialog', { name: /Subagent · Review frontend/i })).toBeInTheDocument();
+    expect(screen.getByText('Frontend result')).toBeInTheDocument();
+    expect(screen.queryByText('Backend result')).toBeNull();
+  });
+
+  it('resizes the drawer from its left edge and remembers the width', async () => {
+    const user = userEvent.setup();
+    streamStore.patchRun('session-run', {
+      state: 'running',
+      traces: [subagent()],
+    });
+
+    render(<SubagentFloat sessionRunIds={['session-run']} />);
+    await user.click(screen.getByRole('button', { name: /Open subagent session/i }));
+
+    const drawer = screen.getByRole('dialog', { name: /Subagent · Review backend/i });
+    const resizer = screen.getByRole('separator', { name: 'Resize subagent window' });
+    expect(drawer).toHaveStyle({ width: '420px' });
+
+    fireEvent.pointerDown(resizer, { button: 0, clientX: 900 });
+    fireEvent.pointerMove(window, { clientX: 820 });
+    fireEvent.pointerUp(window, { clientX: 820 });
+
+    expect(drawer).toHaveStyle({ width: '500px' });
+    expect(window.localStorage.getItem('grok-desktop-subagent-drawer-width')).toBe('500');
   });
 });

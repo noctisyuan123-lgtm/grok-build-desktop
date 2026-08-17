@@ -24,7 +24,10 @@ interface Props {
 export function TraceTimeline({ runId, workedLabel, fallbackTraces = [] }: Props) {
   const snapshot = useRunSnapshot(runId);
   const availableTraces = snapshot?.traces.length ? snapshot.traces : fallbackTraces;
-  const traces = availableTraces.filter(isVisibleTrace);
+  // Child-agent tool calls are rendered in that agent's right-side drawer.
+  // Keep the parent rail focused on the parent workflow and the subagent
+  // lifecycle card itself.
+  const traces = availableTraces.filter((trace) => isVisibleTrace(trace) && isParentTrace(trace));
   const [expanded, setExpanded] = useState(false);
   const hasError = traces.some((trace) => trace.status === 'error');
 
@@ -286,6 +289,10 @@ function isVisibleTrace(trace: TraceEvent): boolean {
     trace.progress == null &&
     trace.raw == null
   );
+}
+
+function isParentTrace(trace: TraceEvent): boolean {
+  return trace.kind === 'subagent' || trace.parentKey == null;
 }
 
 function ActivitySummary({

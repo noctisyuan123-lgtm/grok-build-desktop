@@ -3747,13 +3747,18 @@ async fn load_attachment(
 fn forward_queue_message(app: &tauri::AppHandle, msg: &QueueMessage) {
     use tauri::Emitter as _;
     match &msg.kind {
-        QueueMessageKind::Event { event, raw } => {
+        QueueMessageKind::Event {
+            event,
+            raw,
+            session_id,
+        } => {
             let _ = app.emit(
                 "grok-desktop://run-event",
                 serde_json::json!({
                     "runId": msg.run_id,
                     "event": event,
                     "raw": raw,
+                    "sessionId": session_id,
                 }),
             );
         }

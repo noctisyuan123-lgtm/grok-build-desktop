@@ -185,6 +185,52 @@ describe('streamStore', () => {
     });
   });
 
+  it('keeps child-session thought and response out of the parent transcript', () => {
+    applyRunEvent(
+      'child-routing',
+      { type: 'unknown' },
+      {
+        type: 'subagent_spawned',
+        subagent_id: 'agent-1',
+        child_session_id: 'child-session-1',
+        description: 'Review frontend',
+      },
+      'root-session-1',
+    );
+    applyRunEvent(
+      'child-routing',
+      { type: 'thought', data: 'internal child reasoning' },
+      undefined,
+      'child-session-1',
+    );
+    applyRunEvent(
+      'child-routing',
+      { type: 'text', data: 'Child result' },
+      undefined,
+      'child-session-1',
+    );
+    applyRunEvent(
+      'child-routing',
+      { type: 'text', data: 'Parent result' },
+      undefined,
+      'root-session-1',
+    );
+
+    const snapshot = streamStore.getRunSnapshot('child-routing');
+    expect(snapshot?.transcript).toEqual([
+      { key: 'tools:0', kind: 'tools', traceKeys: ['subagent:agent-1'] },
+      { key: 'response:1', kind: 'response', text: 'Parent result' },
+    ]);
+    expect(snapshot?.traces[0]?.transcript?.map((segment) => segment.kind)).toEqual([
+      'thought',
+      'response',
+    ]);
+    expect(snapshot?.traces[0]?.transcript?.[1]).toMatchObject({
+      kind: 'response',
+      text: 'Child result',
+    });
+  });
+
   it('reconciles open activity when a run reaches every terminal state', () => {
     for (const [runId, state, expected] of [
       ['done-run', 'Done', 'done'],

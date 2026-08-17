@@ -1,85 +1,174 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { Bot, X } from 'lucide-react';
 import { useElapsed } from '../hooks/useElapsed';
-import { useRunSnapshot } from '../hooks/useRunSnapshot';
+import { useRunHtml, useRunSnapshot } from '../hooks/useRunSnapshot';
+import { sanitizeHtml } from '../lib/sanitizeHtml';
 import { useModalFocus } from '../hooks/useModalFocus';
 import { streamStore } from '../lib/streamStore';
 import type { TraceEvent, TraceStatus } from '../lib/traceParser';
+import type { TranscriptSegment } from '../lib/streamStore';
+import { ActivityGroup } from './TraceTimeline';
 import { t } from '../i18n';
 
+const SUBAGENT_DRAWER_WIDTH_KEY = 'grok-desktop-subagent-drawer-width';
+const SUBAGENT_DRAWER_DEFAULT_WIDTH = 420;
+const SUBAGENT_DRAWER_MIN_WIDTH = 320;
+const SUBAGENT_DRAWER_MAX_WIDTH = 720;
+
 /**
- * Compact floating card above the composer for the newest subagent on the
- * current session's latest assistant run. Click opens a session-scoped
- * inspector drawer (visual only — no backend child chat navigation).
+ * Compact floating cards above the composer for every subagent on the current
+ * session's latest assistant run. Each card opens the same right-side drawer
+ * with that child session's own workflow transcript and responses.
  */
 export function SubagentFloat({ sessionRunIds = [] }: { sessionRunIds?: readonly string[] }) {
   const focusRunId = useLatestSessionRunId(sessionRunIds);
   const snapshot = useRunSnapshot(focusRunId ?? '');
-  const subagent = useMemo(
-    () => pickCurrentSubagent(snapshot?.traces ?? [], focusRunId),
+  const subagents = useMemo(
+    () => pickSubagents(snapshot?.traces ?? [], focusRunId),
     [snapshot?.traces, focusRunId],
   );
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const [drawerWidth, setDrawerWidth] = useState(readSubagentDrawerWidth);
+  const resizingCleanupRef = useRef<(() => void) | null>(null);
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
-    if (!subagent) setDrawerOpen(false);
-  }, [subagent?.key]);
+    window.localStorage.setItem(SUBAGENT_DRAWER_WIDTH_KEY, String(drawerWidth));
+  }, [drawerWidth]);
 
-  useModalFocus(drawerOpen, drawerRef, {
+  useEffect(
+    () => () => {
+      resizingCleanupRef.current?.();
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!subagents.some((item) => item.key === openKey)) setOpenKey(null);
+  }, [openKey, subagents]);
+
+  const selected = subagents.find((item) => item.key === openKey) ?? null;
+  useModalFocus(selected != null, drawerRef, {
     initialFocus: closeRef,
-    onEscape: () => setDrawerOpen(false),
+    onEscape: () => setOpenKey(null),
   });
 
-  if (!focusRunId || !subagent) return null;
+  function startDrawerResize(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = drawerWidth;
+    document.body.classList.add('subagent-drawer-resizing');
 
-  const live = subagent.status === 'running';
-  const statusLabel = statusLabelFor(subagent.status);
+    const move = (moveEvent: PointerEvent) => {
+      const next = clampSubagentDrawerWidth(startWidth + startX - moveEvent.clientX);
+      setDrawerWidth(next);
+    };
+    const stop = () => {
+      document.body.classList.remove('subagent-drawer-resizing');
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+      resizingCleanupRef.current = null;
+    };
+    resizingCleanupRef.current?.();
+    resizingCleanupRef.current = stop;
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
+  }
+
+  function nudgeDrawerWidth(delta: number) {
+    setDrawerWidth((current) => clampSubagentDrawerWidth(current + delta));
+  }
+
+  if (!focusRunId || subagents.length === 0) return null;
 
   return (
     <>
-      <div className={`subagent-float${live ? ' is-live' : ''}${drawerOpen ? ' is-open' : ''}`}>
-        <button
-          type="button"
-          className="subagent-float-card"
-          aria-label={t('subagent.floatOpen', { label: subagent.label })}
-          aria-expanded={drawerOpen}
-          aria-controls="subagent-session-drawer"
-          onClick={() => setDrawerOpen(true)}
-        >
-          <Bot size={14} aria-hidden />
-          <span className="subagent-float-label">{subagent.label}</span>
-          <span className={`subagent-float-status status-${subagent.status}`}>{statusLabel}</span>
-          {subagent.progress ? (
-            <span className="subagent-float-progress">{subagent.progress}</span>
-          ) : null}
-        </button>
+      <div className="subagent-float-list">
+        {subagents.map((subagent) => {
+          const live = subagent.status === 'running';
+          const drawerOpen = selected?.key === subagent.key;
+          return (
+            <div
+              key={subagent.key}
+              className={`subagent-float${live ? ' is-live' : ''}${drawerOpen ? ' is-open' : ''}`}
+            >
+              <button
+                type="button"
+                className="subagent-float-card"
+                aria-label={t('subagent.floatOpen', { label: subagent.label })}
+                aria-expanded={drawerOpen}
+                aria-controls={`subagent-session-drawer-${subagent.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
+                onClick={() => setOpenKey(subagent.key)}
+              >
+                <Bot size={14} aria-hidden />
+                <span className="subagent-float-label">{subagent.label}</span>
+                <span className={`subagent-float-status status-${subagent.status}`}>
+                  {statusLabelFor(subagent.status)}
+                </span>
+                {subagent.progress ? (
+                  <span className="subagent-float-progress">{subagent.progress}</span>
+                ) : null}
+              </button>
+            </div>
+          );
+        })}
       </div>
-      {drawerOpen
+      {selected
         ? createPortal(
             <div
               className="subagent-drawer-overlay"
               role="presentation"
-              onClick={() => setDrawerOpen(false)}
+              onClick={() => setOpenKey(null)}
             >
               <aside
-                id="subagent-session-drawer"
+                id={`subagent-session-drawer-${selected.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
                 className="subagent-drawer"
                 ref={drawerRef}
                 role="dialog"
                 aria-modal="true"
-                aria-label={t('subagent.drawerTitle', { label: subagent.label })}
+                aria-label={t('subagent.drawerTitle', { label: selected.label })}
+                style={{ width: `${drawerWidth}px` }}
                 tabIndex={-1}
                 onClick={(event) => event.stopPropagation()}
               >
+                <div
+                  aria-label={t('subagent.resize')}
+                  aria-orientation="vertical"
+                  aria-valuemax={SUBAGENT_DRAWER_MAX_WIDTH}
+                  aria-valuemin={SUBAGENT_DRAWER_MIN_WIDTH}
+                  aria-valuenow={drawerWidth}
+                  className="subagent-drawer-resizer"
+                  onKeyDown={(event) => {
+                    if (event.key === 'ArrowLeft') {
+                      event.preventDefault();
+                      nudgeDrawerWidth(16);
+                    } else if (event.key === 'ArrowRight') {
+                      event.preventDefault();
+                      nudgeDrawerWidth(-16);
+                    }
+                  }}
+                  onPointerDown={startDrawerResize}
+                  role="separator"
+                  tabIndex={0}
+                />
                 <header className="subagent-drawer-head">
                   <div className="subagent-drawer-title">
                     <Bot size={15} aria-hidden />
-                    <strong>{subagent.label}</strong>
-                    <span className={`subagent-drawer-status status-${subagent.status}`}>
-                      {statusLabel}
+                    <strong>{selected.label}</strong>
+                    <span className={`subagent-drawer-status status-${selected.status}`}>
+                      {statusLabelFor(selected.status)}
                     </span>
                   </div>
                   <button
@@ -87,12 +176,12 @@ export function SubagentFloat({ sessionRunIds = [] }: { sessionRunIds?: readonly
                     type="button"
                     className="subagent-drawer-close"
                     aria-label={t('subagent.drawerClose')}
-                    onClick={() => setDrawerOpen(false)}
+                    onClick={() => setOpenKey(null)}
                   >
                     <X size={16} aria-hidden />
                   </button>
                 </header>
-                <SubagentDrawerBody runId={focusRunId} subagent={subagent} />
+                <SubagentDrawerBody runId={focusRunId} subagent={selected} />
               </aside>
             </div>,
             document.body,
@@ -116,6 +205,7 @@ function SubagentDrawerBody({ runId, subagent }: { runId: string; subagent: Trac
           trace.parentKey === subagent.key),
     );
   }, [snapshot?.traces, subagent.key]);
+  const transcript = subagent.transcript ?? [];
 
   return (
     <div className="subagent-drawer-body">
@@ -142,6 +232,14 @@ function SubagentDrawerBody({ runId, subagent }: { runId: string; subagent: Trac
           <code>{subagent.detail}</code>
         </pre>
       ) : null}
+      {transcript.length > 0 ? (
+        <SubagentTranscript
+          runId={runId}
+          subagentKey={subagent.key}
+          transcript={transcript}
+          traces={children}
+        />
+      ) : null}
       {children.length > 0 ? (
         <section className="subagent-drawer-children" aria-label={t('subagent.childTraces')}>
           <h3>{t('subagent.childTraces')}</h3>
@@ -164,6 +262,67 @@ function SubagentDrawerBody({ runId, subagent }: { runId: string; subagent: Trac
   );
 }
 
+function SubagentTranscript({
+  runId,
+  subagentKey,
+  transcript,
+  traces,
+}: {
+  runId: string;
+  subagentKey: string;
+  transcript: TranscriptSegment[];
+  traces: TraceEvent[];
+}) {
+  return (
+    <section className="subagent-drawer-transcript" aria-label="Subagent workflow transcript">
+      {transcript.map((segment) => {
+        if (segment.kind === 'thought') {
+          return (
+            <details key={segment.key} className="subagent-transcript-thought">
+              <summary>Thought</summary>
+              <SubagentMarkdown
+                cacheKey={`${runId}:${subagentKey}:${segment.key}`}
+                text={segment.text}
+              />
+            </details>
+          );
+        }
+        if (segment.kind === 'response') {
+          return (
+            <SubagentMarkdown
+              key={segment.key}
+              cacheKey={`${runId}:${subagentKey}:${segment.key}`}
+              text={segment.text}
+            />
+          );
+        }
+        const activity = segment.traceKeys
+          .map((key) => traces.find((trace) => trace.key === key))
+          .filter((trace): trace is TraceEvent => Boolean(trace));
+        return activity.length > 0 ? <ActivityGroup key={segment.key} traces={activity} /> : null;
+      })}
+    </section>
+  );
+}
+
+function SubagentMarkdown({ cacheKey, text }: { cacheKey: string; text: string }) {
+  const html = useRunHtml(cacheKey);
+  const safeHtml = useMemo(() => (html ? sanitizeHtml(html) : html), [html]);
+  useEffect(() => {
+    import('../lib/markdownWorker')
+      .then(({ scheduleMarkdownParse }) => scheduleMarkdownParse(cacheKey, text))
+      .catch(() => {});
+  }, [cacheKey, text]);
+  return safeHtml ? (
+    <div
+      className="message-body markdown-body subagent-transcript-response"
+      dangerouslySetInnerHTML={{ __html: safeHtml }}
+    />
+  ) : (
+    <pre className="subagent-transcript-raw">{text}</pre>
+  );
+}
+
 /** Newest live subagent, else most recent subagent on this run. */
 export function pickCurrentSubagent(
   traces: readonly TraceEvent[],
@@ -177,12 +336,19 @@ export function pickCurrentSubagent(
   return subagents[subagents.length - 1] ?? null;
 }
 
+function pickSubagents(
+  traces: readonly TraceEvent[],
+  runId: string | null | undefined,
+): TraceEvent[] {
+  if (!runId) return [];
+  return traces.filter((trace) => trace.kind === 'subagent');
+}
+
 /**
  * Latest assistant run id that belongs to this UI session. Never falls back
  * to the global queue head (another tab may be actively running).
  */
 export function useLatestSessionRunId(sessionRunIds: readonly string[]): string | null {
-  const key = sessionRunIds.join('\0');
   return useSyncExternalStore(
     streamStore.subscribe,
     () => {
@@ -195,7 +361,6 @@ export function useLatestSessionRunId(sessionRunIds: readonly string[]): string 
     },
     () => null,
   );
-  void key;
 }
 
 function statusLabelFor(status: TraceStatus): string {
@@ -212,4 +377,17 @@ function formatDuration(ms: number): string {
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.round((ms % 60_000) / 1000);
   return `${minutes}m ${seconds}s`;
+}
+
+function readSubagentDrawerWidth(): number {
+  try {
+    const stored = Number.parseInt(window.localStorage.getItem(SUBAGENT_DRAWER_WIDTH_KEY) ?? '', 10);
+    return Number.isFinite(stored) ? clampSubagentDrawerWidth(stored) : SUBAGENT_DRAWER_DEFAULT_WIDTH;
+  } catch {
+    return SUBAGENT_DRAWER_DEFAULT_WIDTH;
+  }
+}
+
+function clampSubagentDrawerWidth(width: number): number {
+  return Math.round(Math.min(SUBAGENT_DRAWER_MAX_WIDTH, Math.max(SUBAGENT_DRAWER_MIN_WIDTH, width)));
 }

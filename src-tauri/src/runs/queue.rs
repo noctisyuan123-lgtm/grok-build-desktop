@@ -54,6 +54,10 @@ pub enum QueueMessageKind {
         /// recognize new event types (tool_use, subagent_*, etc.) without a
         /// Rust round-trip every time grok extends its protocol.
         raw: serde_json::Value,
+        /// ACP session that emitted the notification. Child-agent updates use
+        /// a different session id from the parent turn and must stay in the
+        /// child transcript.
+        session_id: Option<String>,
     },
     StateChanged {
         state: RunState,
@@ -629,6 +633,7 @@ impl RunQueue {
                                         kind: QueueMessageKind::Event {
                                             event: ev,
                                             raw: raw_value,
+                                            session_id: None,
                                         },
                                     });
                                 }
@@ -823,7 +828,11 @@ impl RunQueue {
                 let raw = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
                 let _ = self.tx.send(QueueMessage {
                     run_id: rec.id.clone(),
-                    kind: QueueMessageKind::Event { event, raw },
+                    kind: QueueMessageKind::Event {
+                        event,
+                        raw,
+                        session_id: None,
+                    },
                 });
                 // Return host to the lane pool for the next serial turn.
                 self.acp_hosts

@@ -55,6 +55,7 @@ function sameCheckpoint(
   if ((message.meta?.sessionId ?? null) !== (sessionId ?? null)) return false;
   const prevTraces = message.meta?.traces ?? [];
   if (prevTraces.length !== traces.length) return false;
+  if (JSON.stringify(prevTraces) !== JSON.stringify(traces)) return false;
   const prevTranscript = message.meta?.transcript ?? [];
   if (prevTranscript.length !== transcript.length) return false;
   const prevLast = prevTranscript.at(-1);

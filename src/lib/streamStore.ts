@@ -49,6 +49,8 @@ export interface RunSnapshot {
   stopReason: string | null;
   /** Grok conversation head produced by this run. Used to fork follow-ups. */
   sessionId: string | null;
+  /** ACP session that owns the parent turn; child sessions are kept on traces. */
+  rootSessionId?: string | null;
   error: string | null;
   /** Authoritative token totals emitted by Grok; null until the first usage line. */
   usage: RunUsage | null;
@@ -184,6 +186,7 @@ class StreamStore {
       htmlVersion: 0,
       stopReason: null,
       sessionId: null,
+      rootSessionId: null,
       error: null,
       usage: null,
       traces: [],
@@ -204,20 +207,49 @@ class StreamStore {
 
 export const streamStore = new StreamStore();
 
-export function applyRunEvent(runId: string, event: GrokEvent, raw?: unknown): void {
+export function applyRunEvent(
+  runId: string,
+  event: GrokEvent,
+  raw?: unknown,
+  protocolSessionId?: string,
+): void {
   const cur = streamStore.getRunSnapshot(runId);
+  const sessionId = protocolSessionId ?? readSessionId(raw);
   const usage = extractUsage(raw);
   if (event.type === 'thought') {
     const { data } = event as Extract<GrokEvent, { type: 'thought' }>;
     const now = Date.now();
+    const owner = findSubagentOwner(cur?.traces ?? [], sessionId, cur?.rootSessionId);
+    if (owner) {
+      streamStore.patchRun(runId, {
+        traces: updateSubagentTranscript(cur?.traces ?? [], owner.key, (transcript) =>
+          appendThought(transcript, data, now),
+        ),
+        lastEventType: 'activity',
+        state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
+      });
+      return;
+    }
     streamStore.patchRun(runId, {
       thoughtChars: (cur?.thoughtChars ?? 0) + data.length,
       transcript: appendThought(cur?.transcript ?? [], data, now),
       lastEventType: 'thought',
+      rootSessionId: cur?.rootSessionId ?? sessionId ?? null,
       state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
     });
   } else if (event.type === 'text') {
     const { data } = event as Extract<GrokEvent, { type: 'text' }>;
+    const owner = findSubagentOwner(cur?.traces ?? [], sessionId, cur?.rootSessionId);
+    if (owner) {
+      streamStore.patchRun(runId, {
+        traces: updateSubagentTranscript(cur?.traces ?? [], owner.key, (transcript) =>
+          appendResponse(transcript, data),
+        ),
+        lastEventType: 'activity',
+        state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
+      });
+      return;
+    }
     const nextText = (cur?.text ?? '') + data;
     const nextTranscript = appendResponse(cur?.transcript ?? [], data);
     streamStore.patchRun(runId, {
@@ -225,6 +257,7 @@ export function applyRunEvent(runId: string, event: GrokEvent, raw?: unknown): v
       textChars: (cur?.textChars ?? 0) + data.length,
       transcript: nextTranscript,
       lastEventType: 'text',
+      rootSessionId: cur?.rootSessionId ?? sessionId ?? null,
       state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
     });
     // Lazy-import to keep the worker out of unit-test bundles (vitest jsdom).
@@ -276,6 +309,7 @@ export function applyRunEvent(runId: string, event: GrokEvent, raw?: unknown): v
       lastEventType: 'end',
       stopReason: e.stopReason,
       sessionId: e.sessionId,
+      rootSessionId: cur?.rootSessionId ?? sessionId ?? e.sessionId,
       endedAt,
       usage: usage ?? cur?.usage ?? null,
       traces: reconcileOpenTraces(cur?.traces ?? [], 'done'),
@@ -307,36 +341,54 @@ export function applyRunEvent(runId: string, event: GrokEvent, raw?: unknown): v
     if (result.kind === 'upsert') {
       const existing = cur?.traces ?? [];
       const idx = existing.findIndex((trace) => trace.key === result.event.key);
+      const eventSessionId = result.event.sessionId ?? sessionId;
+      const owner =
+        result.event.kind === 'subagent'
+          ? null
+          : findSubagentOwner(existing, eventSessionId, cur?.rootSessionId);
+      const normalizedEvent = owner
+        ? {
+            ...result.event,
+            parentKey: result.event.parentKey ?? owner.key,
+            sessionId: result.event.sessionId ?? eventSessionId,
+          }
+        : result.event;
       if (idx >= 0) {
         const updated = [...existing];
         updated[idx] = {
           ...updated[idx]!,
-          ...result.event,
+          ...normalizedEvent,
           // Updates should not reset elapsed time, and missing optional fields
           // must not erase useful data captured by the start event.
           startedAt: updated[idx]!.startedAt,
           label:
-            result.event.label === 'Tool' || result.event.label === 'Subagent'
+            normalizedEvent.label === 'Tool' || normalizedEvent.label === 'Subagent'
               ? updated[idx]!.label
-              : result.event.label,
-          detail: result.event.detail ?? updated[idx]!.detail,
-          parentKey: result.event.parentKey ?? updated[idx]!.parentKey,
-          progress: result.event.progress ?? updated[idx]!.progress,
-          path: result.event.path ?? updated[idx]!.path,
-          diff: result.event.diff ?? updated[idx]!.diff,
-          additions: result.event.additions ?? updated[idx]!.additions,
-          deletions: result.event.deletions ?? updated[idx]!.deletions,
+              : normalizedEvent.label,
+          detail: normalizedEvent.detail ?? updated[idx]!.detail,
+          parentKey: normalizedEvent.parentKey ?? updated[idx]!.parentKey,
+          progress: normalizedEvent.progress ?? updated[idx]!.progress,
+          path: normalizedEvent.path ?? updated[idx]!.path,
+          diff: normalizedEvent.diff ?? updated[idx]!.diff,
+          additions: normalizedEvent.additions ?? updated[idx]!.additions,
+          deletions: normalizedEvent.deletions ?? updated[idx]!.deletions,
+          sessionId: normalizedEvent.sessionId ?? updated[idx]!.sessionId,
+          transcript: updated[idx]!.transcript,
         };
         streamStore.patchRun(runId, {
           traces: updated,
-          lastEventType: result.event.status === 'running' ? 'activity' : cur?.lastEventType,
+          lastEventType: normalizedEvent.status === 'running' ? 'activity' : cur?.lastEventType,
+          rootSessionId: cur?.rootSessionId ?? (owner ? null : sessionId) ?? null,
           state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
         });
       } else {
         streamStore.patchRun(runId, {
-          traces: [...existing, result.event],
-          transcript: appendTool(cur?.transcript ?? [], result.event.key),
-          lastEventType: result.event.status === 'running' ? 'activity' : cur?.lastEventType,
+          traces: [...existing, normalizedEvent],
+          transcript: owner
+            ? (cur?.transcript ?? [])
+            : appendTool(cur?.transcript ?? [], normalizedEvent.key),
+          lastEventType: normalizedEvent.status === 'running' ? 'activity' : cur?.lastEventType,
+          rootSessionId: cur?.rootSessionId ?? (owner ? null : sessionId) ?? null,
           state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
         });
       }
@@ -395,6 +447,41 @@ function closeThought(segments: TranscriptSegment[], endedAt: number): Transcrip
   return [...segments.slice(0, -1), { ...last, endedAt }];
 }
 
+function readSessionId(raw: unknown): string | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const obj = raw as Record<string, unknown>;
+  for (const key of ['sessionId', 'session_id', 'childSessionId', 'child_session_id']) {
+    const value = obj[key];
+    if (typeof value === 'string' && value) return value;
+  }
+  return undefined;
+}
+
+function findSubagentOwner(
+  traces: TraceEvent[],
+  sessionId: string | undefined,
+  rootSessionId: string | null | undefined,
+): TraceEvent | null {
+  if (!sessionId || sessionId === rootSessionId) return null;
+  return (
+    traces.find(
+      (trace) =>
+        trace.kind === 'subagent' &&
+        (trace.sessionId === sessionId || trace.key === `subagent:${sessionId}`),
+    ) ?? null
+  );
+}
+
+function updateSubagentTranscript(
+  traces: TraceEvent[],
+  key: string,
+  update: (transcript: TranscriptSegment[]) => TranscriptSegment[],
+): TraceEvent[] {
+  return traces.map((trace) =>
+    trace.key === key ? { ...trace, transcript: update(trace.transcript ?? []) } : trace,
+  );
+}
+
 function appendThought(
   segments: TranscriptSegment[],
   text: string,
@@ -443,7 +530,14 @@ function appendTool(segments: TranscriptSegment[], traceKey: string): Transcript
 function reconcileOpenTraces(traces: TraceEvent[], status: TraceStatus): TraceEvent[] {
   const endedAt = Date.now();
   return traces.map((trace) =>
-    trace.status === 'running' ? { ...trace, status, endedAt } : trace,
+    trace.status === 'running'
+      ? {
+          ...trace,
+          status,
+          endedAt,
+          transcript: trace.transcript ? closeThought(trace.transcript, endedAt) : undefined,
+        }
+      : trace,
   );
 }
 
@@ -507,9 +601,18 @@ export async function attachTauriListeners(): Promise<void> {
     const attached: UnlistenFn[] = [];
     try {
       attached.push(
-        await listen<{ runId: string; event: GrokEvent; raw?: unknown }>(
-          'grok-desktop://run-event',
-          (e) => applyRunEvent(e.payload.runId, e.payload.event, e.payload.raw),
+        await listen<{
+          runId: string;
+          event: GrokEvent;
+          raw?: unknown;
+          sessionId?: string | null;
+        }>('grok-desktop://run-event', (e) =>
+          applyRunEvent(
+            e.payload.runId,
+            e.payload.event,
+            e.payload.raw,
+            e.payload.sessionId ?? undefined,
+          ),
         ),
       );
       attached.push(

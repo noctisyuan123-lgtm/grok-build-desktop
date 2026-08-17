@@ -290,6 +290,7 @@ export const en = {
   'subagent.floatOpen': 'Open subagent session: {label}',
   'subagent.drawerTitle': 'Subagent · {label}',
   'subagent.drawerClose': 'Close subagent session',
+  'subagent.resize': 'Resize subagent window',
   'subagent.metaStatus': 'Status',
   'subagent.metaElapsed': 'Elapsed',
   'subagent.metaProgress': 'Progress',

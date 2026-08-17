@@ -1,3 +1,5 @@
+import type { TranscriptSegment } from './streamStore';
+
 /**
  * Normalises Grok's `streaming-json` activity events into one stable shape.
  *
@@ -17,6 +19,10 @@ export interface TraceEvent {
   status: TraceStatus;
   startedAt: number;
   endedAt: number | null;
+  /** ACP child session that owns this subagent's workflow transcript. */
+  sessionId?: string;
+  /** Ordered thought/respond/tool transcript for an individual subagent. */
+  transcript?: TranscriptSegment[];
   detail?: string;
   parentKey?: string;
   progress?: string;
@@ -255,6 +261,9 @@ export function classifyEvent(raw: unknown, now = Date.now()): TraceParseResult 
   // always carry toolCallId/subagent_id, so concurrent calls remain distinct.
   const keyName = name ?? (isSubagent ? 'agent' : 'tool');
   const key = `${isSubagent ? 'subagent' : 'tool'}:${id ?? keyName}`;
+  const sessionId = isSubagent
+    ? readField(obj, 'childSessionId', 'child_session_id', 'sessionId', 'session_id')
+    : readField(obj, 'sessionId', 'session_id');
   const status = normaliseStatus(type, readField(obj, 'status'));
   const input =
     obj.rawInput ?? obj.raw_input ?? obj.input ?? obj.arguments ?? obj.args ?? obj.params;
@@ -308,6 +317,7 @@ export function classifyEvent(raw: unknown, now = Date.now()): TraceParseResult 
       status,
       startedAt: duration != null && status !== 'running' ? Math.max(0, now - duration) : now,
       endedAt: status === 'running' ? null : now,
+      sessionId,
       detail,
       parentKey: parent ? `subagent:${parent}` : undefined,
       progress,

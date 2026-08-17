@@ -5244,12 +5244,19 @@ body[data-theme='light'] .hljs-comment {
 }
 
 /* Floating subagent pill above the composer (session-scoped). */
+.subagent-float-list {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 0 4px;
+}
+
 .subagent-float {
   animation: subagent-float-in 180ms ease-out;
   display: flex;
-  justify-content: flex-start;
-  margin: 0 0 6px;
-  padding: 0 4px;
+  min-width: 0;
 }
 
 .subagent-float-card {
@@ -5336,7 +5343,7 @@ body[data-theme='light'] .hljs-comment {
 }
 
 .subagent-drawer {
-  background: var(--grok-bg-1);
+  background: color-mix(in srgb, var(--bg-0) 86%, var(--bg-2));
   border-left: 1px solid var(--grok-border-1);
   bottom: 0;
   box-shadow: -12px 0 40px rgba(0, 0, 0, 0.28);
@@ -5347,7 +5354,32 @@ body[data-theme='light'] .hljs-comment {
   position: absolute;
   right: 0;
   top: 0;
-  width: min(380px, 100vw);
+  width: min(420px, 100vw);
+}
+
+.subagent-drawer-resizer {
+  bottom: 0;
+  cursor: ew-resize;
+  left: -5px;
+  position: absolute;
+  top: 0;
+  touch-action: none;
+  width: 10px;
+  z-index: 1;
+}
+
+.subagent-drawer-resizer:focus-visible {
+  outline: 2px solid var(--grok-accent);
+  outline-offset: -2px;
+}
+
+body.subagent-drawer-resizing {
+  cursor: ew-resize;
+  user-select: none;
+}
+
+body.subagent-drawer-resizing * {
+  cursor: ew-resize !important;
 }
 
 .subagent-drawer-head {
@@ -5477,9 +5509,42 @@ body[data-theme='light'] .hljs-comment {
 
 @media (prefers-reduced-motion: reduce) {
   .subagent-float,
+  .subagent-float-list,
   .subagent-drawer-overlay {
     animation: none;
   }
+}
+
+.subagent-drawer-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.subagent-transcript-thought {
+  border: 1px solid var(--grok-border-1);
+  border-radius: 8px;
+  color: var(--grok-text-2);
+  font-size: 12px;
+  padding: 7px 9px;
+}
+
+.subagent-transcript-thought summary {
+  cursor: pointer;
+  color: var(--grok-text-3);
+  font-size: 11px;
+}
+
+.subagent-transcript-response {
+  font-size: 12px;
+}
+
+.subagent-transcript-raw {
+  color: var(--grok-text-2);
+  font-size: 12px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .composer-context-footer {
   align-items: center;
