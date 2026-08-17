@@ -61,6 +61,25 @@ describe('streamStore', () => {
     expect(snap?.stopReason).toBe('EndTurn');
   });
 
+  it('emits one completion notification when end and Done both arrive', () => {
+    const completions: string[] = [];
+    const unsubscribe = streamStore.subscribeCompletions(({ runId, state }) => {
+      completions.push(`${runId}:${state}`);
+    });
+
+    applyRunEvent('r1', {
+      type: 'end',
+      stopReason: 'EndTurn',
+      sessionId: 's',
+      requestId: 'r',
+    });
+    applyStateChange('r1', { state: 'Done' });
+    applyStateChange('r1', { state: 'Done' });
+
+    expect(completions).toEqual(['r1:done']);
+    unsubscribe();
+  });
+
   it('applyStateChange overwrites state and timestamps', () => {
     applyStateChange('r1', { state: 'Running', startedAt: 100 });
     const snap = streamStore.getRunSnapshot('r1');

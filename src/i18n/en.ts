@@ -129,6 +129,10 @@ export const en = {
   'settings.collapseSidebarTitle': 'Collapse sidebar by default',
   'settings.collapseSidebarHint': 'Hide the left rail to focus on the conversation (⌘B toggles).',
   'settings.collapseSidebar': 'Collapse sidebar',
+  'settings.completionSoundTitle': 'Background completion sound',
+  'settings.completionSoundHint':
+    'Play a short sound when a turn finishes while the app is not focused.',
+  'settings.completionSound': 'Background completion sound',
   'settings.model': 'Model',
   'settings.modelHint': 'Active engine: {model}',
   'settings.customModelId': 'Custom model id',

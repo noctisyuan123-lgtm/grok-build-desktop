@@ -14,6 +14,8 @@ import './App.css';
 import { cancelRun, ensureStreamListenersAttached, prewarmRun } from './lib/grok';
 import { hasTauriRuntime } from './lib/runtime';
 import { streamStore } from './lib/streamStore';
+import { playCompletionSound, primeCompletionSound } from './lib/completionSound';
+import { isBackgroundSessionRun } from './lib/completionNotification';
 import { mergeStreamIntoMessages } from './lib/mergeStreamMessages';
 import { shouldShowPlan } from './components/PlanTodoList';
 import { MessageList, type MessageRef } from './components/MessageList';
@@ -212,6 +214,11 @@ function App() {
       setContextMenu(null);
     },
   });
+  // Completion events can arrive while another session is visible. Keep the
+  // full tab map in a ref so the event handler always compares against the
+  // current conversation instead of the render that first subscribed.
+  const completionSessionRef = useRef({ activeTabId, messages, tabs });
+  completionSessionRef.current = { activeTabId, messages, tabs };
   const inflightRunKey = useSyncExternalStore(
     streamStore.subscribe,
     streamStore.getInflightRunIdsSnapshot,
@@ -300,10 +307,44 @@ function App() {
     const stored = window.localStorage.getItem(storageKeys.dockPosition);
     return isDockPosition(stored) ? stored : 'right';
   });
+  const [completionSoundEnabled, setCompletionSoundEnabled] = useState<boolean>(() => {
+    return window.localStorage.getItem(storageKeys.completionSoundEnabled) !== '0';
+  });
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>(() => {
     const stored = window.localStorage.getItem(storageKeys.inspectorTab);
     return isInspectorTab(stored) ? stored : 'skills';
   });
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      storageKeys.completionSoundEnabled,
+      completionSoundEnabled ? '1' : '0',
+    );
+  }, [completionSoundEnabled]);
+
+  useEffect(() => {
+    const onUserGesture = () => {
+      primeCompletionSound();
+      window.removeEventListener('pointerdown', onUserGesture);
+      window.removeEventListener('keydown', onUserGesture);
+    };
+    window.addEventListener('pointerdown', onUserGesture);
+    window.addEventListener('keydown', onUserGesture);
+    return () => {
+      window.removeEventListener('pointerdown', onUserGesture);
+      window.removeEventListener('keydown', onUserGesture);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!completionSoundEnabled) return;
+    return streamStore.subscribeCompletions(({ runId }) => {
+      const foreground = document.visibilityState === 'visible' && document.hasFocus();
+      const { activeTabId, messages, tabs } = completionSessionRef.current;
+      const otherSessionFinished = isBackgroundSessionRun(runId, activeTabId, messages, tabs);
+      if (!foreground || otherSessionFinished) playCompletionSound();
+    });
+  }, [completionSoundEnabled]);
   // Session notices (folder pick, restore/save failures, …) show as a
   // transient toast over the conversation — previously they rendered only
   // inside the collapsed Terminal dock, where nobody saw them. Auto-dismiss
@@ -1477,6 +1518,8 @@ function App() {
         }}
         sidebarCollapsed={sidebarCollapsed}
         setSidebarCollapsed={setSidebarCollapsed}
+        completionSoundEnabled={completionSoundEnabled}
+        setCompletionSoundEnabled={setCompletionSoundEnabled}
         modelConfig={modelConfig}
         actionPolicy={actionPolicy}
         setActionPolicy={setActionPolicy}

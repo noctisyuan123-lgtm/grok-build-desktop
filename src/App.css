@@ -7939,10 +7939,11 @@ select:focus-visible {
   padding: 8px 12px;
 }
 
-/* Images are a visual lightbox, not a second full-height inspector. Keep the
-   frame centered over the workbench and let the bitmap determine its height. */
+/* Images use a bounded lightbox. The body owns scrolling so very tall or wide
+   attachments remain fully reachable instead of being clipped by the frame. */
 .attachment-preview-panel.is-image {
   bottom: auto;
+  height: auto;
   left: 50%;
   max-height: calc(100vh - 96px);
   right: auto;
@@ -7952,13 +7953,18 @@ select:focus-visible {
 }
 
 .attachment-preview-panel.is-image .attachment-preview-body {
-  overflow: hidden;
+  align-items: flex-start;
+  justify-content: flex-start;
+  max-height: calc(100vh - 156px);
+  overflow: auto;
   padding: 6px;
 }
 
 .attachment-preview-panel.is-image .attachment-preview-image {
-  max-height: calc(100vh - 156px);
-  max-width: calc(100vw - 64px);
+  flex: 0 0 auto;
+  margin: auto;
+  max-height: none;
+  max-width: 100%;
 }
 
 .attachment-preview-panel.is-image .attachment-preview-meta {
@@ -8403,8 +8409,7 @@ body,
 .composer-folder-attachment {
   align-items: center;
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025)),
-    #202020;
+    linear-gradient(135deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025)), #202020;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 14px;
   box-shadow:
@@ -8415,12 +8420,13 @@ body,
   max-width: min(200px, 100%);
   min-height: 54px;
   padding: 6px;
-  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    transform 140ms ease;
 }
 .composer-folder-attachment:hover {
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.095), rgba(255, 255, 255, 0.035)),
-    #222;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.095), rgba(255, 255, 255, 0.035)), #222;
   border-color: rgba(255, 255, 255, 0.23);
   transform: translateY(-1px);
 }
@@ -8490,8 +8496,7 @@ body,
 }
 .theme-light .composer-folder-attachment {
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.85), rgba(246, 244, 239, 0.95)),
-    #f7f6f2;
+    linear-gradient(135deg, rgba(255, 255, 255, 0.85), rgba(246, 244, 239, 0.95)), #f7f6f2;
   border-color: rgba(35, 34, 30, 0.14);
   box-shadow: 0 8px 20px rgba(61, 56, 45, 0.09);
 }
@@ -8679,6 +8684,12 @@ body,
   margin-top: 14px;
   min-height: 20px;
 }
+/* Keep the plan below the response controls, with a little breathing room so
+   it cannot visually merge into a subagent/workflow card. */
+.message-actions + .plan-todo-list {
+  margin-bottom: 14px;
+  margin-top: 8px;
+}
 .message-action {
   align-items: center;
   appearance: none;
@@ -8847,6 +8858,7 @@ body,
   display: block;
   max-height: 240px;
   min-height: 66px;
+  overflow-y: hidden;
   padding: 12px 14px 6px;
   resize: none;
   width: 100%;

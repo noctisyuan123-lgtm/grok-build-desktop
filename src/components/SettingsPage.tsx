@@ -26,6 +26,8 @@ export interface SettingsPageProps {
   setDockPosition: (d: DockPosition) => void;
   sidebarCollapsed: boolean;
   setSidebarCollapsed: (v: boolean) => void;
+  completionSoundEnabled: boolean;
+  setCompletionSoundEnabled: (v: boolean) => void;
 
   // Model & reasoning
   modelOptions: Option[];
@@ -220,6 +222,16 @@ export function SettingsPage(props: SettingsPageProps) {
                   checked={props.sidebarCollapsed}
                   onChange={props.setSidebarCollapsed}
                   label={t('settings.collapseSidebar')}
+                />
+              </Row>
+              <Row
+                title={t('settings.completionSoundTitle')}
+                hint={t('settings.completionSoundHint')}
+              >
+                <Toggle
+                  checked={props.completionSoundEnabled}
+                  onChange={props.setCompletionSoundEnabled}
+                  label={t('settings.completionSound')}
                 />
               </Row>
             </section>

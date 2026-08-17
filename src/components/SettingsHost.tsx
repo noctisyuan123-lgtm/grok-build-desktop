@@ -30,6 +30,8 @@ export interface SettingsHostProps {
   setDockPosition: (position: DockPosition) => void;
   sidebarCollapsed: boolean;
   setSidebarCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
+  completionSoundEnabled: boolean;
+  setCompletionSoundEnabled: React.Dispatch<React.SetStateAction<boolean>>;
   modelConfig: ReturnType<typeof useModelConfig>;
   actionPolicy: ActionPolicy;
   setActionPolicy: (policy: ActionPolicy) => void;
@@ -50,6 +52,8 @@ export function SettingsHost({
   setDockPosition,
   sidebarCollapsed,
   setSidebarCollapsed,
+  completionSoundEnabled,
+  setCompletionSoundEnabled,
   modelConfig,
   actionPolicy,
   setActionPolicy,
@@ -94,6 +98,8 @@ export function SettingsHost({
       setDockPosition={setDockPosition}
       sidebarCollapsed={sidebarCollapsed}
       setSidebarCollapsed={setSidebarCollapsed}
+      completionSoundEnabled={completionSoundEnabled}
+      setCompletionSoundEnabled={setCompletionSoundEnabled}
       modelOptions={[
         ...modelOptions.map((id) => ({
           value: id,

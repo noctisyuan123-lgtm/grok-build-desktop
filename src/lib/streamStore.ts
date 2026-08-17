@@ -17,6 +17,14 @@ export type GrokEvent =
 
 export type RunState = 'queued' | 'running' | 'done' | 'cancelled' | 'failed';
 
+export type RunCompletionState = Extract<RunState, 'done' | 'failed'>;
+
+export interface RunCompletion {
+  runId: string;
+  state: RunCompletionState;
+  endedAt: number | null;
+}
+
 export type TranscriptSegment =
   | {
       key: string;
@@ -68,21 +76,36 @@ interface QueueSnapshot {
 }
 
 type Listener = () => void;
+type CompletionListener = (completion: RunCompletion) => void;
 
 class StreamStore {
   private runs = new Map<string, RunSnapshot>();
   private html = new Map<string, string>();
   private queue: QueueSnapshot = { active: null, activeIds: [], items: [] };
   private listeners = new Set<Listener>();
+  private completionListeners = new Set<CompletionListener>();
+  private completedRunIds = new Set<string>();
 
   subscribe = (l: Listener): (() => void) => {
     this.listeners.add(l);
     return () => this.listeners.delete(l);
   };
 
+  subscribeCompletions = (l: CompletionListener): (() => void) => {
+    this.completionListeners.add(l);
+    return () => this.completionListeners.delete(l);
+  };
+
   private notify() {
     this.listeners.forEach((l) => l());
   }
+
+  markCompletion = (runId: string, state: RunCompletionState, endedAt: number | null): void => {
+    if (this.completedRunIds.has(runId)) return;
+    this.completedRunIds.add(runId);
+    const completion = { runId, state, endedAt } satisfies RunCompletion;
+    this.completionListeners.forEach((listener) => listener(completion));
+  };
 
   getRunSnapshot = (id: string): RunSnapshot | undefined => this.runs.get(id);
   getHtml = (id: string): string | undefined => this.html.get(id);
@@ -173,7 +196,9 @@ class StreamStore {
     this.runs.clear();
     this.html.clear();
     this.queue = { active: null, activeIds: [], items: [] };
+    this.completedRunIds.clear();
     this.listeners.clear();
+    this.completionListeners.clear();
   };
 }
 
@@ -245,27 +270,31 @@ export function applyRunEvent(runId: string, event: GrokEvent, raw?: unknown): v
         .catch(() => {});
     }
     const e = event as Extract<GrokEvent, { type: 'end' }>;
+    const endedAt = Date.now();
     streamStore.patchRun(runId, {
       state: 'done',
       lastEventType: 'end',
       stopReason: e.stopReason,
       sessionId: e.sessionId,
-      endedAt: Date.now(),
+      endedAt,
       usage: usage ?? cur?.usage ?? null,
       traces: reconcileOpenTraces(cur?.traces ?? [], 'done'),
-      transcript: closeThought(cur?.transcript ?? [], Date.now()),
+      transcript: closeThought(cur?.transcript ?? [], endedAt),
     });
+    streamStore.markCompletion(runId, 'done', endedAt);
   } else if (raw) {
     const runError = extractRunError(raw);
     if (runError) {
+      const endedAt = Date.now();
       streamStore.patchRun(runId, {
         state: 'failed',
-        endedAt: Date.now(),
+        endedAt,
         error: runError,
         usage: usage ?? cur?.usage ?? null,
         traces: reconcileOpenTraces(cur?.traces ?? [], 'error'),
-        transcript: closeThought(cur?.transcript ?? [], Date.now()),
+        transcript: closeThought(cur?.transcript ?? [], endedAt),
       });
+      streamStore.markCompletion(runId, 'failed', endedAt);
       return;
     }
 
@@ -335,10 +364,11 @@ export function applyStateChange(
         : state === 'cancelled'
           ? 'cancelled'
           : null;
+  const endedAt = payload.endedAt ?? current?.endedAt ?? (terminalStatus ? Date.now() : null);
   streamStore.patchRun(runId, {
     state,
     startedAt: payload.startedAt ?? current?.startedAt ?? null,
-    endedAt: payload.endedAt ?? current?.endedAt ?? (terminalStatus ? Date.now() : null),
+    endedAt,
     error: payload.error ?? current?.error ?? null,
     traces: terminalStatus
       ? reconcileOpenTraces(current?.traces ?? [], terminalStatus)
@@ -347,6 +377,9 @@ export function applyStateChange(
       ? closeThought(current?.transcript ?? [], payload.endedAt ?? Date.now())
       : (current?.transcript ?? []),
   });
+  if (state === 'done' || state === 'failed') {
+    streamStore.markCompletion(runId, state, endedAt);
+  }
 }
 
 /** Markdown cache key for the exterior final body (last respond segment only). */

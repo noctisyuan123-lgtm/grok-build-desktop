@@ -32,6 +32,24 @@ function renderComposer(overrides: Partial<Parameters<typeof Composer>[0]> = {})
 }
 
 describe('Composer submit', () => {
+  it('grows for a long draft and scrolls after reaching its maximum height', () => {
+    const { textarea } = renderComposer();
+    let contentHeight = 184;
+    Object.defineProperty(textarea, 'scrollHeight', {
+      configurable: true,
+      get: () => contentHeight,
+    });
+
+    fireEvent.input(textarea, { target: { value: 'A long draft' } });
+    expect(textarea.style.height).toBe('184px');
+    expect(textarea.style.overflowY).toBe('hidden');
+
+    contentHeight = 320;
+    fireEvent.input(textarea, { target: { value: 'An even longer draft' } });
+    expect(textarea.style.height).toBe('240px');
+    expect(textarea.style.overflowY).toBe('auto');
+  });
+
   it('replaces the send arrow with a round square stop control while running', async () => {
     mockIPC(() => undefined);
     const onStop = vi.fn();

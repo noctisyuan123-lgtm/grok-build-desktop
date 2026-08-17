@@ -50,6 +50,7 @@ export const storageKeys = {
   permissionMode: 'grok-desktop-permission-mode',
   bestOfN: 'grok-desktop-best-of-n',
   experimentalMemory: 'grok-desktop-experimental-memory',
+  completionSoundEnabled: 'grok-desktop-completion-sound-enabled',
   webSearchEnabled: 'grok-desktop-web-search-enabled',
   subagentsEnabled: 'grok-desktop-subagents-enabled',
   selfCheck: 'grok-desktop-self-check',

@@ -121,8 +121,8 @@ function MessageItemImpl({
             dangerouslySetInnerHTML={{ __html: safeHtml }}
             onClick={handleMarkdownClick}
           />
-          {planNode}
           <MessageActions sourceText={fallbackText || ''} canUndo={canUndo} onUndo={onUndo} />
+          {planNode}
         </>
       );
     }
@@ -131,8 +131,8 @@ function MessageItemImpl({
         <>
           {workedRow}
           <pre className="message-body">{fallbackText}</pre>
-          {planNode}
           <MessageActions sourceText={fallbackText} canUndo={canUndo} onUndo={onUndo} />
+          {planNode}
         </>
       );
     }
@@ -188,7 +188,6 @@ function MessageItemImpl({
           ) : snap.text || fallbackText ? (
             <pre className="message-body streaming-raw">{snap.text || fallbackText || ''}</pre>
           ) : null}
-          {planNode}
         </>
       )}
       {/* A failed/cancelled run must say so in the message area — the only
@@ -205,11 +204,14 @@ function MessageItemImpl({
         <div className="message-error message-cancelled">{t('message.stopped')}</div>
       ) : null}
       {!transcript?.length ? (
-        <MessageActions
-          sourceText={snap.text || fallbackText || ''}
-          canUndo={canUndo && snap.state !== 'queued' && snap.state !== 'running'}
-          onUndo={onUndo}
-        />
+        <>
+          <MessageActions
+            sourceText={snap.text || fallbackText || ''}
+            canUndo={canUndo && snap.state !== 'queued' && snap.state !== 'running'}
+            onUndo={onUndo}
+          />
+          {planNode}
+        </>
       ) : null}
     </>
   );
@@ -371,8 +373,8 @@ function TranscriptMessage({
           className="markdown-streaming"
         />
       ) : null}
-      {planNode}
       <MessageActions sourceText={finalText} canUndo={canUndo} onUndo={onUndo} />
+      {planNode}
     </>
   );
 }

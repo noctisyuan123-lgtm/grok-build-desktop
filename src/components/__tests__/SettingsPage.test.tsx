@@ -15,6 +15,8 @@ function makeProps(overrides: Partial<SettingsPageProps> = {}): SettingsPageProp
     setDockPosition: vi.fn(),
     sidebarCollapsed: false,
     setSidebarCollapsed: vi.fn(),
+    completionSoundEnabled: true,
+    setCompletionSoundEnabled: vi.fn(),
     modelOptions: [
       { value: 'grok-build', label: 'grok-build' },
       { value: 'custom', label: 'Custom' },
@@ -93,9 +95,9 @@ describe('SettingsPage', () => {
     // Initial focus lands on the close button.
     expect(screen.getByRole('button', { name: 'Close settings' })).toHaveFocus();
 
-    // First focusable is the "General" nav item; last is the sidebar toggle.
+    // First focusable is the "General" nav item; last is the completion sound toggle.
     const first = screen.getByRole('button', { name: 'General' });
-    const last = screen.getByRole('switch', { name: 'Collapse sidebar' });
+    const last = screen.getByRole('switch', { name: 'Background completion sound' });
 
     first.focus();
     await user.tab({ shift: true }); // wrap: first → last
@@ -114,6 +116,8 @@ describe('SettingsPage', () => {
     expect(props.setDockPosition).toHaveBeenCalledWith('bottom');
     await user.click(screen.getByRole('switch', { name: 'Collapse sidebar' }));
     expect(props.setSidebarCollapsed).toHaveBeenCalledWith(true);
+    await user.click(screen.getByRole('switch', { name: 'Background completion sound' }));
+    expect(props.setCompletionSoundEnabled).toHaveBeenCalledWith(false);
   });
 
   it('model: shows the custom-id input only for the custom preset and clamps Best-of-N', async () => {
