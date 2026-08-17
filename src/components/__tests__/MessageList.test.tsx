@@ -17,6 +17,65 @@ function renderList(messages: MessageRef[]) {
 }
 
 describe('MessageList session isolation', () => {
+  it('copies every message but only shows Undo on the latest message role', () => {
+    const onUndoUser = vi.fn();
+    const onUndoAssistant = vi.fn();
+    render(
+      <VirtuosoMockContext.Provider value={{ viewportHeight: 800, itemHeight: 64 }}>
+        <MessageList
+          messages={[
+            {
+              id: 'user-1',
+              runId: '',
+              role: 'user',
+              userText: 'Earlier prompt',
+              showUndo: false,
+            },
+            {
+              id: 'assistant-1',
+              runId: 'run-1',
+              role: 'assistant',
+              fallbackText: 'Latest response',
+              canUndo: true,
+              showUndo: true,
+            },
+          ]}
+          onUndoAssistant={onUndoAssistant}
+          onUndoUser={onUndoUser}
+        />
+      </VirtuosoMockContext.Provider>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Copy prompt' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy response' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Undo prompt' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Undo response' })).toBeInTheDocument();
+  });
+
+  it('shows the prompt Undo control when the latest visible message is a user turn', () => {
+    render(
+      <VirtuosoMockContext.Provider value={{ viewportHeight: 800, itemHeight: 64 }}>
+        <MessageList
+          messages={[
+            {
+              id: 'user-tail',
+              runId: '',
+              role: 'user',
+              userText: 'Prompt tail',
+              canUndo: true,
+              showUndo: true,
+            },
+          ]}
+          onUndoUser={vi.fn()}
+        />
+      </VirtuosoMockContext.Provider>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Copy prompt' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Undo prompt' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Undo response' })).not.toBeInTheDocument();
+  });
+
   it('keys Virtuoso rows by stable message id so session switches do not reuse the wrong run', () => {
     streamStore.patchRun('run-a', {
       state: 'running',

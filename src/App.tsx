@@ -141,6 +141,13 @@ function App() {
   const [desktopHandoff, setDesktopHandoff] = useState<DesktopHandoff | null>(null);
   const suppressLiveRehydrateRef = useRef(false);
   const undoneUserContentRef = useRef<string | null>(null);
+  // During the async rewind/export handoff, never let a partial export replace
+  // the visible pre-Undo history. Some session backends briefly expose only
+  // the newest retained turn while their transcript catches up.
+  const pendingUndoVisibleMessagesRef = useRef<{
+    sessionId: string;
+    messages: ChatMessage[];
+  } | null>(null);
   // A rebase can leave no retained assistant bubble to carry sessionId (undo
   // of the only turn). Keep that new head scoped to its tab until the next
   // assistant event can persist it in message metadata.
@@ -638,15 +645,35 @@ function App() {
     const markdown = await invoke<string>('export_grok_session', { sessionId });
     const fingerprint = exportFingerprint(markdown);
     let imported = messagesFromGrokExport(markdown, sessionId);
+    const pendingUndo =
+      pendingUndoVisibleMessagesRef.current?.sessionId === sessionId
+        ? pendingUndoVisibleMessagesRef.current.messages
+        : null;
     const rebased = rebasedSessionHeadRef.current;
     const rebasedBase =
       rebased?.sessionId === sessionId && rebased.tabId === activeTabId
         ? rebased.retainedMessages
         : null;
-    if (undoneUserContentRef.current && !rebasedBase) {
+    if (rebasedBase) {
+      imported = mergeRebasedTranscript(rebasedBase, imported);
+      // An export started before the replacement session was created can
+      // finish afterward with the old head. Only remove the undone target
+      // when it appears beyond the retained replay baseline; if the prompt
+      // was an older repeated turn already in the baseline, leave that copy.
+      if (
+        undoneUserContentRef.current &&
+        imported.length > rebasedBase.length
+      ) {
+        imported = dropUndoneUserTurn(imported, undoneUserContentRef.current);
+      }
+    } else if (undoneUserContentRef.current) {
       imported = dropUndoneUserTurn(imported, undoneUserContentRef.current);
     }
-    if (rebasedBase) imported = mergeRebasedTranscript(rebasedBase, imported);
+    // A successful rewind can briefly produce a short export while the
+    // session's durable transcript is still being rewritten. Keep the
+    // already-visible baseline until the export contains at least that whole
+    // baseline; otherwise one incomplete poll looks like a full `/clear`.
+    if (pendingUndo && !rebasedBase && imported.length < pendingUndo.length) return false;
     if (imported.length === 0) return false;
     const sameExport = fingerprint === liveExportFingerprintRef.current;
     if (sameExport && !importedHasNewTurns(messagesRef.current, imported)) return false;
@@ -657,6 +684,7 @@ function App() {
     if (visibleAfter && visibleAfter !== sessionId) return false;
     liveExportFingerprintRef.current = fingerprint;
     setMessages(imported);
+    if (pendingUndo && !rebasedBase) pendingUndoVisibleMessagesRef.current = null;
     return true;
   }
 
@@ -935,6 +963,7 @@ function App() {
     // Post-Undo re-seed has been consumed. Later turns resume the new session.
     undoSessionPlanRef.current = null;
     undoneUserContentRef.current = null;
+    pendingUndoVisibleMessagesRef.current = null;
     const now = Date.now();
     const userMessageId = makeId('u');
     const assistantMessageId = makeId('a');
@@ -1317,20 +1346,27 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [grokIsRunning]);
 
-  // "Undo response" is deliberately limited to the latest completed turn.
+  // Undo is deliberately limited to the latest completed prompt/response
+  // pair. Both the user-prompt and response controls enter here, so UI,
+  // persisted transcript, and the ACP session are always rewound together.
   // Removing an older pair would leave later answers backed by context that is
   // no longer visible. The prompt is restored verbatim to the composer, and
   // the existing undo toast makes this destructive operation recoverable.
-  function undoAssistantResponse(messageId: string) {
+  function undoLatestTurn(messageId: string) {
     if (activeSessionIsRunning) return;
-    const assistantIndex = messages.findIndex((message) => message.id === messageId);
-    if (assistantIndex !== messages.length - 1) return;
-    const assistant = messages[assistantIndex];
-    const user = messages[assistantIndex - 1];
+    const selectedIndex = messages.findIndex((message) => message.id === messageId);
+    if (selectedIndex < 0) return;
+    const selected = messages[selectedIndex];
+    const selectedUser = selected?.role === 'user' ? selected : null;
+    const assistantIndex = selectedUser ? selectedIndex + 1 : selectedIndex;
+    const assistant = messages[assistantIndex]?.role === 'assistant' ? messages[assistantIndex] : null;
+    const user = selectedUser ?? messages[assistantIndex - 1];
+    const isUserOnlyTail = Boolean(
+      selectedUser && assistant == null && selectedIndex === messages.length - 1,
+    );
+    if (assistantIndex !== messages.length - 1 && !isUserOnlyTail) return;
     if (
-      !assistant ||
-      assistant.role !== 'assistant' ||
-      assistant.status === 'streaming' ||
+      (assistant != null && assistant.status === 'streaming') ||
       !user ||
       user.role !== 'user'
     ) {
@@ -1341,7 +1377,7 @@ function App() {
     const previousDraft = composerRef.current?.getValue() ?? '';
     const previousFolder = composerRef.current?.getAttachedFolder() ?? null;
     const restoredFolder = messageFolders[user.id] ?? null;
-    const preserved = messages.slice(0, assistantIndex - 1);
+    const preserved = messages.slice(0, assistant ? assistantIndex - 1 : selectedIndex);
     // Keep still-visible turns as replay context; exclude the undone pair.
     // If ACP rewind fails, the next submit starts fresh and re-seeds these.
     undoSessionPlanRef.current = {
@@ -1354,7 +1390,13 @@ function App() {
     };
     undoneUserContentRef.current = user.content;
     suppressLiveRehydrateRef.current = true;
-    const grokSessionId = assistant.meta?.sessionId ?? currentSessionId() ?? liveSessionId;
+    const grokSessionId = assistant?.meta?.sessionId ?? currentSessionId() ?? liveSessionId;
+    if (grokSessionId) {
+      pendingUndoVisibleMessagesRef.current = {
+        sessionId: grokSessionId,
+        messages: preserved,
+      };
+    }
     messagesRef.current = preserved;
     setMessages(preserved);
     updatePrompt(user.content);
@@ -1365,6 +1407,7 @@ function App() {
       undo: () => {
         undoSessionPlanRef.current = null;
         undoneUserContentRef.current = null;
+        pendingUndoVisibleMessagesRef.current = null;
         suppressLiveRehydrateRef.current = false;
         messagesRef.current = snapshot;
         setMessages(snapshot);
@@ -1429,7 +1472,13 @@ function App() {
           };
           messagesRef.current = retainedMessages;
           setMessages(retainedMessages);
-          linkLiveSession(nextSessionId);
+          // A replacement session is only shared when the undone turn was
+          // actually connected to `/cli`. Ordinary Desktop runs must resume
+          // the new isolated head without inventing a shared leader; doing
+          // otherwise makes the next prewarm call session/load on a leader
+          // that does not exist and resurrects the old failure.
+          if (wasLive) linkLiveSession(nextSessionId);
+          else linkLiveSession(null);
         } else {
           try {
             await rehydrateFromGrokSession(nextSessionId);
@@ -1462,6 +1511,12 @@ function App() {
 
   const messageRefs: MessageRef[] = useMemo(() => {
     const latestIndex = messages.length - 1;
+    const latestMessage = messages[latestIndex];
+    const latestTurnCanUndo = Boolean(
+      latestMessage &&
+        !activeSessionIsRunning &&
+        (latestMessage?.role === 'user' || latestMessage?.status !== 'streaming'),
+    );
     return messages.map((m, index) =>
       m.role === 'user'
         ? {
@@ -1474,6 +1529,8 @@ function App() {
             userText: m.content.replace(/\n\n📎[^\n]*$/, ''),
             id: m.id,
             attachments: messageAttachments[m.id],
+            canUndo: index === latestIndex && latestTurnCanUndo,
+            showUndo: index === latestIndex && latestTurnCanUndo,
           }
         : {
             // Live runs keep their real id; restored/legacy assistant
@@ -1491,7 +1548,8 @@ function App() {
             showPlan: shouldShowPlan(messages, index),
             autoExpandWork: m.status === 'streaming',
             id: m.id,
-            canUndo: index === latestIndex && m.status !== 'streaming' && !activeSessionIsRunning,
+            canUndo: index === latestIndex && latestTurnCanUndo,
+            showUndo: index === latestIndex && latestTurnCanUndo,
           },
     );
   }, [activeSessionIsRunning, messageAttachments, messages]);
@@ -1608,7 +1666,8 @@ function App() {
                 <MessageList
                   messages={messageRefs}
                   onAttachmentClick={setAttachmentPreview}
-                  onUndoAssistant={undoAssistantResponse}
+                  onUndoAssistant={undoLatestTurn}
+                  onUndoUser={undoLatestTurn}
                 />
               )}
             </div>

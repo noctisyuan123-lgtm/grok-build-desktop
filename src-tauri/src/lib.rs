@@ -2455,6 +2455,196 @@ fn find_grok_session_updates_path(
     None
 }
 
+fn find_grok_session_dir(session_id: &str) -> Option<PathBuf> {
+    let root = grok_home_dir().join("sessions");
+    let entries = fs::read_dir(root).ok()?;
+    for entry in entries.flatten() {
+        let dir = entry.path().join(session_id);
+        if dir.is_dir() {
+            return Some(dir);
+        }
+    }
+    None
+}
+
+fn json_content_text(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .map(json_content_text)
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        serde_json::Value::Object(object) => object
+            .get("text")
+            .or_else(|| object.get("content"))
+            .map(json_content_text)
+            .unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+fn user_query_text(value: &serde_json::Value) -> Option<String> {
+    if value.get("type").and_then(serde_json::Value::as_str) != Some("user") {
+        return None;
+    }
+    let raw = json_content_text(value.get("content")?);
+    let start = raw.find("<user_query>")? + "<user_query>".len();
+    let end = raw[start..].find("</user_query>")? + start;
+    let query = raw[start..end].trim();
+    (!query.is_empty()).then(|| query.to_string())
+}
+
+fn atomic_replace_text(path: &Path, text: &str) -> Result<(), String> {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("session.jsonl");
+    let temporary = path.with_file_name(format!(
+        ".{file_name}.undo-{}.tmp",
+        uuid::Uuid::now_v7()
+    ));
+    if let Err(error) = fs::write(&temporary, text) {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("write {} failed: {error}", temporary.display()));
+    }
+    if let Err(error) = fs::rename(&temporary, path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("replace {} failed: {error}", path.display()));
+    }
+    Ok(())
+}
+
+fn truncate_jsonl_before_line(raw: &str, line_index: usize) -> String {
+    let lines: Vec<&str> = raw.lines().collect();
+    if line_index == 0 {
+        return String::new();
+    }
+    let mut kept = lines[..line_index.min(lines.len())].join("\n");
+    kept.push('\n');
+    kept
+}
+
+fn truncate_rewind_points(raw: &str, target_prompt_index: u64) -> String {
+    let mut kept = raw
+        .lines()
+        .filter(|line| {
+            serde_json::from_str::<serde_json::Value>(line)
+                .ok()
+                .and_then(|value| value.get("prompt_index").and_then(serde_json::Value::as_u64))
+                .is_none_or(|index| index < target_prompt_index)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !kept.is_empty() {
+        kept.push('\n');
+    }
+    kept
+}
+
+/// Truncate Grok's local session files in place, preserving the session ID.
+/// Returns false when the target is not the latest prompt or the file format
+/// cannot be matched safely; callers must then use the ACP/rebase fallback.
+fn truncate_local_grok_session(session_id: &str, undone_prompt: &str) -> Result<bool, String> {
+    let Some(session_dir) = find_grok_session_dir(session_id) else {
+        return Ok(false);
+    };
+    truncate_local_grok_session_dir(&session_dir, undone_prompt)
+}
+
+fn truncate_local_grok_session_dir(
+    session_dir: &Path,
+    undone_prompt: &str,
+) -> Result<bool, String> {
+    let chat_path = session_dir.join("chat_history.jsonl");
+    if !chat_path.is_file() {
+        return Ok(false);
+    }
+    let chat_raw = fs::read_to_string(&chat_path)
+        .map_err(|error| format!("read {} failed: {error}", chat_path.display()))?;
+    let mut target: Option<(usize, u64)> = None;
+    let mut latest_prompt_index: Option<u64> = None;
+    let mut fallback_index = 0u64;
+    for (line_index, line) in chat_raw.lines().enumerate() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let Some(query) = user_query_text(&value) else {
+            continue;
+        };
+        let prompt_index = value
+            .get("prompt_index")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(fallback_index);
+        fallback_index = prompt_index + 1;
+        latest_prompt_index = Some(prompt_index);
+        if query == undone_prompt.trim() {
+            target = Some((line_index, prompt_index));
+        }
+    }
+    let Some((chat_cut, target_prompt_index)) = target else {
+        return Ok(false);
+    };
+    if latest_prompt_index != Some(target_prompt_index) {
+        // The selected prompt is no longer the session tail (for example a
+        // hidden CLI turn arrived after it); never truncate that unseen work.
+        return Ok(false);
+    }
+
+    let mut replacements = vec![(
+        chat_path.clone(),
+        truncate_jsonl_before_line(&chat_raw, chat_cut),
+    )];
+    let updates_path = session_dir.join("updates.jsonl");
+    if updates_path.is_file() {
+        let updates_raw = fs::read_to_string(&updates_path)
+            .map_err(|error| format!("read {} failed: {error}", updates_path.display()))?;
+        let update_cut = updates_raw
+            .lines()
+            .enumerate()
+            .find_map(|(line_index, line)| {
+                let value = serde_json::from_str::<serde_json::Value>(line).ok()?;
+                let update = value.pointer("/params/update")?;
+                if update
+                    .get("sessionUpdate")
+                    .and_then(serde_json::Value::as_str)
+                    != Some("user_message_chunk")
+                {
+                    return None;
+                }
+                let index = update
+                    .get("_meta")
+                    .and_then(|meta| meta.get("promptIndex"))
+                    .and_then(serde_json::Value::as_u64)?;
+                (index >= target_prompt_index).then_some(line_index)
+            });
+        let Some(update_cut) = update_cut else {
+            // Do not leave an authoritative updates log untouched while only
+            // truncating chat_history; export could then resurrect the turn.
+            return Ok(false);
+        };
+        replacements.push((
+            updates_path,
+            truncate_jsonl_before_line(&updates_raw, update_cut),
+        ));
+    }
+    let rewind_points_path = session_dir.join("rewind_points.jsonl");
+    if rewind_points_path.is_file() {
+        let rewind_raw = fs::read_to_string(&rewind_points_path).map_err(|error| {
+            format!("read {} failed: {error}", rewind_points_path.display())
+        })?;
+        replacements.push((
+            rewind_points_path,
+            truncate_rewind_points(&rewind_raw, target_prompt_index),
+        ));
+    }
+    for (path, replacement) in replacements {
+        atomic_replace_text(&path, &replacement)?;
+    }
+    Ok(true)
+}
+
 fn grok_session_updates_path(session_id: &str) -> Option<PathBuf> {
     let root = grok_home_dir().join("sessions");
     let key = (root.clone(), session_id.to_string());
@@ -2611,9 +2801,13 @@ async fn export_grok_session(session_id: String) -> Result<String, String> {
     .map_err(|error| format!("export_grok_session join failed: {error}"))?
 }
 
-/// Drop the latest user turn from the shared grok session (ACP rewind).
-/// Desktop undo is local-only unless this runs; CLI + export poll would
-/// otherwise resurrect the undone messages.
+/// Rewind the active Grok context without clearing the whole session.
+///
+/// Prefer an in-place conversation-only rewind so all earlier turns and the
+/// session identity survive. If the old ACP head cannot be loaded or rewound,
+/// fall back to a new durable head seeded only with the turns still visible.
+/// This makes the model-context boundary identical to the UI boundary without
+/// turning every Undo into `/clear`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UndoSessionResult {
@@ -2651,11 +2845,15 @@ async fn rewind_grok_session(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    let rewind = crate::runs::core::rewind_last_user_turn(
+    // Desktop's TUI was stopped above, so rewind through an isolated ACP
+    // client. This avoids trying to bind a second client to a shared leader
+    // while still preserving the original session when the rewind succeeds.
+    let rewind = crate::runs::core::rewind_last_user_turn_with_share(
         Path::new(&program),
         &cwd,
         &session_id,
         undone.as_deref(),
+        false,
     )
     .await;
     if matches!(rewind, Ok(ref result) if result.rewound) {
@@ -2666,9 +2864,27 @@ async fn rewind_grok_session(
         });
     }
 
-    // Grok 1.0 may expose rewind points yet refuse execute for a loaded
-    // session.  Never reconnect Desktop/CLI to that stale head: create a new
-    // durable session seeded only with the turns still visible after Undo.
+    // Some Grok builds persist the usable conversation in local JSONL but do
+    // not expose rewind execution through ACP. Truncate that same session's
+    // chat history and rewind points before creating a new session. This keeps
+    // the normal Undo path on one session and avoids session-directory growth.
+    if let Some(prompt) = undone.as_deref() {
+        match truncate_local_grok_session(&session_id, prompt) {
+            Ok(true) => {
+                return Ok(UndoSessionResult {
+                    rewound: true,
+                    session_id,
+                    rebased: false,
+                });
+            }
+            Ok(false) => {}
+            Err(error) => eprintln!("[grok undo] local JSONL rewind failed: {error}"),
+        }
+    }
+
+    // Grok may expose neither a usable JSONL checkpoint nor rewind execution,
+    // or the old session may be gone. Only in that case create a replacement
+    // seeded with the replay context supplied by the renderer.
     let rewind_error = rewind.err();
     let replacement = crate::runs::core::create_rebased_session(
         Path::new(&program),
@@ -4215,6 +4431,97 @@ mod tests {
                 ("assistant".into(), "still here".into()),
             ]
         );
+    }
+
+    #[test]
+    fn local_undo_matches_only_tagged_user_queries() {
+        let actual_user = serde_json::json!({
+            "type": "user",
+            "prompt_index": 3,
+            "content": [{"type": "text", "text": "<user_query>keep this</user_query>"}]
+        });
+        let synthetic_user = serde_json::json!({
+            "type": "user",
+            "content": [{"type": "text", "text": "<system-reminder>internal</system-reminder>"}]
+        });
+        assert_eq!(user_query_text(&actual_user).as_deref(), Some("keep this"));
+        assert_eq!(user_query_text(&synthetic_user), None);
+    }
+
+    #[test]
+    fn local_undo_truncation_keeps_prior_jsonl_records() {
+        let raw = "system\nfirst\nsecond\n";
+        assert_eq!(truncate_jsonl_before_line(raw, 2), "system\nfirst\n");
+        assert_eq!(truncate_jsonl_before_line(raw, 0), "");
+    }
+
+    #[test]
+    fn local_undo_truncation_removes_target_and_later_rewind_points() {
+        let raw = concat!(
+            r#"{"prompt_index":0}"#, "\n",
+            r#"{"prompt_index":1}"#, "\n",
+            r#"{"prompt_index":2}"#, "\n",
+        );
+        assert_eq!(
+            truncate_rewind_points(raw, 2),
+            concat!(r#"{"prompt_index":0}"#, "\n", r#"{"prompt_index":1}"#, "\n")
+        );
+    }
+
+    #[test]
+    fn local_undo_updates_all_authoritative_jsonl_files_together() {
+        let session_dir =
+            env::temp_dir().join(format!("grok-local-undo-{}", uuid::Uuid::now_v7()));
+        fs::create_dir_all(&session_dir).expect("create session directory");
+        fs::write(
+            session_dir.join("chat_history.jsonl"),
+            concat!(
+                "{\"type\":\"system\"}\n",
+                "{\"type\":\"user\",\"prompt_index\":0,\"content\":[{\"text\":\"<user_query>first</user_query>\"}]}\n",
+                "{\"type\":\"assistant\",\"content\":\"first reply\"}\n",
+                "{\"type\":\"user\",\"prompt_index\":1,\"content\":[{\"text\":\"<user_query>second</user_query>\"}]}\n",
+                "{\"type\":\"assistant\",\"content\":\"second reply\"}\n",
+            ),
+        )
+        .expect("write chat history");
+        fs::write(
+            session_dir.join("updates.jsonl"),
+            concat!(
+                "{\"params\":{\"update\":{\"sessionUpdate\":\"user_message_chunk\",\"content\":{\"text\":\"first\"},\"_meta\":{\"promptIndex\":0}}}}\n",
+                "{\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{\"text\":\"first reply\"}}}}\n",
+                "{\"params\":{\"update\":{\"sessionUpdate\":\"user_message_chunk\",\"content\":{\"text\":\"second\"},\"_meta\":{\"promptIndex\":1}}}}\n",
+                "{\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{\"text\":\"second reply\"}}}}\n",
+            ),
+        )
+        .expect("write updates");
+        fs::write(
+            session_dir.join("rewind_points.jsonl"),
+            "{\"prompt_index\":0}\n{\"prompt_index\":1}\n",
+        )
+        .expect("write rewind points");
+
+        assert!(truncate_local_grok_session_dir(&session_dir, "second").expect("undo session"));
+        assert_eq!(
+            fs::read_to_string(session_dir.join("chat_history.jsonl")).unwrap(),
+            concat!(
+                "{\"type\":\"system\"}\n",
+                "{\"type\":\"user\",\"prompt_index\":0,\"content\":[{\"text\":\"<user_query>first</user_query>\"}]}\n",
+                "{\"type\":\"assistant\",\"content\":\"first reply\"}\n",
+            )
+        );
+        assert_eq!(
+            fs::read_to_string(session_dir.join("updates.jsonl")).unwrap(),
+            concat!(
+                "{\"params\":{\"update\":{\"sessionUpdate\":\"user_message_chunk\",\"content\":{\"text\":\"first\"},\"_meta\":{\"promptIndex\":0}}}}\n",
+                "{\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{\"text\":\"first reply\"}}}}\n",
+            )
+        );
+        assert_eq!(
+            fs::read_to_string(session_dir.join("rewind_points.jsonl")).unwrap(),
+            "{\"prompt_index\":0}\n"
+        );
+
+        fs::remove_dir_all(session_dir).ok();
     }
 
     #[test]

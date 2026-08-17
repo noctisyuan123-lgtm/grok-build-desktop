@@ -8854,6 +8854,12 @@ body,
   margin-left: 0;
   margin-right: 0;
 }
+.message.message-user > .message-actions {
+  align-self: flex-end;
+  justify-content: flex-end;
+  max-width: min(74%, 920px);
+  width: auto;
+}
 .message.message-assistant .message-body.markdown-body {
   font-size: 14px;
   line-height: 22px;

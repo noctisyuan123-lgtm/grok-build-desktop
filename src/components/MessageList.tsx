@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { MessageItem } from './MessageItem';
 import { LongTextMessage } from './LongTextMessage';
+import { MessageActions } from './MessageActions';
 import { isLongUserText } from '../lib/longText';
 import { useSessionActiveRun } from '../hooks/useActiveRun';
+import { t } from '../i18n';
 import type { PlanEntry, TraceEvent } from '../lib/traceParser';
 import type { TranscriptSegment } from '../lib/streamStore';
 import type { ComposerAttachment } from '../lib/attachments';
@@ -31,6 +33,7 @@ export interface MessageRef {
   /** Keep the work fold open only while this turn is actively streaming. */
   autoExpandWork?: boolean;
   canUndo?: boolean;
+  showUndo?: boolean;
   attachments?: ComposerAttachment[];
 }
 
@@ -41,6 +44,7 @@ interface Props {
   focusId?: string | null;
   focusNonce?: number;
   onUndoAssistant?: (messageId: string) => void;
+  onUndoUser?: (messageId: string) => void;
   onAttachmentClick?: (attachment: ComposerAttachment) => void;
 }
 
@@ -49,6 +53,7 @@ export function MessageList({
   focusId,
   focusNonce,
   onUndoAssistant,
+  onUndoUser,
   onAttachmentClick,
 }: Props) {
   const ref = useRef<VirtuosoHandle>(null);
@@ -208,6 +213,16 @@ export function MessageList({
                   <pre className="message-body">{msg.userText}</pre>
                 )
               ) : null}
+              <MessageActions
+                sourceText={msg.userText ?? ''}
+                canUndo={Boolean(msg.canUndo)}
+                showUndo={Boolean(msg.showUndo)}
+                onUndo={msg.id && onUndoUser ? () => onUndoUser(msg.id!) : undefined}
+                toolbarLabel={t('message.promptActions')}
+                copyLabel={t('message.copyPrompt')}
+                undoLabel={t('message.undoPrompt')}
+                undoDisabledLabel={t('message.undoPromptLatestOnly')}
+              />
             </div>
           );
         }
@@ -227,6 +242,7 @@ export function MessageList({
               showPlan={msg.showPlan}
               autoExpandWork={msg.autoExpandWork}
               canUndo={Boolean(msg.canUndo)}
+              showUndo={Boolean(msg.showUndo)}
               onUndo={
                 assistantId && onUndoAssistant ? () => onUndoAssistant(assistantId) : undefined
               }

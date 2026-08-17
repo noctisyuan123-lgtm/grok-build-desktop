@@ -296,7 +296,27 @@ pub async fn rewind_last_user_turn(
     session_id: &str,
     undone_preview: Option<&str>,
 ) -> Result<RewindResult, String> {
-    let share = desktop_leader_socket_ready();
+    rewind_last_user_turn_with_share(
+        binary,
+        cwd,
+        session_id,
+        undone_preview,
+        desktop_leader_socket_ready(),
+    )
+    .await
+}
+
+/// Rewind a session while explicitly controlling whether the ACP client may
+/// attach to the shared CLI leader. Undo stops Desktop's own TUI first, so the
+/// safe path is an unshared client; if that cannot load/rewind the old head,
+/// the caller can fall back to a fresh replay session.
+pub async fn rewind_last_user_turn_with_share(
+    binary: &Path,
+    cwd: &Path,
+    session_id: &str,
+    undone_preview: Option<&str>,
+    share: bool,
+) -> Result<RewindResult, String> {
     let config = CoreConfig {
         model: None,
         reasoning_effort: None,
@@ -376,6 +396,12 @@ impl AcpHost {
         if !binary.is_file() {
             return Err(format!("grok binary not found at {:?}", binary));
         }
+        // The legacy runner already removes a dead auth lock before spawn.
+        // ACP launches the child directly, so it must perform the same
+        // cleanup or a killed older Grok can leave this host blocked before
+        // it emits initialize/session responses.
+        #[cfg(unix)]
+        process::cleanup_stale_grok_lock();
         let resolved_cwd = if cwd.is_dir() {
             cwd.to_path_buf()
         } else {
@@ -700,11 +726,24 @@ impl AcpHost {
         self.write(&json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }))
             .await?;
         loop {
-            let line = timeout(Duration::from_secs(420), self.lines.next_line())
-                .await
-                .map_err(|_| format!("Grok Core ACP timed out waiting for {method}"))?
-                .map_err(|e| format!("Grok Core ACP read failed: {e}"))?
-                .ok_or_else(|| "Grok Core ACP stream closed".to_string())?;
+            // A prompt can legitimately spend more than 420 seconds inside a
+            // tool or background task without producing an ACP line. An idle
+            // stdout timer here would kill a live turn and report it as a
+            // transport failure. Control/handshake requests retain a bound;
+            // an active prompt ends when ACP replies, the child exits, or the
+            // user cancels the run through the process group.
+            let line = if !uses_idle_timeout(method) {
+                self.lines
+                    .next_line()
+                    .await
+                    .map_err(|e| format!("Grok Core ACP read failed: {e}"))?
+            } else {
+                timeout(Duration::from_secs(420), self.lines.next_line())
+                    .await
+                    .map_err(|_| format!("Grok Core ACP timed out waiting for {method}"))?
+                    .map_err(|e| format!("Grok Core ACP read failed: {e}"))?
+            };
+            let line = line.ok_or_else(|| "Grok Core ACP stream closed".to_string())?;
             let message: Value = match serde_json::from_str(&line) {
                 Ok(message) => message,
                 Err(_) => continue,
@@ -761,6 +800,10 @@ impl AcpHost {
             .map_err(|e| format!("Grok Core ACP write failed: {e}"))?;
         self.stdin.flush().await.map_err(|e| e.to_string())
     }
+}
+
+fn uses_idle_timeout(method: &str) -> bool {
+    method != "session/prompt"
 }
 
 fn permission_result(options: &[Value], may_approve: bool) -> Value {
@@ -888,6 +931,15 @@ pub async fn stop_process_group(pgid: i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prompt_wait_does_not_use_idle_transport_timeout() {
+        // Long-running tools can leave ACP stdout quiet while the prompt is
+        // still live. The request must remain cancellable, not time out here.
+        assert!(!uses_idle_timeout("session/prompt"));
+        assert!(uses_idle_timeout("initialize"));
+        assert!(uses_idle_timeout("session/load"));
+    }
 
     #[test]
     fn converts_legacy_run_flags_to_core_config() {

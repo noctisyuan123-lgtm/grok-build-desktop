@@ -21,6 +21,7 @@ interface Props {
   showPlan?: boolean;
   autoExpandWork?: boolean;
   canUndo?: boolean;
+  showUndo?: boolean;
   onUndo?: () => void;
 }
 
@@ -34,6 +35,7 @@ function MessageItemImpl({
   showPlan = false,
   autoExpandWork = false,
   canUndo = false,
+  showUndo = true,
   onUndo,
 }: Props) {
   const snap = useRunSnapshot(runId);
@@ -107,6 +109,7 @@ function MessageItemImpl({
           startedAt={null}
           autoExpandWork={autoExpandWork}
           canUndo={canUndo}
+          showUndo={showUndo}
           onUndo={onUndo}
           planNode={planNode}
         />
@@ -121,7 +124,12 @@ function MessageItemImpl({
             dangerouslySetInnerHTML={{ __html: safeHtml }}
             onClick={handleMarkdownClick}
           />
-          <MessageActions sourceText={fallbackText || ''} canUndo={canUndo} onUndo={onUndo} />
+          <MessageActions
+            sourceText={fallbackText || ''}
+            canUndo={canUndo}
+            showUndo={showUndo}
+            onUndo={onUndo}
+          />
           {planNode}
         </>
       );
@@ -131,7 +139,12 @@ function MessageItemImpl({
         <>
           {workedRow}
           <pre className="message-body">{fallbackText}</pre>
-          <MessageActions sourceText={fallbackText} canUndo={canUndo} onUndo={onUndo} />
+          <MessageActions
+            sourceText={fallbackText}
+            canUndo={canUndo}
+            showUndo={showUndo}
+            onUndo={onUndo}
+          />
           {planNode}
         </>
       );
@@ -158,6 +171,7 @@ function MessageItemImpl({
           startedAt={snap.startedAt}
           autoExpandWork={autoExpandWork}
           canUndo={canUndo && !runIsLive}
+          showUndo={showUndo}
           onUndo={onUndo}
           planNode={planNode}
         />
@@ -230,6 +244,7 @@ function TranscriptMessage({
   startedAt,
   autoExpandWork,
   canUndo,
+  showUndo,
   onUndo,
   planNode,
 }: {
@@ -243,6 +258,7 @@ function TranscriptMessage({
   startedAt: number | null;
   autoExpandWork: boolean;
   canUndo: boolean;
+  showUndo: boolean;
   onUndo?: () => void;
   planNode?: ReactNode;
 }) {
@@ -373,7 +389,12 @@ function TranscriptMessage({
           className="markdown-streaming"
         />
       ) : null}
-      <MessageActions sourceText={finalText} canUndo={canUndo} onUndo={onUndo} />
+      <MessageActions
+        sourceText={finalText}
+        canUndo={canUndo}
+        showUndo={showUndo}
+        onUndo={onUndo}
+      />
       {planNode}
     </>
   );

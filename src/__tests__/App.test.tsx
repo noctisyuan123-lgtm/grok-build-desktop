@@ -635,6 +635,116 @@ describe('composer submit → queued run → streamed reply', () => {
     expect(composerTextarea().value).toBe('Keep this newer draft');
   });
 
+  it('copies the prompt and rewinds context from the latest response control', async () => {
+    const ctx = await bootApp({
+      rewind_grok_session: () => ({
+        rewound: false,
+        sessionId: 'replacement-session',
+        rebased: true,
+      }),
+    });
+    const runId = await submitPrompt(ctx, 'Undo this prompt from its own controls');
+    await act(async () => {
+      await ctx.tauri.streamReply(runId, ['This response should disappear too.']);
+    });
+    await waitFor(() => {
+      expect(document.querySelector('.message-assistant')).toHaveTextContent(
+        'This response should disappear too.',
+      );
+    });
+
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+    await ctx.user.click(await convo().findByRole('button', { name: t('message.copyPrompt') }));
+    expect(writeText).toHaveBeenCalledWith('Undo this prompt from its own controls');
+
+    expect(convo().queryByRole('button', { name: t('message.undoPrompt') })).not.toBeInTheDocument();
+    await ctx.user.click(await convo().findByRole('button', { name: t('message.undoResponse') }));
+
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
+    const rewind = [...ctx.tauri.calls]
+      .reverse()
+      .find((call) => call.cmd === 'rewind_grok_session');
+    expect(rewind?.args.undoPrompt).toBe('Undo this prompt from its own controls');
+    expect(convo().queryByText('Undo this prompt from its own controls')).not.toBeInTheDocument();
+    expect(convo().queryByText('This response should disappear too.')).not.toBeInTheDocument();
+    expect(composerTextarea().value).toBe('Undo this prompt from its own controls');
+
+    await ctx.user.keyboard('{Enter}');
+    await waitFor(() => expect(ctx.tauri.runIds).toHaveLength(2));
+    const resumedArgs = [...ctx.tauri.calls]
+      .reverse()
+      .find((call) => call.cmd === 'enqueue_run')?.args.args as string[];
+    expect(resumedArgs).toContain('--resume');
+    expect(resumedArgs[resumedArgs.indexOf('--resume') + 1]).toBe('replacement-session');
+    expect(resumedArgs).not.toContain('--share-session');
+  });
+
+  it('keeps the visible pre-Undo history when the rewound export is temporarily incomplete', async () => {
+    let exportText = '';
+    const ctx = await bootApp({
+      export_grok_session: () => exportText,
+      rewind_grok_session: (args) => {
+        // Simulate the durable session briefly exposing only the retained
+        // prompt while its assistant transcript is still being written.
+        exportText = '## User\n\nKeep this context\n';
+        return {
+          rewound: true,
+          sessionId: String(args.sessionId),
+          rebased: false,
+        };
+      },
+    });
+    const firstRun = await submitPrompt(ctx, 'Keep this context');
+    await act(async () => {
+      await ctx.tauri.streamReply(firstRun, ['Kept reply.']);
+    });
+    const secondRun = await submitPrompt(ctx, 'Remove this turn');
+    await act(async () => {
+      await ctx.tauri.streamReply(secondRun, ['This reply is undone.']);
+    });
+
+    await ctx.user.click(await convo().findByRole('button', { name: t('message.undoResponse') }));
+
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
+    expect(await convo().findByText('Keep this context')).toBeInTheDocument();
+    expect(await convo().findByText('Kept reply.')).toBeInTheDocument();
+    expect(convo().queryByText('Remove this turn')).not.toBeInTheDocument();
+    expect(convo().queryByText('This reply is undone.')).not.toBeInTheDocument();
+  });
+
+  it('lets a user-only tail undo itself through the same context replacement path', async () => {
+    let handoffConsumed = false;
+    let undonePrompt = '';
+    const ctx = await bootApp({
+      consume_desktop_handoff: () => {
+        if (handoffConsumed) return null;
+        handoffConsumed = true;
+        return {
+          sessionId: 'shared-user-tail',
+          cwd: '/mock/project',
+          requestedAt: Date.now(),
+        };
+      },
+      export_grok_session: () => '## User\n\nUndo this user-only tail\n',
+      rewind_grok_session: (args) => {
+        undonePrompt = String(args.undoPrompt ?? '');
+        return {
+          rewound: false,
+          sessionId: 'replacement-user-tail',
+          rebased: true,
+        };
+      },
+    });
+
+    expect(await convo().findByText('Undo this user-only tail')).toBeInTheDocument();
+    await ctx.user.click(await convo().findByRole('button', { name: t('message.undoPrompt') }));
+
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
+    expect(undonePrompt).toBe('Undo this user-only tail');
+    expect(convo().queryByText('Undo this user-only tail')).not.toBeInTheDocument();
+    expect(composerTextarea().value).toBe('Undo this user-only tail');
+  });
+
   it('after undo re-seeds visible prior turns into a fresh session (not a bare /clear)', async () => {
     const ctx = await bootApp();
     const firstRun = await submitPrompt(ctx, 'Remember the project name Aurora');

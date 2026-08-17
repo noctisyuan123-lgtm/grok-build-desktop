@@ -47,7 +47,7 @@ pub fn default_proxy_env() -> Vec<(&'static str, &'static str)> {
 /// Detect and remove stale locks: if the recorded PID no longer exists,
 /// delete the lock so the new grok run can acquire it cleanly.
 #[cfg(unix)]
-fn cleanup_stale_grok_lock() {
+pub fn cleanup_stale_grok_lock() {
     let home = match std::env::var("HOME") {
         Ok(h) => h,
         Err(_) => return,

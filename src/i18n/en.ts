@@ -280,10 +280,14 @@ export const en = {
   'message.traceAriaLabel': 'Tool and subagent activity',
   'message.workedFor': 'Worked for {duration}',
   'message.actions': 'Response actions',
+  'message.promptActions': 'Prompt actions',
   'message.copy': 'Copy response',
+  'message.copyPrompt': 'Copy prompt',
   'message.copied': 'Copied',
   'message.undoResponse': 'Undo response',
   'message.undoLatestOnly': 'Only the latest completed response can be undone',
+  'message.undoPrompt': 'Undo prompt',
+  'message.undoPromptLatestOnly': 'Only the latest completed prompt can be undone',
   'message.turnUndone': 'Response moved back to the composer.',
 
   // ── Subagent float / drawer ───────────────────────────────────────────────
