@@ -3,7 +3,6 @@ import {
   isActionPolicy,
   isChatMessage,
   isDockPosition,
-  isEffortLevel,
   isGrokModelId,
   isInspectorTab,
   isMode,
@@ -42,9 +41,7 @@ describe('simple union guards', () => {
     expect(isInspectorTab('overview')).toBe(false);
   });
 
-  it('isEffortLevel and isReasoningEffort', () => {
-    for (const v of ['low', 'medium', 'high', 'xhigh', 'max']) expect(isEffortLevel(v)).toBe(true);
-    expect(isEffortLevel('off')).toBe(false);
+  it('isReasoningEffort', () => {
     for (const v of ['off', 'low', 'medium', 'high', 'xhigh', 'max'])
       expect(isReasoningEffort(v)).toBe(true);
     expect(isReasoningEffort('none')).toBe(false);

@@ -74,12 +74,12 @@ interface Props {
    *  user staring at a composer that "ate" their prompt. */
   onError?: (message: string) => void;
   /**
-   * Optional draft-persistence callback. **Called only on blur and on unmount**,
-   * not on every keystroke — passing it as a per-keystroke listener would force
-   * the parent (3000-line App.tsx) to re-render on each character and stall the
+   * Optional draft-persistence callback. It is deliberately not called on
+   * every keystroke — passing it as a per-keystroke listener would force the
+   * parent (3000-line App.tsx) to re-render on each character and stall the
    * main thread, which in turn drops IME composition events and causes
-   * accidental auto-submits. We persist on blur instead, which is enough for
-   * "user typed, switched modes" preservation.
+   * accidental auto-submits. It runs on blur/unmount and native window-hide
+   * boundaries so a focused draft survives the macOS close button.
    */
   onTextChange?: (text: string) => void;
   /** Compact mode/model/run controls rendered inside the input card. */
@@ -390,14 +390,26 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     resizeTextarea();
   }, [resizeTextarea]);
 
-  // Persist the in-flight draft on unmount (e.g. parent re-mounts Composer on
-  // mode switch). Reads the current text directly from the DOM ref — no
-  // dependency on React state.
+  // Persist the in-flight draft on focus/window lifecycle boundaries (e.g.
+  // the macOS close button hides the window without unmounting the WebView).
+  // Reads the current text directly from the DOM ref — no dependency on
+  // React state. These listeners stay scoped to this mounted Composer.
   useEffect(() => {
     const node = ref.current;
+    const flushDraft = () => {
+      onTextChangeRef.current?.(ref.current?.value ?? '');
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushDraft();
+    };
+    window.addEventListener('blur', flushDraft);
+    window.addEventListener('pagehide', flushDraft);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
-      const text = node?.value ?? '';
-      if (text && onTextChangeRef.current) onTextChangeRef.current(text);
+      window.removeEventListener('blur', flushDraft);
+      window.removeEventListener('pagehide', flushDraft);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      onTextChangeRef.current?.(node?.value ?? '');
     };
   }, []);
 
@@ -672,8 +684,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             }
           }}
           onBlur={(e) => {
-            // Persist draft only on blur, not every keystroke — that's the
-            // critical perf invariant. See header comment on onTextChange prop.
+            // Persist draft on normal textarea blur. Window lifecycle hooks
+            // above cover the native close/hide path while it is focused.
             onTextChangeRef.current?.((e.target as HTMLTextAreaElement).value);
             // Close mention picker on blur so it doesn't linger over other UI.
             // Use a microtask so mousedown on a picker row can fire first.

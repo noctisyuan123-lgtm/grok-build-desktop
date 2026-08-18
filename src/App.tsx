@@ -279,7 +279,7 @@ function App() {
   // selects which left-nav panel is shown.
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<
-    'general' | 'model' | 'permissions' | 'integrations' | 'about'
+    'general' | 'model' | 'permissions' | 'about'
   >('general');
   // Dedicated Tools / MCP hub (community-tool integration).
   const [toolsPageOpen, setToolsPageOpen] = useState(false);
@@ -413,14 +413,10 @@ function App() {
   // CLI-verified options, coding auto-snap) lives in hooks/useModelConfig.ts.
   const modelConfig = useModelConfig({ mode, availableModels });
   const {
-    effortLevel,
     reasoningEffort,
     permissionMode,
-    bestOfN,
     experimentalMemory,
     webSearchEnabled,
-    subagentsEnabled,
-    selfCheck,
     activeModel,
   } = modelConfig;
   // Clear conversation + run history + terminal — destructive, so it offers
@@ -890,15 +886,11 @@ function App() {
     return buildGrokArgs({
       mode,
       activeModel,
-      effortLevel,
       reasoningEffort,
       actionPolicy,
       permissionMode,
-      bestOfN,
       experimentalMemory,
       webSearchEnabled,
-      subagentsEnabled,
-      selfCheck,
       codingCwd,
       resumeSessionId,
       // ACP intentionally does not interpret the CLI's cwd-global `-c`.
@@ -940,15 +932,11 @@ function App() {
     codingCwd,
     mode,
     activeModel,
-    effortLevel,
     reasoningEffort,
     actionPolicy,
     permissionMode,
-    bestOfN,
     experimentalMemory,
     webSearchEnabled,
-    subagentsEnabled,
-    selfCheck,
     liveSessionId,
   ]);
 
@@ -1586,9 +1574,6 @@ function App() {
         modelConfig={modelConfig}
         actionPolicy={actionPolicy}
         setActionPolicy={setActionPolicy}
-        codingCwd={codingCwd}
-        setCodingCwd={setCodingCwd}
-        onPickFolder={() => void pickFolder()}
         grokVersionLine={`Grok CLI ${grokStatus?.version ?? 'unknown'}`}
       />
       <ToolsPage open={toolsPageOpen} onClose={() => setToolsPageOpen(false)} cwd={codingCwd} />

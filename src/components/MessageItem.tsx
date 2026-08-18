@@ -233,7 +233,7 @@ function MessageItemImpl({
 
 export const MessageItem = memo(MessageItemImpl);
 
-function TranscriptMessage({
+export function TranscriptMessage({
   runId,
   transcript,
   traces,

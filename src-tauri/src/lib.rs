@@ -1494,14 +1494,6 @@ fn normalized_model(model: Option<String>) -> String {
     }
 }
 
-#[allow(dead_code)]
-fn normalized_best_of_n(best_of_n: Option<u8>) -> Option<u8> {
-    best_of_n.and_then(|value| match value {
-        2..=5 => Some(value),
-        _ => None,
-    })
-}
-
 fn normalized_permission_mode(permission_mode: Option<String>) -> Option<String> {
     let value = permission_mode?;
     match value.trim() {
@@ -1522,11 +1514,9 @@ struct GrokRunOptions {
     effort: Option<String>,
     reasoning_effort: Option<String>,
     permission_mode: Option<String>,
-    best_of_n: Option<u8>,
     experimental_memory: bool,
     web_search_enabled: bool,
     subagents_enabled: bool,
-    self_check: bool,
 }
 
 impl Default for GrokRunOptions {
@@ -1536,11 +1526,9 @@ impl Default for GrokRunOptions {
             effort: None,
             reasoning_effort: None,
             permission_mode: None,
-            best_of_n: None,
             experimental_memory: false,
             web_search_enabled: true,
             subagents_enabled: true,
-            self_check: false,
         }
     }
 }
@@ -1551,11 +1539,9 @@ fn grok_args(prompt: &str, mode: &str, cwd: &Path, options: GrokRunOptions) -> V
         effort,
         reasoning_effort,
         permission_mode,
-        best_of_n: _,
         experimental_memory,
         web_search_enabled,
         subagents_enabled,
-        self_check,
     } = options;
     let user_prompt = prompt.trim().to_string();
     if let Ok(template) = env::var("GROK_DESKTOP_GROK_ARGS") {
@@ -1577,15 +1563,6 @@ fn grok_args(prompt: &str, mode: &str, cwd: &Path, options: GrokRunOptions) -> V
         args.push(permission_mode);
     }
 
-    if self_check
-        || matches!(
-            env::var("GROK_DESKTOP_GROK_CHECK").as_deref(),
-            Ok("1" | "true" | "yes")
-        )
-    {
-        args.push("--check".to_string());
-    }
-
     if experimental_memory {
         args.push("--experimental-memory".to_string());
     }
@@ -1594,7 +1571,6 @@ fn grok_args(prompt: &str, mode: &str, cwd: &Path, options: GrokRunOptions) -> V
         args.push("--disable-web-search".to_string());
     }
 
-    // grok 1.0 dropped `--best-of-n`; never emit it.
     if !subagents_enabled {
         args.push("--no-subagents".to_string());
     }
@@ -4073,10 +4049,15 @@ pub fn run() {
                         WindowEvent::Resized(size) => {
                             save_window_state(&state_path_for_close, *size);
                         }
-                        WindowEvent::CloseRequested { .. } => {
+                        WindowEvent::CloseRequested { api, .. } => {
+                            // Closing the document window should keep the
+                            // desktop agent alive in the background. Cmd-Q
+                            // remains the explicit app-level quit path.
+                            api.prevent_close();
                             if let Ok(size) = window_for_close.outer_size() {
                                 save_window_state(&state_path_for_close, size);
                             }
+                            let _ = window_for_close.hide();
                         }
                         _ => {}
                     }
@@ -4279,6 +4260,15 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
+            // Clicking the Dock icon after the window was hidden should bring
+            // the existing process and its session back to the foreground.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = &event {
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
             // App-level quit (including Cmd-Q / `tell application … to quit`)
             // does not necessarily produce a per-window CloseRequested event
             // on macOS, so persist here as the reliable final checkpoint.

@@ -227,6 +227,18 @@ describe('Composer submit', () => {
     expect(onTextChange).toHaveBeenCalledWith('draft text');
   });
 
+  it('flushes a focused draft when the native window is about to hide', async () => {
+    const onTextChange = vi.fn();
+    const user = userEvent.setup();
+    const { textarea } = renderComposer({ onTextChange });
+
+    await user.type(textarea, 'draft before close');
+    expect(onTextChange).not.toHaveBeenCalled();
+
+    fireEvent(window, new Event('blur'));
+    expect(onTextChange).toHaveBeenLastCalledWith('draft before close');
+  });
+
   it('attaches selected images and sends them as ACP prompt-json content blocks', async () => {
     const calls: Array<{ cmd: string; payload: unknown }> = [];
     mockIPC((cmd, payload) => {

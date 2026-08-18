@@ -2,7 +2,6 @@
 import { t } from '../i18n';
 import type {
   ActionPolicy,
-  EffortLevel,
   GrokModelId,
   InspectorTab,
   Mode,
@@ -45,15 +44,12 @@ export const storageKeys = {
   modelPreset: 'grok-desktop-model-preset',
   customModel: 'grok-desktop-custom-model',
   availableModels: 'grok-desktop-available-models-v1',
-  effortLevel: 'grok-desktop-effort-level',
   reasoningEffort: 'grok-desktop-reasoning-effort',
+  legacyEffortLevel: 'grok-desktop-effort-level',
   permissionMode: 'grok-desktop-permission-mode',
-  bestOfN: 'grok-desktop-best-of-n',
   experimentalMemory: 'grok-desktop-experimental-memory',
   completionSoundEnabled: 'grok-desktop-completion-sound-enabled',
   webSearchEnabled: 'grok-desktop-web-search-enabled',
-  subagentsEnabled: 'grok-desktop-subagents-enabled',
-  selfCheck: 'grok-desktop-self-check',
   safeRuntimeDefaults: 'grok-desktop-safe-runtime-defaults-v3',
   // History-organization (keyed by prompt/message id):
   historyPinned: 'grok-desktop-history-pinned-v1',
@@ -136,14 +132,6 @@ export const actionPolicies: Record<
     detail: t('policy.autopilotDetail'),
     risk: 'high',
   },
-};
-
-export const effortLevels: Record<EffortLevel, { label: string; detail: string }> = {
-  low: { label: t('effort.low'), detail: t('effort.lowDetail') },
-  medium: { label: t('effort.medium'), detail: t('effort.mediumDetail') },
-  high: { label: t('effort.high'), detail: t('effort.highDetail') },
-  xhigh: { label: t('effort.xhigh'), detail: t('effort.xhighDetail') },
-  max: { label: t('effort.max'), detail: t('effort.maxDetail') },
 };
 
 export const reasoningEfforts: Record<ReasoningEffort, { label: string; detail: string }> = {

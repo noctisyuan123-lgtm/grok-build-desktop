@@ -5,7 +5,6 @@ import type { useModelConfig } from '../hooks/useModelConfig';
 import type {
   ActionPolicy,
   DockPosition,
-  EffortLevel,
   GrokModelId,
   PermissionMode,
   ReasoningEffort,
@@ -13,7 +12,6 @@ import type {
 } from '../app/types';
 import {
   actionPolicies,
-  effortLevels,
   grokModelPresets,
   permissionModes,
   reasoningEfforts,
@@ -35,9 +33,6 @@ export interface SettingsHostProps {
   modelConfig: ReturnType<typeof useModelConfig>;
   actionPolicy: ActionPolicy;
   setActionPolicy: (policy: ActionPolicy) => void;
-  codingCwd: string;
-  setCodingCwd: (cwd: string) => void;
-  onPickFolder: () => void;
   grokVersionLine: string;
 }
 
@@ -57,30 +52,19 @@ export function SettingsHost({
   modelConfig,
   actionPolicy,
   setActionPolicy,
-  codingCwd,
-  setCodingCwd,
-  onPickFolder,
   grokVersionLine,
 }: SettingsHostProps) {
   const {
     customModel,
     setCustomModel,
-    effortLevel,
-    setEffortLevel,
     reasoningEffort,
     setReasoningEffort,
     permissionMode,
     setPermissionMode,
-    bestOfN,
-    setBestOfN,
     experimentalMemory,
     setExperimentalMemory,
     webSearchEnabled,
     setWebSearchEnabled,
-    subagentsEnabled,
-    setSubagentsEnabled,
-    selfCheck,
-    setSelfCheck,
     activeModel,
     selectModel,
     selectedModelValue,
@@ -112,20 +96,12 @@ export function SettingsHost({
       customModel={customModel}
       setCustomModel={setCustomModel}
       activeModel={activeModel}
-      effortOptions={(Object.keys(effortLevels) as EffortLevel[]).map((k) => ({
-        value: k,
-        label: effortLevels[k].label,
-      }))}
-      effortLevel={effortLevel}
-      setEffortLevel={(v) => setEffortLevel(v as EffortLevel)}
       reasoningOptions={(Object.keys(reasoningEfforts) as ReasoningEffort[]).map((k) => ({
         value: k,
         label: reasoningEfforts[k].label,
       }))}
       reasoningEffort={reasoningEffort}
       setReasoningEffort={(v) => setReasoningEffort(v as ReasoningEffort)}
-      bestOfN={bestOfN}
-      setBestOfN={setBestOfN}
       experimentalMemory={experimentalMemory}
       setExperimentalMemory={setExperimentalMemory}
       actionPolicyOptions={(Object.keys(actionPolicies) as ActionPolicy[]).map((k) => ({
@@ -144,13 +120,6 @@ export function SettingsHost({
       setPermissionMode={(v) => setPermissionMode(v as PermissionMode)}
       webSearchEnabled={webSearchEnabled}
       setWebSearchEnabled={setWebSearchEnabled}
-      subagentsEnabled={subagentsEnabled}
-      setSubagentsEnabled={setSubagentsEnabled}
-      selfCheck={selfCheck}
-      setSelfCheck={setSelfCheck}
-      codingCwd={codingCwd}
-      setCodingCwd={setCodingCwd}
-      onPickFolder={onPickFolder}
       appVersion="0.4.0"
       grokVersionLine={grokVersionLine}
     />

@@ -1,6 +1,6 @@
 // The composer block below the chat: autopilot risk banner, the Composer
 // itself, and the footer selects (mode / model / workflow / action policy /
-// effort / reasoning / best-of-N) plus the inline Stop button. Extracted
+// reasoning) plus the inline Stop button. Extracted
 // from App.tsx unchanged; run-config state rides in as the grouped
 // useModelConfig result.
 import { useCallback, useState } from 'react';

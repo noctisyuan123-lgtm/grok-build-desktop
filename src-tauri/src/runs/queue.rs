@@ -1,4 +1,4 @@
-use super::core::{self, AcpHost, CoreConfig};
+use super::core::{self, AcpCancelHandle, AcpHost, CoreConfig};
 use super::db::{Db, RunRecord, RunState};
 use super::event::GrokEvent;
 use super::parser::parse_line;
@@ -102,6 +102,9 @@ struct Inner {
     /// Session heads emitted by completed runs. A queued child resolves its
     /// parent's head immediately before launch, after the parent has ended.
     completed_sessions: HashMap<String, String>,
+    /// ACP cancellation handles for currently active runs. Kept with the
+    /// queue state so lookup and cancellation marking share one lock.
+    active_acp_cancels: HashMap<String, Arc<AcpCancelHandle>>,
     grok_path: PathBuf,
 }
 
@@ -125,6 +128,7 @@ impl RunQueue {
             cancelled: HashSet::new(),
             parent_runs,
             completed_sessions: HashMap::new(),
+            active_acp_cancels: HashMap::new(),
             grok_path,
         };
         let (tx, rx) = broadcast::channel(BROADCAST_CAPACITY);
@@ -282,21 +286,20 @@ impl RunQueue {
             });
             return Ok(true);
         }
-        // If active on any lane: mark cancelled and kill that run's group only.
-        let pgid = inner
+        // If active on any lane: mark cancelled. ACP turns receive the
+        // protocol-level session/cancel notification so the host/session can
+        // survive for the next turn; legacy runs retain process-group kill.
+        let active = inner
             .active_lanes
             .values()
             .find(|slot| slot.run_id == run_id)
-            .and_then(|slot| slot.pgid);
-        if pgid.is_some()
-            || inner
-                .active_lanes
-                .values()
-                .any(|slot| slot.run_id == run_id)
-        {
+            .map(|slot| (slot.pgid, inner.active_acp_cancels.get(run_id).cloned()));
+        if let Some((pgid, acp_cancel)) = active {
             inner.cancelled.insert(run_id.into());
             drop(inner);
-            if let Some(p) = pgid {
+            if let Some(handle) = acp_cancel {
+                handle.cancel().await;
+            } else if let Some(p) = pgid {
                 process::kill_group(p).await;
             }
             return Ok(true);
@@ -783,6 +786,7 @@ impl RunQueue {
             }
         }
         let mut host = host.expect("ACP host initialized");
+        host.cancel_handle().prepare_for_turn().await;
         let prewarmed_session_id = if config.resume_session_id.is_none() {
             let key = prewarm_session_key(cwd, &config);
             self.prewarmed_sessions
@@ -801,6 +805,16 @@ impl RunQueue {
                     slot.pgid = Some(host.pgid());
                 }
             }
+            inner
+                .active_acp_cancels
+                .insert(rec.id.clone(), host.cancel_handle());
+        }
+        // A Stop can arrive after the lane becomes active but before the ACP
+        // handle is registered. Carry that mark into the protocol handle so
+        // run_turn cannot accidentally start a prompt after cancellation.
+        let cancelled_before_start = self.inner.lock().await.cancelled.contains(&rec.id);
+        if cancelled_before_start {
+            host.cancel_handle().cancel().await;
         }
         let result = host
             .run_turn(
@@ -841,20 +855,69 @@ impl RunQueue {
                     .insert(rec.lane_id.clone(), host);
                 self.finalize(&rec.id, RunState::Done, None).await;
             }
-            Ok(_) => {
-                // Cancelled mid-turn: drop host so the child is killed.
-                drop(host);
+            Ok(turn) => {
+                // ACP cancellation ends the turn but not the session. Keep
+                // the host and record its head so the next Desktop turn can
+                // continue the same model context.
+                self.inner
+                    .lock()
+                    .await
+                    .completed_sessions
+                    .insert(rec.id.clone(), turn.session_id.clone());
+                let event = GrokEvent::End {
+                    stop_reason: "Cancelled".into(),
+                    session_id: turn.session_id,
+                    request_id: turn.request_id,
+                };
+                let raw = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
+                let _ = self.tx.send(QueueMessage {
+                    run_id: rec.id.clone(),
+                    kind: QueueMessageKind::Event {
+                        event,
+                        raw,
+                        session_id: None,
+                    },
+                });
+                self.acp_hosts
+                    .lock()
+                    .await
+                    .insert(rec.lane_id.clone(), host);
                 self.finalize(&rec.id, RunState::Cancelled, None).await;
             }
             Err(error) => {
-                drop(host);
-                let state = if cancelled {
-                    RunState::Cancelled
+                if cancelled {
+                    if let Some(session_id) = host.cancel_handle().session_id().await {
+                        self.inner
+                            .lock()
+                            .await
+                            .completed_sessions
+                            .insert(rec.id.clone(), session_id.clone());
+                        let event = GrokEvent::End {
+                            stop_reason: "Cancelled".into(),
+                            session_id,
+                            request_id: "acp".into(),
+                        };
+                        let raw = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
+                        let _ = self.tx.send(QueueMessage {
+                            run_id: rec.id.clone(),
+                            kind: QueueMessageKind::Event {
+                                event,
+                                raw,
+                                session_id: None,
+                            },
+                        });
+                        self.acp_hosts
+                            .lock()
+                            .await
+                            .insert(rec.lane_id.clone(), host);
+                    } else {
+                        drop(host);
+                    }
+                    self.finalize(&rec.id, RunState::Cancelled, None).await;
                 } else {
-                    RunState::Failed
-                };
-                self.finalize(&rec.id, state, (!cancelled).then_some(error))
-                    .await;
+                    drop(host);
+                    self.finalize(&rec.id, RunState::Failed, Some(error)).await;
+                }
             }
         }
     }

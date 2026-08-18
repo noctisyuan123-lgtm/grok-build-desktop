@@ -159,7 +159,7 @@ Light theme is `data-theme="light"` on `<body>`. Same token names, light values.
 
 #### 7. **Settings panel** (when user clicks Settings in sidebar — currently a placeholder)
 
-- Where Grok options live: model / effort / reasoning / permission-mode / Best-of-N / memory / web search / subagents / self-check
+- Where Grok options live: model / reasoning / permission-mode / memory / web search / subagents
 - Should be a proper drawer or modal, not a buried form
 
 #### 8. **Prompt Library** (wired inline in the app shell; SQLite store in `src-tauri/src/prompts/mod.rs`)

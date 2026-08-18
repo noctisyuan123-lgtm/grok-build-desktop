@@ -44,9 +44,7 @@ for (const label of [
   'Grok Code',
   'grok-build',
   'Approvals',
-  'Effort',
   'Reasoning',
-  'Best-of-N',
   'Subagents',
   'MCP',
   'Preview',
@@ -323,9 +321,12 @@ for (const cmd of ['grok_mcp_add', 'grok_mcp_remove']) {
   assert.ok(libRs.includes(cmd), `missing Tauri command for MCP: ${cmd}`);
 }
 
-// v0.4.0: minimal header + model picker in composer footer
+// v0.4.0: minimal header + model picker in composer controls
 assert.ok(app.includes('window-titlebar minimal'), 'Minimal Claude-Desktop-style top bar missing');
-assert.ok(app.includes('model-select-footer'), 'Model picker must be in the composer footer');
+assert.ok(
+  app.includes('composerSection.grokModel') && app.includes('composer-model-menu'),
+  'Model picker must be wired to the composer controls',
+);
 
 // Regression guard: conversation panel must be flex (a 2-row grid let the
 // TabBar steal the scroll row and collapsed MessageList to 0 height).
@@ -420,12 +421,12 @@ assert.ok(
   read('src/lib/mcp.ts').includes("'--',\n    entry.command"),
   'MCP command preview must mirror the positional syntax the backend runs',
 );
-// 9) Low-frequency run config (workflow/policy/effort/reasoning/best-of-n)
+// 9) Low-frequency run config (workflow/policy/reasoning)
 //    lives in the compact composer's popover rather than stealing a permanent
 //    full-width row from the prompt input.
 assert.ok(
-  app.includes('composerSection.agentEffort') &&
-    app.includes('className="composer-advanced-popover"') &&
+  app.includes('composerSection.reasoningEffort') &&
+    app.includes('id="composer-run-settings"') &&
     app.includes('composerSection.runSettings'),
   'run-config selects must be available from the compact composer popover',
 );
@@ -459,8 +460,7 @@ assert.ok(
     read('src/components/StatusBar.tsx').includes('statusBar.working'),
   'StatusBar must surface the live phase (writing…/working…)',
 );
-// 13) Best-of-N defaulting to 1 is behavior-tested in useModelConfig.test.tsx.
-// 14) grok-build adaptation: durable guidance goes through --rules (system
+// 13) grok-build adaptation: durable guidance goes through --rules (system
 //     prompt), NOT a preamble in the user turn (behavior-tested in
 //     grokArgs.test.ts). The old 25-line preamble — and especially its FALSE
 //     "0 skills … discovered by grok inspect" line — must stay gone (grok
@@ -581,15 +581,17 @@ assert.ok(
   cspDirective(devCsp, 'form-action') === "form-action 'none'",
   "devCsp must also set form-action 'none'",
 );
-// With style-src 'self' (no 'unsafe-inline') the codebase must carry zero
-// inline-style dependence. React style={} props would actually still work
-// (React writes styles via the CSSOM, which CSP exempts), but keeping the
-// tree free of them keeps the invariant observable and stops markup-parsed
-// style attributes creeping in via refactors. Dynamic values go through
-// element.style in an effect (see ContextMenu).
+// With style-src 'self' (no 'unsafe-inline') the codebase must carry no
+// markup-parsed inline-style dependence. React writes style props through the
+// CSSOM, so the one intentional dynamic drawer-width value is safe; keep the
+// guard narrow so new inline-style props still fail loudly.
+const reactStyleLines = app
+  .split('\n')
+  .filter((line) => line.includes('style={{'));
 assert.ok(
-  !app.includes('style={') && !mainTsx.includes('style={'),
-  'no React style={} props — use classes, or element.style via a ref for dynamic values',
+  !mainTsx.includes('style={') &&
+    reactStyleLines.every((line) => line.includes('width: `${drawerWidth}px`')),
+  'React style={} props must be limited to the dynamic drawer width',
 );
 // The preview scheme must stay frameable and nothing else remote must be.
 assert.ok(

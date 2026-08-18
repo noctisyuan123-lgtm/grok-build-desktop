@@ -61,6 +61,19 @@ describe('streamStore', () => {
     expect(snap?.stopReason).toBe('EndTurn');
   });
 
+  it('keeps the ACP session head when a turn is cancelled', () => {
+    applyRunEvent('cancelled', { type: 'text', data: 'partial' }, undefined, 'session-1');
+    applyRunEvent('cancelled', {
+      type: 'end',
+      stopReason: 'Cancelled',
+      sessionId: 'session-1',
+      requestId: 'acp',
+    });
+    const snap = streamStore.getRunSnapshot('cancelled');
+    expect(snap?.state).toBe('cancelled');
+    expect(snap?.sessionId).toBe('session-1');
+  });
+
   it('emits one completion notification when end and Done both arrive', () => {
     const completions: string[] = [];
     const unsubscribe = streamStore.subscribeCompletions(({ runId, state }) => {

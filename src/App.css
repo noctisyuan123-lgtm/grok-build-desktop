@@ -5516,35 +5516,9 @@ body.subagent-drawer-resizing * {
 }
 
 .subagent-drawer-transcript {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.subagent-transcript-thought {
-  border: 1px solid var(--grok-border-1);
-  border-radius: 8px;
-  color: var(--grok-text-2);
-  font-size: 12px;
-  padding: 7px 9px;
-}
-
-.subagent-transcript-thought summary {
-  cursor: pointer;
-  color: var(--grok-text-3);
-  font-size: 11px;
-}
-
-.subagent-transcript-response {
-  font-size: 12px;
-}
-
-.subagent-transcript-raw {
-  color: var(--grok-text-2);
-  font-size: 12px;
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
+  /* Keep the wrapper semantic without adding a second, drawer-only layout
+     rhythm around the shared main-agent transcript renderer. */
+  display: contents;
 }
 .composer-context-footer {
   align-items: center;

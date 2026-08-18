@@ -268,6 +268,7 @@ export function applyRunEvent(
       thoughtChars: (cur?.thoughtChars ?? 0) + data.length,
       transcript: appendThought(cur?.transcript ?? [], data, now),
       lastEventType: 'thought',
+      sessionId: cur?.sessionId ?? sessionId ?? null,
       rootSessionId: cur?.rootSessionId ?? sessionId ?? null,
       state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
     });
@@ -301,6 +302,7 @@ export function applyRunEvent(
         textChars: (cur?.textChars ?? 0) + data.length,
         transcript: nextTranscript,
         lastEventType: 'text',
+        sessionId: cur?.sessionId ?? sessionId ?? null,
         rootSessionId: cur?.rootSessionId ?? sessionId ?? null,
         state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
       },
@@ -352,18 +354,19 @@ export function applyRunEvent(
     }
     const e = event as Extract<GrokEvent, { type: 'end' }>;
     const endedAt = Date.now();
+    const cancelled = /cancel/i.test(e.stopReason);
     streamStore.patchRun(runId, {
-      state: 'done',
+      state: cancelled ? 'cancelled' : 'done',
       lastEventType: 'end',
       stopReason: e.stopReason,
-      sessionId: e.sessionId,
+      sessionId: cur?.sessionId ?? e.sessionId,
       rootSessionId: cur?.rootSessionId ?? sessionId ?? e.sessionId,
       endedAt,
       usage: usage ?? cur?.usage ?? null,
-      traces: reconcileOpenTraces(cur?.traces ?? [], 'done'),
+      traces: reconcileOpenTraces(cur?.traces ?? [], cancelled ? 'cancelled' : 'done'),
       transcript: closeThought(cur?.transcript ?? [], endedAt),
     });
-    streamStore.markCompletion(runId, 'done', endedAt);
+    if (!cancelled) streamStore.markCompletion(runId, 'done', endedAt);
   } else if (raw) {
     const runError = extractRunError(raw);
     if (runError) {

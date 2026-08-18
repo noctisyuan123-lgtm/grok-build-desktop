@@ -1,15 +1,13 @@
 // Model / run-configuration state for App: model preset + custom id, agent
-// effort, reasoning effort, permission mode, best-of-N, memory/web/subagents/
-// self-check toggles — each persisted to localStorage — plus the derived
+// reasoning effort, permission mode, and memory/web toggles — each
+// persisted to localStorage — plus the derived
 // active model, the CLI-verified model options, and the coding-mode
 // auto-snap. Extracted from App.tsx unchanged.
 import { useEffect, useMemo, useState } from 'react';
 import {
-  isEffortLevel,
   isGrokModelId,
   isPermissionMode,
   isReasoningEffort,
-  type EffortLevel,
   type GrokModelId,
   type Mode,
   type PermissionMode,
@@ -34,21 +32,20 @@ export function useModelConfig({ availableModels }: ModelConfigDeps) {
   );
   const safeRuntimeDefaultsMigrated =
     window.localStorage.getItem(storageKeys.safeRuntimeDefaults) === 'true';
-  const [effortLevel, setEffortLevel] = useState<EffortLevel>(() => {
-    const stored = window.localStorage.getItem(storageKeys.effortLevel);
-    return safeRuntimeDefaultsMigrated && isEffortLevel(stored) ? stored : 'medium';
-  });
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(() => {
     const stored = window.localStorage.getItem(storageKeys.reasoningEffort);
+    const legacyEffort = window.localStorage.getItem(storageKeys.legacyEffortLevel);
+    // Older builds stored a separate Effort value and used it whenever
+    // Reasoning effort was Auto/off. Preserve that effective value once while
+    // migrating to the single reasoning-effort control.
+    if (safeRuntimeDefaultsMigrated && stored === 'off' && isReasoningEffort(legacyEffort)) {
+      return legacyEffort;
+    }
     return isReasoningEffort(stored) ? stored : grokModelPresets['grok-build'].defaultReasoning;
   });
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => {
     const stored = window.localStorage.getItem(storageKeys.permissionMode);
     return isPermissionMode(stored) ? stored : 'default';
-  });
-  const [bestOfN, setBestOfN] = useState(() => {
-    const value = Number(window.localStorage.getItem(storageKeys.bestOfN) ?? '1');
-    return Number.isInteger(value) && value >= 1 && value <= 5 ? value : 1;
   });
   const [experimentalMemory, setExperimentalMemory] = useState(
     () => window.localStorage.getItem(storageKeys.experimentalMemory) === 'true',
@@ -57,14 +54,6 @@ export function useModelConfig({ availableModels }: ModelConfigDeps) {
     () =>
       safeRuntimeDefaultsMigrated &&
       window.localStorage.getItem(storageKeys.webSearchEnabled) === 'true',
-  );
-  const [subagentsEnabled, setSubagentsEnabled] = useState(
-    () =>
-      safeRuntimeDefaultsMigrated &&
-      window.localStorage.getItem(storageKeys.subagentsEnabled) === 'true',
-  );
-  const [selfCheck, setSelfCheck] = useState(
-    () => window.localStorage.getItem(storageKeys.selfCheck) === 'true',
   );
   // True only after the user explicitly picks Custom… so the <select> can
   // stay on that sentinel even when the leftover custom id is also a CLI model.
@@ -108,20 +97,13 @@ export function useModelConfig({ availableModels }: ModelConfigDeps) {
   }, [customModel]);
 
   useEffect(() => {
-    window.localStorage.setItem(storageKeys.effortLevel, effortLevel);
-  }, [effortLevel]);
-
-  useEffect(() => {
     window.localStorage.setItem(storageKeys.reasoningEffort, reasoningEffort);
+    window.localStorage.removeItem(storageKeys.legacyEffortLevel);
   }, [reasoningEffort]);
 
   useEffect(() => {
     window.localStorage.setItem(storageKeys.permissionMode, permissionMode);
   }, [permissionMode]);
-
-  useEffect(() => {
-    window.localStorage.setItem(storageKeys.bestOfN, String(bestOfN));
-  }, [bestOfN]);
 
   useEffect(() => {
     window.localStorage.setItem(storageKeys.experimentalMemory, String(experimentalMemory));
@@ -130,14 +112,6 @@ export function useModelConfig({ availableModels }: ModelConfigDeps) {
   useEffect(() => {
     window.localStorage.setItem(storageKeys.webSearchEnabled, String(webSearchEnabled));
   }, [webSearchEnabled]);
-
-  useEffect(() => {
-    window.localStorage.setItem(storageKeys.subagentsEnabled, String(subagentsEnabled));
-  }, [subagentsEnabled]);
-
-  useEffect(() => {
-    window.localStorage.setItem(storageKeys.selfCheck, String(selfCheck));
-  }, [selfCheck]);
 
   const storedModels = useMemo(
     () => parseStoredModelIds(window.localStorage.getItem(storageKeys.availableModels)),
@@ -192,22 +166,14 @@ export function useModelConfig({ availableModels }: ModelConfigDeps) {
     setModelPreset,
     customModel,
     setCustomModel,
-    effortLevel,
-    setEffortLevel,
     reasoningEffort,
     setReasoningEffort,
     permissionMode,
     setPermissionMode,
-    bestOfN,
-    setBestOfN,
     experimentalMemory,
     setExperimentalMemory,
     webSearchEnabled,
     setWebSearchEnabled,
-    subagentsEnabled,
-    setSubagentsEnabled,
-    selfCheck,
-    setSelfCheck,
     activeModel,
     activeModelMeta,
     activeReasoningLabel,

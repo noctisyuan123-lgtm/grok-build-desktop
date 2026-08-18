@@ -87,7 +87,6 @@ list`, and `grok sessions list`. The right inspector separates Context,
 - `GROK_DESKTOP_GROK_ARGS`: whitespace-split argument template with `{prompt}`
   and `{mode}` placeholders. Only affects the legacy non-streaming
   `run_grok_task` path — streaming runs get their arguments from the UI.
-- `GROK_DESKTOP_GROK_CHECK`: enable `--check` on the legacy path.
 - `GROK_DESKTOP_GROK_MAX_TURNS`: headless turn cap on the legacy path.
   Defaults to 12 (the streaming UI always sends `--max-turns 12`).
 - `XAI_API_KEY`: optional Grok API key auth visible to the spawned CLI process.
@@ -96,7 +95,7 @@ list`, and `grok sessions list`. The right inspector separates Context,
 
 - Plan Mode view: separate "plan" from "apply" (the raw
   `--permission-mode plan` primitive is already exposed in Settings).
-- Sub-agent visualization for best-of-n / fan-out runs.
+- Sub-agent visualization for fan-out runs.
 - Native in-process Core: replace the ACP child transport with a direct
   `xai-grok-shell` Rust adapter once its embedding API is stable. The renderer
   and run-event contract do not change.

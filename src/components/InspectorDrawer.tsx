@@ -32,7 +32,6 @@ import type { useModelConfig } from '../hooks/useModelConfig';
 import type {
   ActionPolicy,
   DockPosition,
-  EffortLevel,
   GrokModelId,
   InspectorTab,
   PermissionMode,
@@ -41,7 +40,6 @@ import type {
 import {
   actionPolicies,
   contextFiles,
-  effortLevels,
   grokModelPresets,
   grokOptimizationRules,
   inspectorTabs,
@@ -118,22 +116,14 @@ export function InspectorDrawer({
   const {
     customModel,
     setCustomModel,
-    effortLevel,
-    setEffortLevel,
     reasoningEffort,
     setReasoningEffort,
     permissionMode,
     setPermissionMode,
-    bestOfN,
-    setBestOfN,
     experimentalMemory,
     setExperimentalMemory,
     webSearchEnabled,
     setWebSearchEnabled,
-    subagentsEnabled,
-    setSubagentsEnabled,
-    selfCheck,
-    setSelfCheck,
     activeModel,
     activeModelMeta,
     activeReasoningLabel,
@@ -273,20 +263,6 @@ export function InspectorDrawer({
                     </select>
                   </label>
                   <label>
-                    <span>{t('inspector.agentEffort')}</span>
-                    <select
-                      aria-label={t('inspector.agentEffort')}
-                      onChange={(event) => setEffortLevel(event.currentTarget.value as EffortLevel)}
-                      value={effortLevel}
-                    >
-                      {(Object.keys(effortLevels) as EffortLevel[]).map((effort) => (
-                        <option key={effort} value={effort}>
-                          {effortLevels[effort].label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
                     <span>{t('inspector.reasoning')}</span>
                     <select
                       aria-label={t('composerSection.reasoningEffort')}
@@ -298,20 +274,6 @@ export function InspectorDrawer({
                       {(Object.keys(reasoningEfforts) as ReasoningEffort[]).map((effort) => (
                         <option key={effort} value={effort}>
                           {reasoningEfforts[effort].label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span>{t('inspector.bestOfN')}</span>
-                    <select
-                      aria-label={t('inspector.bestOfNAria')}
-                      onChange={(event) => setBestOfN(Number(event.currentTarget.value))}
-                      value={bestOfN}
-                    >
-                      {[1, 2, 3, 4, 5].map((value) => (
-                        <option key={value} value={value}>
-                          {value}
                         </option>
                       ))}
                     </select>
@@ -360,22 +322,6 @@ export function InspectorDrawer({
                       type="checkbox"
                     />
                     <span>{t('inspector.web')}</span>
-                  </label>
-                  <label>
-                    <input
-                      checked={subagentsEnabled}
-                      onChange={(event) => setSubagentsEnabled(event.currentTarget.checked)}
-                      type="checkbox"
-                    />
-                    <span>{t('inspector.subagents')}</span>
-                  </label>
-                  <label>
-                    <input
-                      checked={selfCheck}
-                      onChange={(event) => setSelfCheck(event.currentTarget.checked)}
-                      type="checkbox"
-                    />
-                    <span>{t('inspector.check')}</span>
                   </label>
                 </div>
                 <div className="auth-actions">
@@ -697,7 +643,7 @@ export function InspectorDrawer({
               <section className="inspector-card">
                 <div className="card-head">
                   <span>{t('inspector.optimization')}</span>
-                  <code>{effortLevels[effortLevel].label}</code>
+                  <code>{activeReasoningLabel}</code>
                 </div>
                 <div className="safety-list">
                   {grokOptimizationRules.map((rule) => (
@@ -723,18 +669,6 @@ export function InspectorDrawer({
                     <ShieldCheck size={14} />{' '}
                     {t('inspector.optimizationWebSearch', {
                       state: webSearchEnabled ? t('common.enabled') : t('common.disabled'),
-                    })}
-                  </span>
-                  <span>
-                    <ShieldCheck size={14} />{' '}
-                    {t('inspector.optimizationSubagents', {
-                      state: subagentsEnabled ? t('common.enabled') : t('common.disabled'),
-                    })}
-                  </span>
-                  <span>
-                    <ShieldCheck size={14} />{' '}
-                    {t('inspector.optimizationSelfCheck', {
-                      state: selfCheck ? t('common.enabled') : t('common.off'),
                     })}
                   </span>
                 </div>

@@ -14,9 +14,13 @@ use std::collections::HashSet;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Mutex};
 use tokio::time::{timeout, Duration};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,7 +28,10 @@ pub struct CoreConfig {
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub always_approve: bool,
+    pub permission_mode: Option<String>,
     pub experimental_memory: bool,
+    pub web_search_disabled: bool,
+    pub subagents_disabled: bool,
     pub review_only: bool,
     pub rules: Option<String>,
     pub resume_session_id: Option<String>,
@@ -39,7 +46,10 @@ impl CoreConfig {
             model: None,
             reasoning_effort: None,
             always_approve: false,
+            permission_mode: None,
             experimental_memory: false,
+            web_search_disabled: false,
+            subagents_disabled: false,
             review_only: false,
             rules: None,
             resume_session_id: None,
@@ -68,7 +78,10 @@ impl CoreConfig {
                     out.prompt_blocks = value.and_then(|raw| serde_json::from_str(&raw).ok())
                 }
                 "--always-approve" => out.always_approve = true,
+                "--permission-mode" => out.permission_mode = value,
                 "--experimental-memory" => out.experimental_memory = true,
+                "--disable-web-search" => out.web_search_disabled = true,
+                "--no-subagents" => out.subagents_disabled = true,
                 "--rules" => {
                     out.review_only = value
                         .as_deref()
@@ -85,6 +98,7 @@ impl CoreConfig {
                     | "--resume"
                     | "--rules"
                     | "--prompt-json"
+                    | "--permission-mode"
             ) {
                 2
             } else {
@@ -95,13 +109,19 @@ impl CoreConfig {
     }
 
     fn launch_args(&self) -> Vec<String> {
-        // `--experimental-memory` is a top-level Grok option, so it must be
-        // placed before the `agent` subcommand. Passing it after `agent` is
-        // rejected by grok 1.0.4, even though the Desktop run builder emits
-        // it alongside the other legacy options.
+        // These are top-level Grok options, so they must be placed before the
+        // `agent` subcommand. Passing them after `agent` is rejected by grok
+        // 1.0.4, even though the Desktop run builder emits them alongside the
+        // other legacy options.
         let mut args = Vec::new();
         if self.experimental_memory {
             args.push("--experimental-memory".to_string());
+        }
+        if self.web_search_disabled {
+            args.push("--disable-web-search".to_string());
+        }
+        if self.subagents_disabled {
+            args.push("--no-subagents".to_string());
         }
         args.push("agent".to_string());
         if let Some(model) = &self.model {
@@ -109,6 +129,9 @@ impl CoreConfig {
         }
         if let Some(effort) = &self.reasoning_effort {
             args.extend(["--reasoning-effort".to_string(), effort.clone()]);
+        }
+        if let Some(permission_mode) = &self.permission_mode {
+            args.extend(["--permission-mode".to_string(), permission_mode.clone()]);
         }
         if self.always_approve {
             args.push("--always-approve".to_string());
@@ -321,7 +344,10 @@ pub async fn rewind_last_user_turn_with_share(
         model: None,
         reasoning_effort: None,
         always_approve: false,
+        permission_mode: None,
         experimental_memory: false,
+        web_search_disabled: false,
+        subagents_disabled: false,
         review_only: false,
         rules: None,
         resume_session_id: Some(session_id.to_string()),
@@ -349,7 +375,10 @@ pub async fn create_rebased_session(
         model: None,
         reasoning_effort: None,
         always_approve: false,
+        permission_mode: None,
         experimental_memory: false,
+        web_search_disabled: false,
+        subagents_disabled: false,
         review_only: false,
         rules: replay_rules
             .map(str::trim)
@@ -375,14 +404,68 @@ pub async fn create_rebased_session(
     Ok(session_id)
 }
 
+pub struct AcpCancelHandle {
+    stdin: Arc<Mutex<ChildStdin>>,
+    session_id: Arc<Mutex<Option<String>>>,
+    cancelled: AtomicBool,
+}
+
+impl AcpCancelHandle {
+    pub async fn prepare_for_turn(&self) {
+        self.cancelled.store(false, Ordering::Release);
+        *self.session_id.lock().await = None;
+    }
+
+    async fn set_session_id(&self, session_id: String) {
+        *self.session_id.lock().await = Some(session_id.clone());
+        if self.cancelled.load(Ordering::Acquire) {
+            let _ = self.send_cancel(&session_id).await;
+        }
+    }
+
+    pub async fn cancel(&self) {
+        if self.cancelled.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        if let Some(session_id) = self.session_id.lock().await.clone() {
+            let _ = self.send_cancel(&session_id).await;
+        }
+    }
+
+    async fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
+    pub async fn session_id(&self) -> Option<String> {
+        self.session_id.lock().await.clone()
+    }
+
+    async fn send_cancel(&self, session_id: &str) -> Result<(), String> {
+        let mut encoded = serde_json::to_vec(&json!({
+            "jsonrpc": "2.0",
+            "method": "session/cancel",
+            "params": { "sessionId": session_id },
+        }))
+        .map_err(|error| error.to_string())?;
+        encoded.push(b'\n');
+        let mut stdin = self.stdin.lock().await;
+        stdin
+            .write_all(&encoded)
+            .await
+            .map_err(|error| format!("Grok Core ACP cancel failed: {error}"))?;
+        stdin.flush().await.map_err(|error| error.to_string())
+    }
+}
+
 pub struct AcpHost {
     child: Child,
-    stdin: ChildStdin,
+    stdin: Arc<Mutex<ChildStdin>>,
     lines: Lines<BufReader<ChildStdout>>,
     next_id: u64,
     pgid: i32,
     launch_key: String,
     loaded_sessions: HashSet<String>,
+    cancel_handle: Arc<AcpCancelHandle>,
 }
 
 pub struct TurnResult {
@@ -443,6 +526,12 @@ impl AcpHost {
                 }
             });
         }
+        let stdin = Arc::new(Mutex::new(stdin));
+        let cancel_handle = Arc::new(AcpCancelHandle {
+            stdin: stdin.clone(),
+            session_id: Arc::new(Mutex::new(None)),
+            cancelled: AtomicBool::new(false),
+        });
         let mut host = Self {
             child,
             stdin,
@@ -451,6 +540,7 @@ impl AcpHost {
             pgid,
             launch_key: config.launch_key(binary),
             loaded_sessions: HashSet::new(),
+            cancel_handle,
         };
         host.request(
             "initialize",
@@ -472,6 +562,10 @@ impl AcpHost {
 
     pub fn pgid(&self) -> i32 {
         self.pgid
+    }
+
+    pub fn cancel_handle(&self) -> Arc<AcpCancelHandle> {
+        self.cancel_handle.clone()
     }
 
     /// Create an empty session while the UI is idle so the first prompt does
@@ -670,6 +764,11 @@ impl AcpHost {
             self.new_session(&cwd, config).await?
         };
 
+        self.cancel_handle.set_session_id(session_id.clone()).await;
+        if self.cancel_handle.is_cancelled().await {
+            return Err("user cancelled".into());
+        }
+
         let prompt_blocks = content_blocks(prompt, config);
         let mut prompt_params = json!({
             "sessionId": session_id,
@@ -779,7 +878,9 @@ impl AcpHost {
                 .cloned()
                 .unwrap_or_default();
             let may_approve = config.is_some_and(|c| c.always_approve);
-            let result = permission_result(&options, may_approve);
+            let review_only = config.is_some_and(|c| c.review_only);
+            let cancel_requested = self.cancel_handle.is_cancelled().await;
+            let result = permission_result(&options, may_approve, review_only, cancel_requested);
             self.write(&json!({ "jsonrpc": "2.0", "id": id, "result": result }))
                 .await
         } else {
@@ -791,14 +892,15 @@ impl AcpHost {
         }
     }
 
-    async fn write(&mut self, value: &Value) -> Result<(), String> {
+    async fn write(&self, value: &Value) -> Result<(), String> {
         let mut encoded = serde_json::to_vec(value).map_err(|e| e.to_string())?;
         encoded.push(b'\n');
-        self.stdin
+        let mut stdin = self.stdin.lock().await;
+        stdin
             .write_all(&encoded)
             .await
             .map_err(|e| format!("Grok Core ACP write failed: {e}"))?;
-        self.stdin.flush().await.map_err(|e| e.to_string())
+        stdin.flush().await.map_err(|e| e.to_string())
     }
 }
 
@@ -806,20 +908,40 @@ fn uses_idle_timeout(method: &str) -> bool {
     method != "session/prompt"
 }
 
-fn permission_result(options: &[Value], may_approve: bool) -> Value {
-    let chosen = options.iter().find(|option| {
-        let label = format!(
-            "{} {}",
-            option.get("name").and_then(Value::as_str).unwrap_or(""),
-            option.get("kind").and_then(Value::as_str).unwrap_or("")
-        )
-        .to_lowercase();
-        if may_approve {
-            label.contains("allow") || label.contains("approve") || label.contains("once")
-        } else {
-            label.contains("deny") || label.contains("reject") || label.contains("cancel")
-        }
-    });
+fn permission_result(
+    options: &[Value],
+    may_approve: bool,
+    review_only: bool,
+    cancel_requested: bool,
+) -> Value {
+    let find_option = |needle: &str| {
+        options.iter().find(|option| {
+            let label = format!(
+                "{} {}",
+                option.get("name").and_then(Value::as_str).unwrap_or(""),
+                option.get("kind").and_then(Value::as_str).unwrap_or("")
+            )
+            .to_lowercase();
+            label.contains(needle)
+        })
+    };
+    let chosen = if cancel_requested {
+        find_option("cancel")
+    } else if review_only {
+        find_option("deny").or_else(|| find_option("reject"))
+    } else if may_approve {
+        find_option("always")
+            .or_else(|| find_option("approve"))
+            .or_else(|| find_option("allow"))
+    } else {
+        // Desktop has no interactive permission sheet in the ACP path. Patch
+        // is therefore a bounded approval: choose a one-shot option for each
+        // protected request, while Autopilot may choose the broader allow
+        // option exposed by the server.
+        find_option("once")
+            .or_else(|| find_option("allow"))
+            .or_else(|| find_option("approve"))
+    };
     chosen
         .and_then(|option| option.get("optionId").or_else(|| option.get("option_id")))
         .cloned()
@@ -950,12 +1072,15 @@ mod tests {
             "xhigh".into(),
             "--resume".into(),
             "session-1".into(),
+            "--permission-mode".into(),
+            "plan".into(),
             "--always-approve".into(),
         ];
         let config = CoreConfig::from_legacy_args(&args);
         assert_eq!(config.model.as_deref(), Some("grok-build"));
         assert_eq!(config.reasoning_effort.as_deref(), Some("xhigh"));
         assert_eq!(config.resume_session_id.as_deref(), Some("session-1"));
+        assert_eq!(config.permission_mode.as_deref(), Some("plan"));
         assert!(config.always_approve);
         assert!(!config.share_session);
         assert!(config.prompt_blocks.is_none());
@@ -979,6 +1104,32 @@ mod tests {
             disabled.launch_args().first().map(String::as_str),
             Some("agent")
         );
+    }
+
+    #[test]
+    fn forwards_tool_disables_before_agent_subcommand() {
+        let config =
+            CoreConfig::from_legacy_args(&["--disable-web-search".into(), "--no-subagents".into()]);
+        assert!(config.web_search_disabled);
+        assert!(config.subagents_disabled);
+
+        let launch = config.launch_args();
+        let agent = launch
+            .iter()
+            .position(|arg| arg == "agent")
+            .expect("agent subcommand");
+        assert!(launch
+            .iter()
+            .position(|arg| arg == "--disable-web-search")
+            .is_some_and(|index| index < agent));
+        assert!(launch
+            .iter()
+            .position(|arg| arg == "--no-subagents")
+            .is_some_and(|index| index < agent));
+
+        let defaults = CoreConfig::from_legacy_args(&[]).launch_args();
+        assert!(!defaults.contains(&"--disable-web-search".to_string()));
+        assert!(!defaults.contains(&"--no-subagents".to_string()));
     }
 
     #[test]
@@ -1122,18 +1273,27 @@ mod tests {
     }
 
     #[test]
-    fn only_auto_mode_approves_protected_acp_actions() {
+    fn desktop_permission_modes_select_distinct_acp_outcomes() {
         let options = vec![
             json!({ "optionId": "deny", "name": "Deny", "kind": "reject" }),
             json!({ "optionId": "once", "name": "Allow once", "kind": "allow_once" }),
+            json!({ "optionId": "always", "name": "Allow always", "kind": "allow_always" }),
         ];
         assert_eq!(
-            permission_result(&options, false)["outcome"]["optionId"],
+            permission_result(&options, false, true, false)["outcome"]["optionId"],
             "deny"
         );
         assert_eq!(
-            permission_result(&options, true)["outcome"]["optionId"],
+            permission_result(&options, false, false, false)["outcome"]["optionId"],
             "once"
+        );
+        assert_eq!(
+            permission_result(&options, true, false, false)["outcome"]["optionId"],
+            "always"
+        );
+        assert_eq!(
+            permission_result(&options, false, false, true)["outcome"]["outcome"],
+            "cancelled"
         );
     }
 

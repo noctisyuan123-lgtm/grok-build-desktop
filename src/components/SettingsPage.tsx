@@ -5,7 +5,7 @@ import { t } from '../i18n';
 type ThemeMode = 'dark' | 'light';
 type DockPosition = 'right' | 'bottom';
 
-export type SettingsSection = 'general' | 'model' | 'permissions' | 'integrations' | 'about';
+export type SettingsSection = 'general' | 'model' | 'permissions' | 'about';
 
 interface Option {
   value: string;
@@ -36,14 +36,9 @@ export interface SettingsPageProps {
   customModel: string;
   setCustomModel: (v: string) => void;
   activeModel: string;
-  effortOptions: Option[];
-  effortLevel: string;
-  setEffortLevel: (v: string) => void;
   reasoningOptions: Option[];
   reasoningEffort: string;
   setReasoningEffort: (v: string) => void;
-  bestOfN: number;
-  setBestOfN: (v: number) => void;
   experimentalMemory: boolean;
   setExperimentalMemory: (v: boolean) => void;
 
@@ -61,15 +56,6 @@ export interface SettingsPageProps {
   setPermissionMode: (v: string) => void;
   webSearchEnabled: boolean;
   setWebSearchEnabled: (v: boolean) => void;
-  subagentsEnabled: boolean;
-  setSubagentsEnabled: (v: boolean) => void;
-  selfCheck: boolean;
-  setSelfCheck: (v: boolean) => void;
-
-  // Workspace
-  codingCwd: string;
-  setCodingCwd: (v: string) => void;
-  onPickFolder: () => void;
 
   // About
   appVersion: string;
@@ -80,7 +66,6 @@ const NAV: { id: SettingsSection; label: string }[] = [
   { id: 'general', label: t('settings.nav.general') },
   { id: 'model', label: t('settings.nav.model') },
   { id: 'permissions', label: t('settings.nav.permissions') },
-  { id: 'integrations', label: t('settings.nav.workspace') },
   { id: 'about', label: t('settings.nav.about') },
 ];
 
@@ -266,19 +251,6 @@ export function SettingsPage(props: SettingsPageProps) {
                   />
                 </Row>
               ) : null}
-              <Row title={t('settings.effort')} hint={t('settings.effortHint')}>
-                <select
-                  aria-label={t('settings.effort')}
-                  value={props.effortLevel}
-                  onChange={(e) => props.setEffortLevel(e.currentTarget.value)}
-                >
-                  {props.effortOptions.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </Row>
               <Row title={t('settings.reasoningEffort')} hint={t('settings.reasoningEffortHint')}>
                 <select
                   aria-label={t('settings.reasoningEffort')}
@@ -291,18 +263,6 @@ export function SettingsPage(props: SettingsPageProps) {
                     </option>
                   ))}
                 </select>
-              </Row>
-              <Row title={t('settings.bestOfN')} hint={t('settings.bestOfNHint')}>
-                <input
-                  aria-label={t('settings.bestOfN')}
-                  type="number"
-                  min={1}
-                  max={5}
-                  value={props.bestOfN}
-                  onChange={(e) =>
-                    props.setBestOfN(Math.max(1, Math.min(5, Number(e.currentTarget.value) || 1)))
-                  }
-                />
               </Row>
               <Row title={t('settings.memoryTitle')} hint={t('settings.memoryHint')}>
                 <Toggle
@@ -340,58 +300,29 @@ export function SettingsPage(props: SettingsPageProps) {
                   </p>
                 );
               })()}
-              <Row title={t('settings.permissionMode')} hint={t('settings.permissionModeHint')}>
-                <select
-                  aria-label={t('settings.permissionMode')}
-                  value={props.permissionMode}
-                  onChange={(e) => props.setPermissionMode(e.currentTarget.value)}
-                >
-                  {props.permissionOptions.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </Row>
+              <details className="set-advanced">
+                <summary>{t('settings.advancedCli')}</summary>
+                <Row title={t('settings.permissionMode')} hint={t('settings.permissionModeHint')}>
+                  <select
+                    aria-label={t('settings.permissionMode')}
+                    value={props.permissionMode}
+                    disabled={props.actionPolicy !== 'patch'}
+                    onChange={(e) => props.setPermissionMode(e.currentTarget.value)}
+                  >
+                    {props.permissionOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </Row>
+              </details>
               <Row title={t('settings.webSearch')} hint={t('settings.webSearchHint')}>
                 <Toggle
                   checked={props.webSearchEnabled}
                   onChange={props.setWebSearchEnabled}
                   label={t('settings.webSearch')}
                 />
-              </Row>
-              <Row title={t('settings.subagents')} hint={t('settings.subagentsHint')}>
-                <Toggle
-                  checked={props.subagentsEnabled}
-                  onChange={props.setSubagentsEnabled}
-                  label={t('settings.subagents')}
-                />
-              </Row>
-              <Row title={t('settings.selfCheck')} hint={t('settings.selfCheckHint')}>
-                <Toggle
-                  checked={props.selfCheck}
-                  onChange={props.setSelfCheck}
-                  label={t('settings.selfCheck')}
-                />
-              </Row>
-            </section>
-          ) : null}
-
-          {section === 'integrations' ? (
-            <section className="settings-section">
-              <h2>{t('settings.nav.workspace')}</h2>
-              <Row title={t('settings.projectFolder')} hint={t('settings.projectFolderHint')}>
-                <div className="set-inline">
-                  <input
-                    aria-label={t('settings.projectFolder')}
-                    value={props.codingCwd}
-                    placeholder={t('settings.projectFolderPlaceholder')}
-                    onChange={(e) => props.setCodingCwd(e.currentTarget.value)}
-                  />
-                  <button type="button" onClick={props.onPickFolder}>
-                    {t('settings.pickFolder')}
-                  </button>
-                </div>
               </Row>
             </section>
           ) : null}

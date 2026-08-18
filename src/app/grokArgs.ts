@@ -1,6 +1,6 @@
 // Pure builders for the grok CLI invocation. Extracted from App.tsx —
 // behavior must match the composer's submit path exactly.
-import type { ActionPolicy, EffortLevel, Mode, PermissionMode, ReasoningEffort } from './types';
+import type { ActionPolicy, Mode, PermissionMode, ReasoningEffort } from './types';
 
 /** Visible chat turns re-seeded into a fresh ACP session after Undo. */
 export type ReplayMessage = {
@@ -11,15 +11,11 @@ export type ReplayMessage = {
 export interface GrokRunConfig {
   mode: Mode;
   activeModel: string;
-  effortLevel: EffortLevel;
   reasoningEffort: ReasoningEffort;
   actionPolicy: ActionPolicy;
   permissionMode: PermissionMode;
-  bestOfN: number;
   experimentalMemory: boolean;
   webSearchEnabled: boolean;
-  subagentsEnabled: boolean;
-  selfCheck: boolean;
   codingCwd: string;
   /** Exact conversation head to fork. Avoids cwd-global `-c` leaking undone turns. */
   resumeSessionId?: string | null;
@@ -76,8 +72,8 @@ export function buildConversationReplayBlock(messages: readonly ReplayMessage[])
 // the system level via `--rules` (see buildGrokRules) instead of bolting a
 // preamble onto every user turn. That keeps the model on-task, makes the
 // chat bubble an exact mirror of the request, and avoids fighting
-// grok-build's own prompt. Operational settings (effort/reasoning/best-of-n/
-// permission/web/subagents) ride as real CLI flags — never echoed as prose.
+// grok-build's own prompt. Operational settings (reasoning/
+// permission/web) ride as real CLI flags — never echoed as prose.
 
 // Durable, system-level guidance for grok-build, passed via `--rules` (grok
 // appends it to the agent's own system prompt — verified the model honours
@@ -115,12 +111,11 @@ function mapGrokEffort(value: string): string {
   return value === 'max' ? 'xhigh' : value;
 }
 
-export function resolveGrokEffort(config: Pick<GrokRunConfig, 'effortLevel' | 'reasoningEffort'>): string | null {
-  if (config.reasoningEffort && config.reasoningEffort !== 'off') {
-    return mapGrokEffort(config.reasoningEffort);
-  }
-  if (config.effortLevel) return mapGrokEffort(config.effortLevel);
-  return null;
+export function resolveGrokEffort(
+  config: Pick<GrokRunConfig, 'reasoningEffort'>,
+): string | null {
+  if (!config.reasoningEffort || config.reasoningEffort === 'off') return null;
+  return mapGrokEffort(config.reasoningEffort);
 }
 
 export function buildGrokArgs(config: GrokRunConfig): string[] {
@@ -140,7 +135,6 @@ export function buildGrokArgs(config: GrokRunConfig): string[] {
   } else if (config.permissionMode && config.permissionMode !== 'default') {
     args.push('--permission-mode', config.permissionMode);
   }
-  // grok 1.0 dropped `--best-of-n`. Sending it exits 2 ("unexpected argument").
   // Behavioural guidance at the system-prompt level (grok-native), instead of
   // a preamble in the user turn. Coding mode only; chat stays freeform.
   // After Undo, ACP cannot rewind the loaded session, so we start fresh and
@@ -155,8 +149,6 @@ export function buildGrokArgs(config: GrokRunConfig): string[] {
   if (ruleParts.length > 0) args.push('--rules', ruleParts.join('\n\n'));
   if (config.experimentalMemory) args.push('--experimental-memory');
   if (!config.webSearchEnabled) args.push('--disable-web-search');
-  if (!config.subagentsEnabled) args.push('--no-subagents');
-  if (config.selfCheck) args.push('--check');
   args.push('--max-turns', '12');
   if (config.mode === 'coding' && config.codingCwd.trim()) {
     args.push('--cwd', config.codingCwd.trim());

@@ -20,7 +20,6 @@ export type Runner =
 export type ActionPolicy = 'review' | 'patch' | 'autopilot';
 export type InspectorTab =
   'context' | 'skills' | 'mcp' | 'agents' | 'plugins' | 'hooks' | 'permissions' | 'desktop';
-export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type PermissionMode = 'default' | 'acceptEdits' | 'auto' | 'dontAsk' | 'plan';
 export type ThemeMode = 'dark' | 'light';
@@ -160,16 +159,6 @@ export function isInspectorTab(value: unknown): value is InspectorTab {
     value === 'hooks' ||
     value === 'permissions' ||
     value === 'desktop'
-  );
-}
-
-export function isEffortLevel(value: unknown): value is EffortLevel {
-  return (
-    value === 'low' ||
-    value === 'medium' ||
-    value === 'high' ||
-    value === 'xhigh' ||
-    value === 'max'
   );
 }
 

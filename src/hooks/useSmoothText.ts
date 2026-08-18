@@ -47,7 +47,7 @@ export function useSmoothText(runId: string | null | undefined): {
       const remaining = target - cur;
       // Two cadences, both gentle:
       //  • While the run is live: a calm ~1-3 chars/frame (≈60-180 cps). On a
-      //    big burst (best-of-n, a fast model) we deliberately cap at 3 so the
+      //    big burst from a fast model we deliberately cap at 3 so the
       //    text never "dumps" — the caret just trails and catches up, which
       //    reads as natural live typing instead of a wall of text appearing.
       //  • Once the run has ended: drain whatever's left over ~0.3-0.5s so the

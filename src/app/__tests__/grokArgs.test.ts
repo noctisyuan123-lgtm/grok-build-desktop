@@ -10,15 +10,11 @@ function config(overrides: Partial<GrokRunConfig> = {}): GrokRunConfig {
   return {
     mode: 'coding',
     activeModel: 'grok-build',
-    effortLevel: 'medium',
-    reasoningEffort: 'off',
+    reasoningEffort: 'medium',
     actionPolicy: 'patch',
     permissionMode: 'default',
-    bestOfN: 1,
     experimentalMemory: false,
     webSearchEnabled: true,
-    subagentsEnabled: true,
-    selfCheck: false,
     codingCwd: '',
     resumeSessionId: null,
     continueLatestSession: false,
@@ -55,29 +51,18 @@ describe('buildGrokArgs', () => {
   });
 
   it('passes model and a single reasoning-effort flag', () => {
-    const args = buildGrokArgs(config({ activeModel: 'grok-latest', effortLevel: 'high' }));
+    const args = buildGrokArgs(config({ activeModel: 'grok-latest', reasoningEffort: 'high' }));
     expect(flagValue(args, '--model')).toBe('grok-latest');
-    // grok 1.0 aliases --effort to --reasoning-effort; never send both.
+    // grok 1.0 accepts one reasoning-effort control.
     expect(args).not.toContain('--effort');
     expect(flagValue(args, '--reasoning-effort')).toBe('high');
   });
 
-  it('prefers explicit reasoning effort and maps max to xhigh', () => {
-    expect(
-      flagValue(
-        buildGrokArgs(config({ effortLevel: 'low', reasoningEffort: 'high' })),
-        '--reasoning-effort',
-      ),
-    ).toBe('high');
+  it('maps max to xhigh and omits the flag for Auto', () => {
     expect(flagValue(buildGrokArgs(config({ reasoningEffort: 'max' })), '--reasoning-effort')).toBe(
       'xhigh',
     );
-    expect(flagValue(buildGrokArgs(config({ effortLevel: 'max' })), '--reasoning-effort')).toBe(
-      'xhigh',
-    );
-    const both = buildGrokArgs(config({ effortLevel: 'medium', reasoningEffort: 'xhigh' }));
-    expect(both.filter((part) => part === '--reasoning-effort')).toHaveLength(1);
-    expect(both).not.toContain('--effort');
+    expect(buildGrokArgs(config({ reasoningEffort: 'off' }))).not.toContain('--reasoning-effort');
   });
 
   it('maps autopilot to --always-approve and suppresses --permission-mode', () => {
@@ -106,28 +91,18 @@ describe('buildGrokArgs', () => {
     expect(buildGrokArgs(config({ mode: 'coding' }))).toContain('--rules');
   });
 
-  it('never sends --best-of-n (removed in grok 1.0)', () => {
-    expect(buildGrokArgs(config({ bestOfN: 1 }))).not.toContain('--best-of-n');
-    expect(buildGrokArgs(config({ bestOfN: 3 }))).not.toContain('--best-of-n');
-  });
-
-  it('still honors --no-subagents when Best-of-N is left above 1 in old storage', () => {
-    const fanned = buildGrokArgs(config({ subagentsEnabled: false, bestOfN: 3 }));
-    expect(fanned).toContain('--no-subagents');
-    expect(fanned).not.toContain('--best-of-n');
+  it('keeps subagents available without a user-facing disable flag', () => {
+    expect(buildGrokArgs(config())).not.toContain('--no-subagents');
   });
 
   it('maps the remaining toggles to their flags', () => {
-    const args = buildGrokArgs(
-      config({ experimentalMemory: true, webSearchEnabled: false, selfCheck: true }),
-    );
+    const args = buildGrokArgs(config({ experimentalMemory: true, webSearchEnabled: false }));
     expect(args).toContain('--experimental-memory');
     expect(args).toContain('--disable-web-search');
-    expect(args).toContain('--check');
+    expect(args).not.toContain('--check');
     const off = buildGrokArgs(config());
     expect(off).not.toContain('--experimental-memory');
     expect(off).not.toContain('--disable-web-search');
-    expect(off).not.toContain('--check');
   });
 
   it('passes --cwd only in coding mode with a non-blank path', () => {

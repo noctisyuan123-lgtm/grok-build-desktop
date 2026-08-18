@@ -18,55 +18,43 @@ describe('useModelConfig defaults and persistence', () => {
     const { result } = render();
     expect(result.current.modelPreset).toBe('grok-4.6');
     expect(result.current.activeModel).toBe('grok-4.6');
-    expect(result.current.effortLevel).toBe('medium');
     expect(result.current.reasoningEffort).toBe('off');
-    expect(result.current.bestOfN).toBe(1);
     expect(result.current.webSearchEnabled).toBe(false);
-    expect(result.current.subagentsEnabled).toBe(false);
   });
 
-  it('restores persisted values (effort/web/subagents only after the safe-defaults migration)', () => {
+  it('restores persisted values (effort/web only after the safe-defaults migration)', () => {
     window.localStorage.setItem(storageKeys.safeRuntimeDefaults, 'true');
     window.localStorage.setItem(storageKeys.modelPreset, 'grok-4.5');
-    window.localStorage.setItem(storageKeys.effortLevel, 'xhigh');
+    window.localStorage.setItem(storageKeys.legacyEffortLevel, 'xhigh');
     window.localStorage.setItem(storageKeys.reasoningEffort, 'high');
     window.localStorage.setItem(storageKeys.permissionMode, 'plan');
-    window.localStorage.setItem(storageKeys.bestOfN, '3');
     window.localStorage.setItem(storageKeys.webSearchEnabled, 'true');
     const { result } = render({
       mode: 'standard',
       availableModels: ['grok-4.6', 'grok-4.5'],
     });
     expect(result.current.modelPreset).toBe('grok-4.5');
-    expect(result.current.effortLevel).toBe('xhigh');
     expect(result.current.reasoningEffort).toBe('high');
     expect(result.current.permissionMode).toBe('plan');
-    expect(result.current.bestOfN).toBe(3);
     expect(result.current.webSearchEnabled).toBe(true);
   });
 
   it('ignores persisted effort/web-search toggles before the migration flag exists', () => {
-    window.localStorage.setItem(storageKeys.effortLevel, 'xhigh');
     window.localStorage.setItem(storageKeys.webSearchEnabled, 'true');
     const { result } = render();
-    expect(result.current.effortLevel).toBe('medium');
     expect(result.current.webSearchEnabled).toBe(false);
   });
 
   it('rejects invalid persisted values', () => {
     window.localStorage.setItem(storageKeys.modelPreset, 'gpt-4');
-    window.localStorage.setItem(storageKeys.bestOfN, '99');
     const { result } = render();
     expect(result.current.modelPreset).toBe('grok-4.6');
-    expect(result.current.bestOfN).toBe(1);
   });
 
   it('mirrors changes back to localStorage', () => {
     const { result } = render();
-    act(() => result.current.setEffortLevel('high'));
-    expect(window.localStorage.getItem(storageKeys.effortLevel)).toBe('high');
-    act(() => result.current.setSelfCheck(true));
-    expect(window.localStorage.getItem(storageKeys.selfCheck)).toBe('true');
+    act(() => result.current.setReasoningEffort('high'));
+    expect(window.localStorage.getItem(storageKeys.reasoningEffort)).toBe('high');
   });
 });
 

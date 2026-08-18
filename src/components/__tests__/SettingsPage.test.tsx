@@ -26,14 +26,12 @@ function makeProps(overrides: Partial<SettingsPageProps> = {}): SettingsPageProp
     customModel: '',
     setCustomModel: vi.fn(),
     activeModel: 'grok-build',
-    effortOptions: [{ value: 'medium', label: 'Medium' }],
-    effortLevel: 'medium',
-    setEffortLevel: vi.fn(),
-    reasoningOptions: [{ value: 'off', label: 'Auto' }],
+    reasoningOptions: [
+      { value: 'off', label: 'Auto' },
+      { value: 'high', label: 'High' },
+    ],
     reasoningEffort: 'off',
     setReasoningEffort: vi.fn(),
-    bestOfN: 1,
-    setBestOfN: vi.fn(),
     experimentalMemory: false,
     setExperimentalMemory: vi.fn(),
     actionPolicyOptions: [
@@ -55,13 +53,6 @@ function makeProps(overrides: Partial<SettingsPageProps> = {}): SettingsPageProp
     setPermissionMode: vi.fn(),
     webSearchEnabled: false,
     setWebSearchEnabled: vi.fn(),
-    subagentsEnabled: false,
-    setSubagentsEnabled: vi.fn(),
-    selfCheck: false,
-    setSelfCheck: vi.fn(),
-    codingCwd: '/repo',
-    setCodingCwd: vi.fn(),
-    onPickFolder: vi.fn(),
     appVersion: '0.4.0',
     grokVersionLine: 'Grok CLI 1.0',
     ...overrides,
@@ -120,7 +111,7 @@ describe('SettingsPage', () => {
     expect(props.setCompletionSoundEnabled).toHaveBeenCalledWith(false);
   });
 
-  it('model: shows the custom-id input only for the custom preset and clamps Best-of-N', async () => {
+  it('model: shows the custom-id input only for the custom preset and changes reasoning effort', async () => {
     const user = userEvent.setup();
     const props = makeProps({ section: 'model' });
     const { rerender } = render(<SettingsPage {...props} />);
@@ -129,13 +120,10 @@ describe('SettingsPage', () => {
     rerender(<SettingsPage {...makeProps({ section: 'model', modelPreset: 'custom' })} />);
     expect(screen.getByLabelText('Custom model id')).toBeInTheDocument();
 
-    const bestOfProps = makeProps({ section: 'model' });
-    rerender(<SettingsPage {...bestOfProps} />);
-    const bestOf = screen.getByLabelText('Best-of-N');
-    await user.clear(bestOf);
-    await user.type(bestOf, '9');
-    // Values outside 1..5 are clamped before reaching state.
-    expect(bestOfProps.setBestOfN).toHaveBeenLastCalledWith(5);
+    const reasoningProps = makeProps({ section: 'model' });
+    rerender(<SettingsPage {...reasoningProps} />);
+    await user.selectOptions(screen.getByLabelText('Reasoning effort'), 'high');
+    expect(reasoningProps.setReasoningEffort).toHaveBeenLastCalledWith('high');
   });
 
   it('permissions: warns on the high-risk autopilot policy', () => {
@@ -155,13 +143,10 @@ describe('SettingsPage', () => {
     expect(props.setWebSearchEnabled).toHaveBeenCalledWith(false);
   });
 
-  it('workspace: edits the project folder and opens the picker', async () => {
-    const user = userEvent.setup();
-    const props = makeProps({ section: 'integrations' });
-    render(<SettingsPage {...props} />);
-    expect(screen.getByLabelText('Project folder')).toHaveValue('/repo');
-    await user.click(screen.getByRole('button', { name: 'Pick…' }));
-    expect(props.onPickFolder).toHaveBeenCalledTimes(1);
+  it('does not expose the redundant Workspace settings page', () => {
+    render(<SettingsPage {...makeProps()} />);
+    expect(screen.queryByRole('button', { name: 'Workspace' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Project folder')).not.toBeInTheDocument();
   });
 
   it('about: shows app and grok versions', () => {

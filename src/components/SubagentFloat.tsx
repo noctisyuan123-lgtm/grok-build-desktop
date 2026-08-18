@@ -9,13 +9,12 @@ import {
 import { createPortal } from 'react-dom';
 import { Bot, X } from 'lucide-react';
 import { useElapsed } from '../hooks/useElapsed';
-import { useRunHtml, useRunSnapshot } from '../hooks/useRunSnapshot';
-import { sanitizeHtml } from '../lib/sanitizeHtml';
+import { useRunSnapshot } from '../hooks/useRunSnapshot';
 import { useModalFocus } from '../hooks/useModalFocus';
 import { streamStore } from '../lib/streamStore';
 import type { TraceEvent, TraceStatus } from '../lib/traceParser';
-import type { TranscriptSegment } from '../lib/streamStore';
-import { ActivityGroup } from './TraceTimeline';
+import { PlanTodoList, resolvePlanEntriesFromTraces } from './PlanTodoList';
+import { TranscriptMessage } from './MessageItem';
 import { t } from '../i18n';
 
 const SUBAGENT_DRAWER_WIDTH_KEY = 'grok-desktop-subagent-drawer-width';
@@ -206,6 +205,10 @@ function SubagentDrawerBody({ runId, subagent }: { runId: string; subagent: Trac
     );
   }, [snapshot?.traces, subagent.key]);
   const transcript = subagent.transcript ?? [];
+  const live = subagent.status === 'running';
+  const transcriptRunId = `${runId}:subagent:${subagent.key}`;
+  const planEntries = useMemo(() => resolvePlanEntriesFromTraces(children), [children]);
+  const planNode = planEntries?.length ? <PlanTodoList entries={planEntries} /> : null;
 
   return (
     <div className="subagent-drawer-body">
@@ -233,12 +236,25 @@ function SubagentDrawerBody({ runId, subagent }: { runId: string; subagent: Trac
         </pre>
       ) : null}
       {transcript.length > 0 ? (
-        <SubagentTranscript
-          runId={runId}
-          subagentKey={subagent.key}
-          transcript={transcript}
-          traces={children}
-        />
+        <div className="subagent-drawer-transcript">
+          <TranscriptMessage
+            runId={transcriptRunId}
+            transcript={transcript}
+            traces={children}
+            workedLabel={
+              !live && elapsed != null
+                ? t('message.workedFor', { duration: formatDuration(elapsed) })
+                : undefined
+            }
+            live={live}
+            responseTerminalReady={!live}
+            startedAt={subagent.startedAt}
+            autoExpandWork={live}
+            canUndo={false}
+            showUndo={false}
+            planNode={planNode}
+          />
+        </div>
       ) : null}
       {children.length > 0 ? (
         <section className="subagent-drawer-children" aria-label={t('subagent.childTraces')}>
@@ -259,67 +275,6 @@ function SubagentDrawerBody({ runId, subagent }: { runId: string; subagent: Trac
         <p className="subagent-drawer-empty">{t('subagent.noChildTraces')}</p>
       )}
     </div>
-  );
-}
-
-function SubagentTranscript({
-  runId,
-  subagentKey,
-  transcript,
-  traces,
-}: {
-  runId: string;
-  subagentKey: string;
-  transcript: TranscriptSegment[];
-  traces: TraceEvent[];
-}) {
-  return (
-    <section className="subagent-drawer-transcript" aria-label="Subagent workflow transcript">
-      {transcript.map((segment) => {
-        if (segment.kind === 'thought') {
-          return (
-            <details key={segment.key} className="subagent-transcript-thought">
-              <summary>Thought</summary>
-              <SubagentMarkdown
-                cacheKey={`${runId}:${subagentKey}:${segment.key}`}
-                text={segment.text}
-              />
-            </details>
-          );
-        }
-        if (segment.kind === 'response') {
-          return (
-            <SubagentMarkdown
-              key={segment.key}
-              cacheKey={`${runId}:${subagentKey}:${segment.key}`}
-              text={segment.text}
-            />
-          );
-        }
-        const activity = segment.traceKeys
-          .map((key) => traces.find((trace) => trace.key === key))
-          .filter((trace): trace is TraceEvent => Boolean(trace));
-        return activity.length > 0 ? <ActivityGroup key={segment.key} traces={activity} /> : null;
-      })}
-    </section>
-  );
-}
-
-function SubagentMarkdown({ cacheKey, text }: { cacheKey: string; text: string }) {
-  const html = useRunHtml(cacheKey);
-  const safeHtml = useMemo(() => (html ? sanitizeHtml(html) : html), [html]);
-  useEffect(() => {
-    import('../lib/markdownWorker')
-      .then(({ scheduleMarkdownParse }) => scheduleMarkdownParse(cacheKey, text))
-      .catch(() => {});
-  }, [cacheKey, text]);
-  return safeHtml ? (
-    <div
-      className="message-body markdown-body subagent-transcript-response"
-      dangerouslySetInnerHTML={{ __html: safeHtml }}
-    />
-  ) : (
-    <pre className="subagent-transcript-raw">{text}</pre>
   );
 }
 
@@ -381,13 +336,20 @@ function formatDuration(ms: number): string {
 
 function readSubagentDrawerWidth(): number {
   try {
-    const stored = Number.parseInt(window.localStorage.getItem(SUBAGENT_DRAWER_WIDTH_KEY) ?? '', 10);
-    return Number.isFinite(stored) ? clampSubagentDrawerWidth(stored) : SUBAGENT_DRAWER_DEFAULT_WIDTH;
+    const stored = Number.parseInt(
+      window.localStorage.getItem(SUBAGENT_DRAWER_WIDTH_KEY) ?? '',
+      10,
+    );
+    return Number.isFinite(stored)
+      ? clampSubagentDrawerWidth(stored)
+      : SUBAGENT_DRAWER_DEFAULT_WIDTH;
   } catch {
     return SUBAGENT_DRAWER_DEFAULT_WIDTH;
   }
 }
 
 function clampSubagentDrawerWidth(width: number): number {
-  return Math.round(Math.min(SUBAGENT_DRAWER_MAX_WIDTH, Math.max(SUBAGENT_DRAWER_MIN_WIDTH, width)));
+  return Math.round(
+    Math.min(SUBAGENT_DRAWER_MAX_WIDTH, Math.max(SUBAGENT_DRAWER_MIN_WIDTH, width)),
+  );
 }

@@ -32,7 +32,9 @@ describe('SubagentFloat', () => {
       traces: [subagent()],
     });
     render(<SubagentFloat sessionRunIds={['session-run']} />);
-    expect(screen.getByRole('button', { name: /Open subagent session: Review backend/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Open subagent session: Review backend/i }),
+    ).toBeInTheDocument();
     expect(screen.getByText('Review backend')).toBeInTheDocument();
     expect(screen.getByText('Running')).toBeInTheDocument();
   });
@@ -139,10 +141,57 @@ describe('SubagentFloat', () => {
     render(<SubagentFloat sessionRunIds={['session-run']} />);
     expect(screen.getAllByRole('button', { name: /Open subagent session/i })).toHaveLength(2);
 
-    await user.click(screen.getByRole('button', { name: /Open subagent session: Review frontend/i }));
+    await user.click(
+      screen.getByRole('button', { name: /Open subagent session: Review frontend/i }),
+    );
     expect(screen.getByRole('dialog', { name: /Subagent · Review frontend/i })).toBeInTheDocument();
     expect(screen.getByText('Frontend result')).toBeInTheDocument();
     expect(screen.queryByText('Backend result')).toBeNull();
+  });
+
+  it('uses the main workflow renderer inside the independent drawer', async () => {
+    const user = userEvent.setup();
+    const child = {
+      key: 'tool:workflow',
+      kind: 'tool' as const,
+      label: 'Read workflow.ts',
+      status: 'done' as const,
+      startedAt: 1_100,
+      endedAt: 1_700,
+      parentKey: 'subagent:review',
+    };
+    streamStore.patchRun('session-run', {
+      state: 'done',
+      traces: [
+        subagent({
+          status: 'done',
+          endedAt: 2_000,
+          transcript: [
+            {
+              key: 'thought:0',
+              kind: 'thought',
+              text: 'Inspect the workflow',
+              startedAt: 1_000,
+              endedAt: 1_400,
+            },
+            { key: 'tools:0', kind: 'tools', traceKeys: [child.key] },
+            { key: 'response:0', kind: 'response', text: 'Workflow result' },
+          ],
+        }),
+        child,
+      ],
+    });
+
+    render(<SubagentFloat sessionRunIds={['session-run']} />);
+    await user.click(screen.getByRole('button', { name: /Open subagent session/i }));
+
+    expect(document.body.querySelector('.transcript-work')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Worked for 1.0s' })).toBeInTheDocument();
+    expect(screen.getByText('Workflow result')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Worked for 1.0s' }));
+    await user.click(screen.getByRole('button', { name: 'Thought and used 1 tool' }));
+    expect(screen.getByText('Thought briefly')).toBeInTheDocument();
+    expect(screen.getAllByText('Read workflow.ts')).toHaveLength(2);
   });
 
   it('resizes the drawer from its left edge and remembers the width', async () => {
