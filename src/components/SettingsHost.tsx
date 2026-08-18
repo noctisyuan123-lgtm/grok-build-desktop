@@ -1,6 +1,7 @@
 // Adapter that maps App-level state (model config, session, panels) onto
 // SettingsPage's option-list props. Extracted from App.tsx unchanged.
 import { SettingsPage, type SettingsSection } from './SettingsPage';
+import packageJson from '../../package.json';
 import type { useModelConfig } from '../hooks/useModelConfig';
 import type {
   ActionPolicy,
@@ -120,7 +121,7 @@ export function SettingsHost({
       setPermissionMode={(v) => setPermissionMode(v as PermissionMode)}
       webSearchEnabled={webSearchEnabled}
       setWebSearchEnabled={setWebSearchEnabled}
-      appVersion="0.4.0"
+      appVersion={packageJson.version}
       grokVersionLine={grokVersionLine}
     />
   );

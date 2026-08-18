@@ -153,5 +153,6 @@ describe('SettingsPage', () => {
     render(<SettingsPage {...makeProps({ section: 'about' })} />);
     expect(screen.getByText('v0.4.0')).toBeInTheDocument();
     expect(screen.getByText('Grok CLI 1.0')).toBeInTheDocument();
+    expect(document.querySelector('.set-about-mark')).toHaveAttribute('src');
   });
 });

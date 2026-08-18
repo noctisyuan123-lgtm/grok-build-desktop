@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { useModalFocus } from '../hooks/useModalFocus';
 import { t } from '../i18n';
+import appIcon from '../../src-tauri/icons/icon.png';
 
 type ThemeMode = 'dark' | 'light';
 type DockPosition = 'right' | 'bottom';
@@ -331,7 +332,7 @@ export function SettingsPage(props: SettingsPageProps) {
             <section className="settings-section">
               <h2>{t('settings.nav.about')}</h2>
               <div className="set-about">
-                <div className="set-about-mark">G</div>
+                <img className="set-about-mark" src={appIcon} alt="" />
                 <div>
                   <div className="set-about-name">{t('settings.aboutName')}</div>
                   <div className="set-about-ver">
