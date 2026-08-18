@@ -87,6 +87,8 @@ class StreamStore {
   private listeners = new Set<Listener>();
   private completionListeners = new Set<CompletionListener>();
   private completedRunIds = new Set<string>();
+  private notifyScheduled = false;
+  private cancelScheduledNotify: (() => void) | null = null;
 
   subscribe = (l: Listener): (() => void) => {
     this.listeners.add(l);
@@ -100,6 +102,35 @@ class StreamStore {
 
   private notify() {
     this.listeners.forEach((l) => l());
+  }
+
+  /**
+   * Publish text deltas at most once per animation frame. The run map is
+   * updated synchronously, so event handlers can still read the latest state;
+   * only React subscribers wait for the coalesced notification.
+   */
+  scheduleNotify = (): void => {
+    if (this.notifyScheduled) return;
+    this.notifyScheduled = true;
+    const flush = () => {
+      this.notifyScheduled = false;
+      this.cancelScheduledNotify = null;
+      this.notify();
+    };
+    if (typeof requestAnimationFrame === 'function') {
+      const frame = requestAnimationFrame(flush);
+      this.cancelScheduledNotify = () => cancelAnimationFrame(frame);
+    } else {
+      const timer = setTimeout(flush, 16);
+      this.cancelScheduledNotify = () => clearTimeout(timer);
+    }
+  };
+
+  private notifyNow(): void {
+    this.cancelScheduledNotify?.();
+    this.cancelScheduledNotify = null;
+    this.notifyScheduled = false;
+    this.notify();
   }
 
   markCompletion = (runId: string, state: RunCompletionState, endedAt: number | null): void => {
@@ -142,10 +173,10 @@ class StreamStore {
     return this.queue.active ? this.runs.get(this.queue.active) : undefined;
   };
 
-  patchRun = (id: string, patch: Partial<RunSnapshot>): void => {
+  patchRun = (id: string, patch: Partial<RunSnapshot>, options?: { notify?: boolean }): void => {
     const cur = this.runs.get(id) ?? this.makeEmpty(id);
     this.runs.set(id, { ...cur, ...patch });
-    this.notify();
+    if (options?.notify !== false) this.notifyNow();
   };
 
   setHtml = (id: string, html: string): void => {
@@ -154,7 +185,7 @@ class StreamStore {
     if (cur) {
       this.runs.set(id, { ...cur, htmlVersion: cur.htmlVersion + 1 });
     }
-    this.notify();
+    this.notifyNow();
   };
 
   setQueue = (q: {
@@ -170,7 +201,7 @@ class StreamStore {
       activeIds,
       items: q.items ?? [],
     };
-    this.notify();
+    this.notifyNow();
   };
 
   private makeEmpty(id: string): RunSnapshot {
@@ -200,6 +231,9 @@ class StreamStore {
     this.html.clear();
     this.queue = { active: null, activeIds: [], items: [] };
     this.completedRunIds.clear();
+    this.cancelScheduledNotify?.();
+    this.cancelScheduledNotify = null;
+    this.notifyScheduled = false;
     this.listeners.clear();
     this.completionListeners.clear();
   };
@@ -241,25 +275,38 @@ export function applyRunEvent(
     const { data } = event as Extract<GrokEvent, { type: 'text' }>;
     const owner = findSubagentOwner(cur?.traces ?? [], sessionId, cur?.rootSessionId);
     if (owner) {
-      streamStore.patchRun(runId, {
-        traces: updateSubagentTranscript(cur?.traces ?? [], owner.key, (transcript) =>
-          appendResponse(transcript, data),
-        ),
-        lastEventType: 'activity',
-        state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
-      });
+      const ownerTranscript = owner.transcript ?? [];
+      const startsResponse = ownerTranscript.at(-1)?.kind !== 'response';
+      streamStore.patchRun(
+        runId,
+        {
+          traces: updateSubagentTranscript(cur?.traces ?? [], owner.key, (transcript) =>
+            appendResponse(transcript, data),
+          ),
+          lastEventType: 'activity',
+          state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
+        },
+        { notify: startsResponse },
+      );
+      if (!startsResponse) streamStore.scheduleNotify();
       return;
     }
     const nextText = (cur?.text ?? '') + data;
     const nextTranscript = appendResponse(cur?.transcript ?? [], data);
-    streamStore.patchRun(runId, {
-      text: nextText,
-      textChars: (cur?.textChars ?? 0) + data.length,
-      transcript: nextTranscript,
-      lastEventType: 'text',
-      rootSessionId: cur?.rootSessionId ?? sessionId ?? null,
-      state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
-    });
+    const startsResponse = cur?.transcript.at(-1)?.kind !== 'response';
+    streamStore.patchRun(
+      runId,
+      {
+        text: nextText,
+        textChars: (cur?.textChars ?? 0) + data.length,
+        transcript: nextTranscript,
+        lastEventType: 'text',
+        rootSessionId: cur?.rootSessionId ?? sessionId ?? null,
+        state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
+      },
+      { notify: startsResponse },
+    );
+    if (!startsResponse) streamStore.scheduleNotify();
     // Lazy-import to keep the worker out of unit-test bundles (vitest jsdom).
     import('./markdownWorker')
       .then(({ scheduleMarkdownParse }) => {
@@ -292,11 +339,12 @@ export function applyRunEvent(
     if (cur?.text || (lastResponse?.kind === 'response' && lastResponse.text)) {
       import('./markdownWorker')
         .then(({ scheduleMarkdownParse }) => {
-          if (cur?.text) scheduleMarkdownParse(runId, cur.text);
+          if (cur?.text) scheduleMarkdownParse(runId, cur.text, { immediate: true });
           if (lastResponse?.kind === 'response') {
             scheduleMarkdownParse(
               exteriorMarkdownKey(runId, lastResponseIndex),
               lastResponse.text,
+              { immediate: true },
             );
           }
         })

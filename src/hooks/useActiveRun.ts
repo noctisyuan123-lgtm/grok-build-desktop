@@ -10,12 +10,27 @@ export function useActiveRun(): RunSnapshot | undefined {
 }
 
 /**
+ * Narrow subscription for components that only need the active run identity
+ * and lifecycle state. The full snapshot changes for every streamed chunk;
+ * this primitive stays stable while the same run is producing text.
+ */
+export function useActiveRunKey(): string {
+  return useSyncExternalStore(
+    streamStore.subscribe,
+    () => {
+      const snap = streamStore.getActiveRunSnapshot();
+      return snap ? `${snap.id}\0${snap.state}` : '';
+    },
+    () => '',
+  );
+}
+
+/**
  * Active run that belongs to the given message run ids (current UI session).
  * With concurrent multi-lane execution the global queue head may belong to
  * another tab — callers that render session-scoped UI must use this instead.
  */
 export function useSessionActiveRun(runIds: readonly string[]): RunSnapshot | undefined {
-  const key = runIds.join('\0');
   return useSyncExternalStore(
     streamStore.subscribe,
     () => {
@@ -31,8 +46,31 @@ export function useSessionActiveRun(runIds: readonly string[]): RunSnapshot | un
     },
     () => undefined,
   );
-  // `key` documents that getSnapshot closes over runIds identity.
-  void key;
+}
+
+/**
+ * Primitive progress key for the run currently owned by a message list.
+ * It preserves the list's auto-follow behavior without handing the whole
+ * mutable snapshot to the parent on every event.
+ */
+export function useSessionActiveRunProgress(runIds: readonly string[]): string {
+  return useSyncExternalStore(
+    streamStore.subscribe,
+    () => {
+      for (let i = runIds.length - 1; i >= 0; i -= 1) {
+        const id = runIds[i];
+        if (!id) continue;
+        const snap = streamStore.getRunSnapshot(id);
+        if (snap && (snap.state === 'running' || snap.state === 'queued')) {
+          return [snap.id, snap.state, snap.textChars, snap.thoughtChars, snap.htmlVersion].join(
+            '\0',
+          );
+        }
+      }
+      return '';
+    },
+    () => '',
+  );
 }
 
 /**

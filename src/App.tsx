@@ -36,7 +36,7 @@ import { TitleBar } from './components/TitleBar';
 import { ComposerSection } from './components/ComposerSection';
 import { SettingsHost } from './components/SettingsHost';
 import { UndoToast } from './components/UndoToast';
-import { useActiveRun } from './hooks/useActiveRun';
+import { useActiveRunKey } from './hooks/useActiveRun';
 import { useGrokRunners } from './hooks/useGrokRunners';
 import { useUndoToast } from './hooks/useUndoToast';
 import { useSessionPersistence } from './hooks/useSessionPersistence';
@@ -1322,8 +1322,10 @@ function App() {
   const grokToolStatus = statusMap.grok;
   const isGrokReady = Boolean(grokStatus?.authenticated);
   const workspacePath = codingCwd.trim() || 'No project selected';
-  const activeRun = useActiveRun();
-  const grokIsRunning = Boolean(activeRun && activeRun.state === 'running');
+  // App only needs the active run lifecycle. Subscribing to the full snapshot
+  // made this large component re-render for every streamed text chunk.
+  const activeRunKey = useActiveRunKey();
+  const grokIsRunning = activeRunKey.endsWith('\0running');
   const activeSessionRunId = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index];
@@ -1332,7 +1334,10 @@ function App() {
       if (state === 'queued' || state === 'running') return message.runId;
     }
     return null;
-  }, [messages, activeRun?.id, activeRun?.state]);
+    // activeRunKey intentionally invalidates this store-backed lookup when the
+    // active run lifecycle changes, even though the callback reads the store.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, activeRunKey]);
   const activeSessionIsRunning = activeSessionRunId != null;
 
   // Refresh the static preview when a streaming grok run finishes. The main

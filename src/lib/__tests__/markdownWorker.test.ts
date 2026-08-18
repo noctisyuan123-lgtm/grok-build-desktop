@@ -49,6 +49,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -96,6 +97,7 @@ describe('scheduleMarkdownParse', () => {
   });
 
   it('rebuilds the worker after an error and re-drives stashed texts', async () => {
+    vi.useFakeTimers();
     const { scheduleMarkdownParse } = await loadModule();
     scheduleMarkdownParse('r1', 'v1');
     scheduleMarkdownParse('r1', 'v2'); // stashed behind the in-flight v1
@@ -105,9 +107,10 @@ describe('scheduleMarkdownParse', () => {
     expect(FakeWorker.instances).toHaveLength(2);
     expect(FakeWorker.instances[1]!.posted).toEqual([{ runId: 'r1', text: 'v2' }]);
 
-    // The cleared in-flight mark means new requests post immediately again.
+    // The cleared in-flight mark lets the new request drain after its throttle window.
     FakeWorker.instances[1]!.emit('message', { data: { runId: 'r1', html: '<p>v2</p>' } });
     scheduleMarkdownParse('r1', 'v3');
+    vi.advanceTimersByTime(250);
     expect(FakeWorker.instances[1]!.posted).toEqual([
       { runId: 'r1', text: 'v2' },
       { runId: 'r1', text: 'v3' },

@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { useActiveRun } from '../hooks/useActiveRun';
+import { useActiveRunKey } from '../hooks/useActiveRun';
 import { useElapsed } from '../hooks/useElapsed';
 import { useQueue } from '../hooks/useQueue';
 import { cancelPendingRuns, cancelRun, getQueue, resumePendingRuns } from '../lib/grok';
-import { replaceQueue } from '../lib/streamStore';
+import { replaceQueue, streamStore } from '../lib/streamStore';
 import { t } from '../i18n';
 
 function formatElapsed(ms: number): string {
@@ -23,7 +23,10 @@ interface Props {
 export function QueueDock({ onError }: Props) {
   const [expanded, setExpanded] = useState(false);
   const queue = useQueue();
-  const active = useActiveRun();
+  const activeKey = useActiveRunKey();
+  // The key subscription changes only when the active run or its lifecycle
+  // changes; reading the stable snapshot here avoids per-token QueueDock work.
+  const active = activeKey ? streamStore.getActiveRunSnapshot() : undefined;
   const elapsed = useElapsed(active?.startedAt ?? null, active?.endedAt ?? null);
   const [resumeBannerVisible, setResumeBannerVisible] = useState(false);
   const [bannerCount, setBannerCount] = useState(0);

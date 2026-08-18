@@ -112,10 +112,11 @@ describe('streamStore', () => {
     expect(streamStore.getInflightRunIdsSnapshot()).toBe('');
   });
 
-  it('subscriber notified on event', () => {
+  it('subscriber notified on event', async () => {
     let calls = 0;
     const unsub = streamStore.subscribe(() => calls++);
     applyRunEvent('r1', { type: 'text', data: 'a' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
     expect(calls).toBeGreaterThan(0);
     unsub();
   });

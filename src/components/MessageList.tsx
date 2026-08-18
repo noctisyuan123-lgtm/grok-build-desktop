@@ -4,7 +4,7 @@ import { MessageItem } from './MessageItem';
 import { LongTextMessage } from './LongTextMessage';
 import { MessageActions } from './MessageActions';
 import { isLongUserText } from '../lib/longText';
-import { useSessionActiveRun } from '../hooks/useActiveRun';
+import { useSessionActiveRunProgress } from '../hooks/useActiveRun';
 import { t } from '../i18n';
 import type { PlanEntry, TraceEvent } from '../lib/traceParser';
 import type { TranscriptSegment } from '../lib/streamStore';
@@ -71,8 +71,8 @@ export function MessageList({
     () => messages.map((message) => message.runId).filter(Boolean),
     [messages],
   );
-  const active = useSessionActiveRun(sessionRunIds);
-  const activeBelongsHere = Boolean(active);
+  const activeProgress = useSessionActiveRunProgress(sessionRunIds);
+  const activeBelongsHere = activeProgress !== '';
 
   const scrollToLast = useCallback(
     (smooth = false) => {
@@ -117,24 +117,15 @@ export function MessageList({
       scheduleScrollToLast(atBottomRef.current);
     }
     prevLenRef.current = messages.length;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length, scheduleScrollToLast]);
 
   // The active run is STREAMING — its text/thought/html grows on the same
   // (last) message. Virtuoso's followOutput only fires on new items, not on
   // an item growing, so we pin to the bottom ourselves while at-bottom.
   useEffect(() => {
-    if (!activeBelongsHere || !active) return;
+    if (!activeBelongsHere) return;
     if (atBottomRef.current) scheduleScrollToLast();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    activeBelongsHere,
-    active?.textChars,
-    active?.thoughtChars,
-    active?.htmlVersion,
-    active?.state,
-    scheduleScrollToLast,
-  ]);
+  }, [activeBelongsHere, activeProgress, scheduleScrollToLast]);
 
   // History-click jump: scroll the requested message into view (centered) and
   // flash it for ~1.3s so the user sees exactly which task they returned to.
