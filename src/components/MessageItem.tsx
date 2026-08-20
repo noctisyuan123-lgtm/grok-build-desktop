@@ -127,6 +127,7 @@ function MessageItemImpl({
           <MessageActions
             sourceText={fallbackText || ''}
             canUndo={canUndo}
+            showCopy
             showUndo={showUndo}
             onUndo={onUndo}
           />
@@ -142,6 +143,7 @@ function MessageItemImpl({
           <MessageActions
             sourceText={fallbackText}
             canUndo={canUndo}
+            showCopy
             showUndo={showUndo}
             onUndo={onUndo}
           />
@@ -222,6 +224,8 @@ function MessageItemImpl({
           <MessageActions
             sourceText={snap.text || fallbackText || ''}
             canUndo={canUndo && snap.state !== 'queued' && snap.state !== 'running'}
+            showCopy={!runIsLive && responseTerminalReady}
+            showUndo={showUndo}
             onUndo={onUndo}
           />
           {planNode}
@@ -392,6 +396,7 @@ export function TranscriptMessage({
       <MessageActions
         sourceText={finalText}
         canUndo={canUndo}
+        showCopy={!live && responseTerminalReady}
         showUndo={showUndo}
         onUndo={onUndo}
       />

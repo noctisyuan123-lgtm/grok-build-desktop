@@ -1051,6 +1051,24 @@ describe('MessageItem rendering states', () => {
     expect(container.querySelector('.stream-caret')).toBeNull();
   });
 
+  it('shows response copy only after the streaming response ends', async () => {
+    applyRunEvent('copy-after-end', { type: 'text', data: 'answer' });
+    render(<MessageItem runId="copy-after-end" />);
+
+    expect(screen.queryByRole('button', { name: 'Copy response' })).not.toBeInTheDocument();
+
+    await act(async () => {
+      applyRunEvent('copy-after-end', {
+        type: 'end',
+        stopReason: 'EndTurn',
+        sessionId: 'session',
+        requestId: 'request',
+      });
+    });
+
+    expect(screen.getByRole('button', { name: 'Copy response' })).toBeInTheDocument();
+  });
+
   it('uses a quiet starting state without a placeholder timer or blank text block', () => {
     applyStateChange('r-waiting', { state: 'Running', startedAt: Date.now() });
     const { container } = render(<MessageItem runId="r-waiting" />);

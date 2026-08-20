@@ -3040,7 +3040,7 @@ button.status-cluster.status-action:disabled {
 }
 
 .conversation-panel.is-empty .composer-context-footer {
-  bottom: -12px;
+  bottom: -18px;
 }
 
 .conversation-panel.is-empty .empty-state {
@@ -5529,7 +5529,7 @@ body.subagent-drawer-resizing * {
   pointer-events: none;
   position: absolute;
   /* Keep the indicator just below the composer, never inside its hit area. */
-  bottom: -4px;
+  bottom: -10px;
   /* Anchor to the shared composer column instead of the full window. */
   right: 0;
   z-index: 5;

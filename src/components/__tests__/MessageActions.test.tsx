@@ -30,4 +30,17 @@ describe('MessageActions', () => {
     await user.click(screen.getByRole('button', { name: t('message.undoResponse') }));
     expect(onUndo).toHaveBeenCalledTimes(1);
   });
+
+  it('can hide response copy until the response is complete', () => {
+    render(
+      <MessageActions
+        sourceText="streaming answer"
+        canUndo={false}
+        showCopy={false}
+        showUndo={false}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: t('message.copy') })).not.toBeInTheDocument();
+  });
 });
