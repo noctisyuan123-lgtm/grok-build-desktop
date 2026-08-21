@@ -657,7 +657,9 @@ describe('composer submit → queued run → streamed reply', () => {
     await ctx.user.click(await convo().findByRole('button', { name: t('message.copyPrompt') }));
     expect(writeText).toHaveBeenCalledWith('Undo this prompt from its own controls');
 
-    expect(convo().queryByRole('button', { name: t('message.undoPrompt') })).not.toBeInTheDocument();
+    expect(
+      convo().queryByRole('button', { name: t('message.undoPrompt') }),
+    ).not.toBeInTheDocument();
     await ctx.user.click(await convo().findByRole('button', { name: t('message.undoResponse') }));
 
     await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
@@ -671,12 +673,76 @@ describe('composer submit → queued run → streamed reply', () => {
 
     await ctx.user.keyboard('{Enter}');
     await waitFor(() => expect(ctx.tauri.runIds).toHaveLength(2));
-    const resumedArgs = [...ctx.tauri.calls]
-      .reverse()
-      .find((call) => call.cmd === 'enqueue_run')?.args.args as string[];
+    const resumedArgs = [...ctx.tauri.calls].reverse().find((call) => call.cmd === 'enqueue_run')
+      ?.args.args as string[];
     expect(resumedArgs).toContain('--resume');
     expect(resumedArgs[resumedArgs.indexOf('--resume') + 1]).toBe('replacement-session');
     expect(resumedArgs).not.toContain('--share-session');
+  });
+
+  it('edits the latest user bubble only after the old model context is rewound', async () => {
+    let rewindArgs: Record<string, unknown> | undefined;
+    const ctx = await bootApp({
+      rewind_grok_session: (args) => {
+        rewindArgs = args;
+        return {
+          rewound: true,
+          sessionId: String(args.sessionId),
+          rebased: false,
+        };
+      },
+    });
+    const firstRun = await submitPrompt(ctx, 'Original prompt');
+    await act(async () => {
+      await ctx.tauri.streamReply(firstRun, ['Original answer']);
+    });
+    await waitFor(() => expect(convo().getByText('Original answer')).toBeInTheDocument());
+
+    await ctx.user.click(await convo().findByRole('button', { name: t('message.editPrompt') }));
+    const editBox = await convo().findByRole('textbox', { name: t('message.editPromptInput') });
+    await ctx.user.clear(editBox);
+    await ctx.user.type(editBox, 'Edited prompt');
+    await ctx.user.click(await convo().findByRole('button', { name: t('message.editSend') }));
+
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
+    expect(rewindArgs?.undoPrompt).toBe('Original prompt');
+    expect(String(rewindArgs?.replayContext ?? '')).not.toContain('Original prompt');
+    await waitFor(() => expect(ctx.tauri.runIds).toHaveLength(2));
+    expect(convo().queryByText('Original prompt')).not.toBeInTheDocument();
+    expect(convo().queryByText('Original answer')).not.toBeInTheDocument();
+    expect(await convo().findByText('Edited prompt')).toBeInTheDocument();
+    const enqueue = [...ctx.tauri.calls].reverse().find((call) => call.cmd === 'enqueue_run');
+    expect(enqueue?.args.prompt).toBe('Edited prompt');
+    expect(enqueue?.args.args).toContain('--resume');
+    expect(enqueue?.args.args).toContain(String(rewindArgs?.sessionId));
+    expect(enqueue?.args.args).not.toContain('--fork-session');
+  });
+
+  it('restores the original user bubble and sends nothing when edit rewind fails', async () => {
+    const ctx = await bootApp({
+      rewind_grok_session: () => {
+        throw new Error('rewind unavailable');
+      },
+    });
+    const firstRun = await submitPrompt(ctx, 'Keep original');
+    await act(async () => {
+      await ctx.tauri.streamReply(firstRun, ['Original answer remains']);
+    });
+    await waitFor(() => expect(convo().getByText('Original answer remains')).toBeInTheDocument());
+
+    await ctx.user.click(await convo().findByRole('button', { name: t('message.editPrompt') }));
+    const editBox = await convo().findByRole('textbox', { name: t('message.editPromptInput') });
+    await ctx.user.clear(editBox);
+    await ctx.user.type(editBox, 'Must not send');
+    await ctx.user.click(await convo().findByRole('button', { name: t('message.editSend') }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent(t('message.editFailed')),
+    );
+    expect(await convo().findByText('Keep original')).toBeInTheDocument();
+    expect(await convo().findByText('Original answer remains')).toBeInTheDocument();
+    expect(convo().queryByText('Must not send')).not.toBeInTheDocument();
+    expect(ctx.tauri.runIds).toHaveLength(1);
   });
 
   it('keeps the visible pre-Undo history when the rewound export is temporarily incomplete', async () => {

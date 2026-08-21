@@ -1,4 +1,7 @@
-const MAX_TITLE_UNITS = 24;
+// Keep auto-titles short enough to scan in the sidebar. The sidebar itself
+// is a navigation list, so a clipped short topic is preferable to replaying
+// the user's whole opening sentence with a visible ellipsis.
+const MAX_TITLE_UNITS = 28;
 
 function fitSidebar(text: string): string {
   let units = 0;
@@ -6,7 +9,9 @@ function fitSidebar(text: string): string {
   for (const char of text) {
     // CJK glyphs are roughly twice as wide as Latin text in the sidebar.
     const next = /[\u3000-\u9fff\uf900-\ufaff]/.test(char) ? 2 : 1;
-    if (units + next > MAX_TITLE_UNITS) break;
+    if (units + next > MAX_TITLE_UNITS - 1) {
+      break;
+    }
     fitted += char;
     units += next;
   }
@@ -16,10 +21,11 @@ function fitSidebar(text: string): string {
     fitted.length < text.length &&
     !/\s/.test(text[fitted.length] ?? '') &&
     !/\s/.test(fitted.at(-1) ?? '');
-  if (cutMidWord && lastSpace >= Math.floor(trimmed.length * 0.6)) {
-    return trimmed.slice(0, lastSpace);
-  }
-  return trimmed;
+  const readable =
+    cutMidWord && lastSpace >= Math.floor(trimmed.length * 0.6)
+      ? trimmed.slice(0, lastSpace)
+      : trimmed;
+  return readable;
 }
 
 function compact(text: string): string {
@@ -42,6 +48,16 @@ function intentTitle(text: string): string | null {
 
   if (/(session|会话).*(命名|标题|name|title)|(?:命名|标题).*(session|会话)/i.test(text)) {
     return '优化会话标题生成';
+  }
+  if (
+    /(usage|context|用量|占用|上下文)/i.test(text) &&
+    /(copy|复制|respond|response|回复)/i.test(text)
+  ) {
+    return '调整上下文用量与回复操作';
+  }
+  if (/(usage|context|用量|占用|上下文)/i.test(text)) return '调整上下文用量显示';
+  if (/(copy|复制).*(respond|response|回复)|(?:respond|response|回复).*复制/i.test(text)) {
+    return '调整回复复制操作';
   }
   if (/(滚轮|滚动条|scrollbar)/i.test(text)) return '优化侧栏滚动条';
   if (/(terminal|终端)/i.test(text)) return `${verb}内置终端`;
@@ -86,7 +102,7 @@ export function deriveConversationTitle(prompt: string): string {
     )
     .replace(/^帮我\s*(?:把)?\s*/i, '')
     .split(/[，,。！？!?；;\n]|(?:然后|顺便|另外|还有)/, 1)[0]
-    .replace(/(?:一下|一些|一点|就行|吧|吗|呢|呀|啊|呗)+$/i, '')
+    .replace(/(?:一下|一些|一点|就行|吧|吗|呢|呀|啊|呗|please)+$/i, '')
     .trim();
 
   if (!title) title = source;

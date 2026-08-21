@@ -526,6 +526,9 @@ pre {
   display: block;
   flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .history-list time {
@@ -8838,6 +8841,60 @@ body,
 }
 .message.message-user .message-body {
   max-width: 100%;
+}
+.message-edit-box {
+  align-self: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(74%, 920px);
+  width: 100%;
+}
+.message-edit-input {
+  background: var(--conversation-surface, var(--panel-bg));
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 12px;
+  box-sizing: border-box;
+  color: var(--conversation-text);
+  font: inherit;
+  line-height: 1.45;
+  max-height: 240px;
+  min-height: 76px;
+  outline: none;
+  padding: 11px 13px;
+  resize: vertical;
+  width: 100%;
+}
+.message-edit-input:focus {
+  border-color: var(--accent, #6d8cff);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #6d8cff) 22%, transparent);
+}
+.message-edit-controls {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.message-edit-cancel,
+.message-edit-send {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 5px 10px;
+}
+.message-edit-cancel {
+  background: transparent;
+  color: var(--muted-text);
+}
+.message-edit-send {
+  background: var(--accent, #6d8cff);
+  border-color: transparent;
+  color: white;
+}
+.message-edit-send:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 .message-attachments,
 .message-actions,

@@ -298,6 +298,7 @@ export function Sidebar({
         className={`history-row${item.pinned ? ' pinned' : ''}${item.active ? ' active' : ''}`}
         key={item.id}
         onClick={() => switchToSession(item.id)}
+        onDoubleClick={() => startRename(item.id)}
         onContextMenu={(e) => {
           e.preventDefault();
           openHistoryMenu(item, { x: e.clientX, y: e.clientY });
@@ -325,7 +326,6 @@ export function Sidebar({
             {item.title}
           </strong>
         </span>
-        <time>{item.time || ''}</time>
       </button>
     );
   }
@@ -475,7 +475,11 @@ export function Sidebar({
                                     <span className="history-activity-dot" />
                                   ) : null}
                                 </span>
-                                <Folder size={18} className="project-folder-icon" aria-hidden="true" />
+                                <Folder
+                                  size={18}
+                                  className="project-folder-icon"
+                                  aria-hidden="true"
+                                />
                                 <span>{projectName(path)}</span>
                               </button>
                               {!collapsed ? rows.map(renderHistoryRow) : null}

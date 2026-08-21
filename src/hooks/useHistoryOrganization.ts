@@ -168,23 +168,18 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
   const [historyFilter, setHistoryFilter] = useState('');
   // HISTORY is a list of CONVERSATIONS (sessions/tabs), newest first — the way
   // Claude / ChatGPT show chats. Each row is one whole conversation, titled by
-  // a compact intent summary of its first prompt; clicking it loads that conversation. (It used to list
-  // every individual prompt, which read as "messages", not tasks.)
+  // a stable auto-title from its first prompt; an explicit Rename label wins.
+  // Clicking a row loads the whole conversation, not just one message.
   const recentPrompts = useMemo(() => {
-    const firstUserLine = (msgs: TabMessage[]): string => {
+    const firstUserPrompt = (msgs: TabMessage[]): string => {
       const u = msgs.find((m) => m.role === 'user');
-      return (
-        u?.content
-          .split('\n')
-          .map((s) => s.trim())
-          .find(Boolean) ?? ''
-      );
+      return u?.content.trim() ?? '';
     };
     const rows: HistoryRow[] = tabs
       .flatMap((t) => {
         const msgs =
           (t.id === activeTabId ? (messages as unknown as TabMessage[]) : t.messages) ?? [];
-        const fp = firstUserLine(msgs);
+        const fp = firstUserPrompt(msgs);
         // A blank New Session is an ephemeral compose surface, not history.
         // It becomes a conversation row only after its first user message.
         if (!fp) return [];
@@ -192,18 +187,20 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
           ? Math.max(...msgs.map((m) => (m as { ts?: number }).ts ?? 0))
           : t.createdAt;
         const fallback = deriveConversationTitle(fp);
-        return [{
-          id: t.id,
-          title: promptLabels[t.id] ?? fallback,
-          detail: '',
-          time: timeLabel(lastTs),
-          pinned: pinnedPromptIds.has(t.id),
-          group: promptGroups[t.id] ?? null,
-          projectPath: t.cwd.trim() || null,
-          archived: archivedPromptIds.has(t.id),
-          lastTs,
-          active: t.id === activeTabId,
-        }];
+        return [
+          {
+            id: t.id,
+            title: promptLabels[t.id] ?? fallback,
+            detail: '',
+            time: timeLabel(lastTs),
+            pinned: pinnedPromptIds.has(t.id),
+            group: promptGroups[t.id] ?? null,
+            projectPath: t.cwd.trim() || null,
+            archived: archivedPromptIds.has(t.id),
+            lastTs,
+            active: t.id === activeTabId,
+          },
+        ];
       })
       .sort((a, b) => b.lastTs - a.lastTs);
     if (!historyFilter.trim()) return rows;

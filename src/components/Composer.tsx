@@ -44,6 +44,8 @@ export interface ComposerHandle {
   getValue: () => string;
   /** Focus the textarea. */
   focus: () => void;
+  /** Submit the current textarea value through the normal enqueue path. */
+  submit: () => Promise<void>;
 }
 
 interface Props {
@@ -60,6 +62,8 @@ interface Props {
   sessionRunIds?: readonly string[];
   /** Initial seed value (e.g. restored from session_state drafts). Only applied once on mount. */
   initialValue?: string;
+  /** Temporarily lock sends while a destructive turn replacement is settling. */
+  locked?: boolean;
   placeholder?: string;
   onEnqueued?: (info: {
     runId: string;
@@ -134,6 +138,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     laneId,
     sessionRunIds,
     initialValue,
+    locked = false,
     placeholder,
     onEnqueued,
     onError,
@@ -359,27 +364,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     };
   }, [addAttachments, attachFolderPath, onError]);
 
-  useImperativeHandle(
-    outerRef,
-    () => ({
-      setValue: (text: string) => {
-        const el = ref.current;
-        if (!el) return;
-        el.value = text;
-        // Imperative writes (mode switch, undo-response restore, starters)
-        // replace the live draft — seed history so Cmd+Z can still recover
-        // the previous local text if the user immediately deletes.
-        recordDraftHistory(text);
-        resizeTextarea(el);
-      },
-      setAttachedFolder,
-      getAttachedFolder: () => attachedFolder,
-      getValue: () => ref.current?.value ?? '',
-      focus: () => ref.current?.focus(),
-    }),
-    [attachedFolder, recordDraftHistory, resizeTextarea],
-  );
-
   // Apply initialValue once on mount.
   useEffect(() => {
     if (initialValue && ref.current && !ref.current.value) {
@@ -469,8 +453,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     return `${raw}\n\n---\nReferenced files (from @ mentions):${blocks.join('\n')}`;
   };
 
-  const submit = async () => {
-    if (submitting) return;
+  const submit = async (force = false) => {
+    if (submitting || (locked && !force)) return;
     const el = ref.current;
     if (!el) return;
     const rawText = el.value.trim();
@@ -538,6 +522,28 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       requestAnimationFrame(() => ref.current?.focus());
     }
   };
+
+  useImperativeHandle(
+    outerRef,
+    () => ({
+      setValue: (text: string) => {
+        const el = ref.current;
+        if (!el) return;
+        el.value = text;
+        // Imperative writes (mode switch, undo-response restore, starters)
+        // replace the live draft — seed history so Cmd+Z can still recover
+        // the previous local text if the user immediately deletes.
+        recordDraftHistory(text);
+        resizeTextarea(el);
+      },
+      setAttachedFolder,
+      getAttachedFolder: () => attachedFolder,
+      getValue: () => ref.current?.value ?? '',
+      focus: () => ref.current?.focus(),
+      submit: () => submit(true),
+    }),
+    [attachedFolder, recordDraftHistory, resizeTextarea, submit],
+  );
 
   const pickerOpen = Boolean(mention && cwd.trim());
 
@@ -631,7 +637,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       <div className="composer-input-shell">
         <textarea
           ref={ref}
-          disabled={submitting}
+          disabled={submitting || locked}
           // While the @-mention picker is open the textarea drives a listbox
           // without losing DOM focus — the ARIA combobox pattern. The role is
           // scoped to that state so the composer stays a plain multiline
@@ -752,7 +758,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           <button
             className="composer-attach"
             type="button"
-            disabled={submitting}
+            disabled={submitting || locked}
             aria-label={t('composer.chooseFiles')}
             title={t('composer.chooseFiles')}
             onClick={() => fileInputRef.current?.click()}
@@ -766,7 +772,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           <button
             className="composer-folder-attach"
             type="button"
-            disabled={submitting || folderPickerBusy}
+            disabled={submitting || locked || folderPickerBusy}
             aria-label={t('composer.attachFolder')}
             title={t('composer.attachFolder')}
             onClick={() => void chooseFolder()}
@@ -788,7 +794,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             <button
               className="composer-send"
               type="button"
-              disabled={submitting}
+              disabled={submitting || locked}
               aria-label={
                 submitting
                   ? t('composer.sendQueuing')

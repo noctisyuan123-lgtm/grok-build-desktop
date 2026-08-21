@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { VirtuosoMockContext } from 'react-virtuoso';
 import { MessageList, type MessageRef } from '../MessageList';
 import { streamStore } from '../../lib/streamStore';
@@ -74,6 +75,47 @@ describe('MessageList session isolation', () => {
     expect(screen.getByRole('button', { name: 'Copy prompt' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Undo prompt' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Undo response' })).not.toBeInTheDocument();
+  });
+
+  it('sends an edited prompt with Enter and keeps Shift+Enter for newlines', async () => {
+    const user = userEvent.setup();
+    const onEditUser = vi.fn();
+    render(
+      <VirtuosoMockContext.Provider value={{ viewportHeight: 800, itemHeight: 64 }}>
+        <MessageList
+          messages={[
+            {
+              id: 'user-edit',
+              runId: '',
+              role: 'user',
+              userText: 'Original prompt',
+              canEdit: true,
+              showEdit: true,
+            },
+          ]}
+          onEditUser={onEditUser}
+        />
+      </VirtuosoMockContext.Provider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Edit prompt' }));
+    const input = screen.getByRole('textbox', { name: 'Edit prompt text' });
+    expect(input).toHaveFocus();
+    expect((input as HTMLTextAreaElement).selectionStart).toBe('Original prompt'.length);
+    expect((input as HTMLTextAreaElement).selectionEnd).toBe('Original prompt'.length);
+    await user.click(input);
+    expect((input as HTMLTextAreaElement).selectionStart).toBe('Original prompt'.length);
+    expect((input as HTMLTextAreaElement).selectionEnd).toBe('Original prompt'.length);
+    await user.clear(input);
+    await user.type(input, 'first line');
+    await user.keyboard('{Shift>}{Enter}{/Shift}');
+    await user.type(input, 'second line');
+
+    expect(onEditUser).not.toHaveBeenCalled();
+    expect(input).toHaveValue('first line\nsecond line');
+
+    await user.keyboard('{Enter}');
+    expect(onEditUser).toHaveBeenCalledWith('user-edit', 'first line\nsecond line');
   });
 
   it('keys Virtuoso rows by stable message id so session switches do not reuse the wrong run', () => {

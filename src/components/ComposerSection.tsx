@@ -16,18 +16,8 @@ import {
   useComposerMenu,
 } from './ComposerPickers';
 import type { useModelConfig } from '../hooks/useModelConfig';
-import {
-  type ActionPolicy,
-  type ChatMessage,
-  type Mode,
-  type ReasoningEffort,
-} from '../app/types';
-import {
-  actionPolicies,
-  defaultDrafts,
-  modeCopy,
-  reasoningEfforts,
-} from '../app/constants';
+import { type ActionPolicy, type ChatMessage, type Mode, type ReasoningEffort } from '../app/types';
+import { actionPolicies, defaultDrafts, modeCopy, reasoningEfforts } from '../app/constants';
 import { t } from '../i18n';
 import type { ComposerAttachment } from '../lib/attachments';
 
@@ -52,6 +42,7 @@ export interface ComposerSectionProps {
   actionPolicy: ActionPolicy;
   setActionPolicy: (policy: ActionPolicy) => void;
   onHostSlash?: (raw: string) => boolean | Promise<boolean>;
+  locked?: boolean;
   grokIsRunning: boolean;
   activeRunId: string | null;
   /** UI session / tab id for concurrent lane scheduling. */
@@ -74,6 +65,7 @@ export function ComposerSection({
   actionPolicy,
   setActionPolicy,
   onHostSlash,
+  locked = false,
   grokIsRunning,
   activeRunId,
   laneId,
@@ -100,7 +92,10 @@ export function ComposerSection({
   const modelChoices = [
     ...modelOptions.map((id) => ({
       value: id,
-      label: availableModels.length === 0 || availableModels.includes(id) ? id : t('composerSection.modelNotInCli', { id }),
+      label:
+        availableModels.length === 0 || availableModels.includes(id)
+          ? id
+          : t('composerSection.modelNotInCli', { id }),
     })),
     { value: 'custom', label: t('composerSection.customOption') },
   ];
@@ -151,6 +146,7 @@ export function ComposerSection({
           .map((message) => message.runId)
           .filter((id): id is string => Boolean(id))}
         initialValue={drafts[mode] || defaultDrafts[mode]}
+        locked={locked}
         placeholder={modeCopy[mode].placeholder}
         onTextChange={(text) => {
           setDrafts((current) => ({ ...current, [mode]: text }));
@@ -198,7 +194,11 @@ export function ComposerSection({
             </div>
             <div className="cmp-wrap">
               <button
-                className={openMenu === 'run' ? 'composer-advanced-trigger is-open' : 'composer-advanced-trigger'}
+                className={
+                  openMenu === 'run'
+                    ? 'composer-advanced-trigger is-open'
+                    : 'composer-advanced-trigger'
+                }
                 type="button"
                 aria-label={t('composerSection.runSettings')}
                 aria-expanded={openMenu === 'run'}

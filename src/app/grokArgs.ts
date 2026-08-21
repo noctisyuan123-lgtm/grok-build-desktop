@@ -38,6 +38,8 @@ export interface GrokRunConfig {
    * Normal Desktop turns still fork so Undo can isolate heads.
    */
   shareSession?: boolean;
+  /** Resume an already-rewound Edit head in place without joining the CLI leader. */
+  resumeSessionInPlace?: boolean;
 }
 
 /**
@@ -161,7 +163,7 @@ export function buildGrokArgs(config: GrokRunConfig): string[] {
   if (!config.forceNewSession && config.resumeSessionId) {
     args.push('--resume', config.resumeSessionId);
     if (config.shareSession) args.push('--share-session');
-    else args.push('--fork-session');
+    else if (!config.resumeSessionInPlace) args.push('--fork-session');
   } else if (!config.forceNewSession && config.continueLatestSession) {
     args.push('-c');
     if (config.shareSession) args.push('--share-session');

@@ -20,6 +20,11 @@ describe('deriveConversationTitle', () => {
       '回复 AUTO_POLICY_OK',
     );
     expect(deriveConversationTitle('把 sidebar 里的滚动条贴到最右边')).toBe('优化侧栏滚动条');
+    expect(
+      deriveConversationTitle(
+        '帮我把显示session usage的按键往下挪挪，再把respond下的复制按钮改成生成完后显示',
+      ),
+    ).toBe('调整上下文用量与回复操作');
   });
 
   it('removes greetings, markdown noise, and overly long tails', () => {
@@ -30,7 +35,12 @@ describe('deriveConversationTitle', () => {
     expect(
       deriveConversationTitle(
         '请帮我把这个特别特别特别特别特别特别特别特别特别特别长的任务说明整理一下',
-      ).length,
+      ),
     ).not.toContain('…');
+    expect(
+      deriveConversationTitle(
+        '请帮我把这个特别特别特别特别特别特别特别特别特别特别长的任务说明整理一下',
+      ).length,
+    ).toBeLessThanOrEqual(14);
   });
 });

@@ -138,6 +138,15 @@ describe('buildGrokArgs', () => {
     expect(sharedContinue).not.toContain('--fork-session');
   });
 
+  it('resumes an already-rewound Edit head in place without creating a fork', () => {
+    const edited = buildGrokArgs(
+      config({ resumeSessionId: 'rewound-session', resumeSessionInPlace: true }),
+    );
+    expect(flagValue(edited, '--resume')).toBe('rewound-session');
+    expect(edited).not.toContain('--fork-session');
+    expect(edited).not.toContain('--share-session');
+  });
+
   it('never combines explicit resume with queue-time -c', () => {
     // resumeSessionId wins; continueLatest is only the pre-session-id fallback.
     const args = buildGrokArgs(

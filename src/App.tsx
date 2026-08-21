@@ -130,6 +130,7 @@ function App() {
     composerRef.current?.setValue(value);
   }, []);
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
+  const [turnMutationBusy, setTurnMutationBusy] = useState(false);
   // Live CLI↔Desktop link is opt-in via /cli or /desktop only — never restore
   // from localStorage on boot (that was resuming the old head into New Session).
   const [liveSessionId, setLiveSessionId] = useState<string | null>(null);
@@ -148,6 +149,9 @@ function App() {
     sessionId: string;
     messages: ChatMessage[];
   } | null>(null);
+  // Edit rewinds the current ACP head in place. The replacement prompt must
+  // continue that same head instead of taking the normal Desktop fork.
+  const editResumeSessionInPlaceRef = useRef<string | null>(null);
   // A rebase can leave no retained assistant bubble to carry sessionId (undo
   // of the only turn). Keep that new head scoped to its tab until the next
   // assistant event can persist it in message metadata.
@@ -412,13 +416,8 @@ function App() {
   // Model + run-configuration state (preset, efforts, permission, toggles,
   // CLI-verified options, coding auto-snap) lives in hooks/useModelConfig.ts.
   const modelConfig = useModelConfig({ mode, availableModels });
-  const {
-    reasoningEffort,
-    permissionMode,
-    experimentalMemory,
-    webSearchEnabled,
-    activeModel,
-  } = modelConfig;
+  const { reasoningEffort, permissionMode, experimentalMemory, webSearchEnabled, activeModel } =
+    modelConfig;
   // Clear conversation + run history + terminal — destructive, so it offers
   // an undo window instead of firing blind. The snapshot is cheap (immutable
   // arrays) and restoring it re-mirrors into the active tab automatically.
@@ -656,10 +655,7 @@ function App() {
       // finish afterward with the old head. Only remove the undone target
       // when it appears beyond the retained replay baseline; if the prompt
       // was an older repeated turn already in the baseline, leave that copy.
-      if (
-        undoneUserContentRef.current &&
-        imported.length > rebasedBase.length
-      ) {
+      if (undoneUserContentRef.current && imported.length > rebasedBase.length) {
         imported = dropUndoneUserTurn(imported, undoneUserContentRef.current);
       }
     } else if (undoneUserContentRef.current) {
@@ -862,8 +858,11 @@ function App() {
       .reverse()
       .find((message) => message.role === 'assistant' && message.meta?.sessionId)?.meta?.sessionId;
     const rebased = rebasedSessionHeadRef.current;
+    const inPlaceEditSessionId = editResumeSessionInPlaceRef.current;
     const previousSessionId =
-      visibleSessionId ?? (rebased?.tabId === activeTabId ? rebased.sessionId : undefined);
+      inPlaceEditSessionId ??
+      visibleSessionId ??
+      (rebased?.tabId === activeTabId ? rebased.sessionId : undefined);
     // A turn currently running is the parent of anything newly queued. Its
     // session id does not exist yet, so do not accidentally fork from the
     // older completed turn found above.
@@ -900,6 +899,8 @@ function App() {
       forceNewSession: Boolean(undoPlan),
       replayMessages: undoPlan?.replayMessages,
       shareSession,
+      resumeSessionInPlace:
+        resumeSessionId != null && editResumeSessionInPlaceRef.current === resumeSessionId,
     });
   }
 
@@ -952,6 +953,7 @@ function App() {
     undoSessionPlanRef.current = null;
     undoneUserContentRef.current = null;
     pendingUndoVisibleMessagesRef.current = null;
+    editResumeSessionInPlaceRef.current = null;
     const now = Date.now();
     const userMessageId = makeId('u');
     const assistantMessageId = makeId('a');
@@ -1352,17 +1354,14 @@ function App() {
     const selected = messages[selectedIndex];
     const selectedUser = selected?.role === 'user' ? selected : null;
     const assistantIndex = selectedUser ? selectedIndex + 1 : selectedIndex;
-    const assistant = messages[assistantIndex]?.role === 'assistant' ? messages[assistantIndex] : null;
+    const assistant =
+      messages[assistantIndex]?.role === 'assistant' ? messages[assistantIndex] : null;
     const user = selectedUser ?? messages[assistantIndex - 1];
     const isUserOnlyTail = Boolean(
       selectedUser && assistant == null && selectedIndex === messages.length - 1,
     );
     if (assistantIndex !== messages.length - 1 && !isUserOnlyTail) return;
-    if (
-      (assistant != null && assistant.status === 'streaming') ||
-      !user ||
-      user.role !== 'user'
-    ) {
+    if ((assistant != null && assistant.status === 'streaming') || !user || user.role !== 'user') {
       return;
     }
 
@@ -1415,7 +1414,91 @@ function App() {
     }
   }
 
-  async function persistUndoToGrokSession(sessionId: string) {
+  async function editLatestTurn(messageId: string, nextText: string) {
+    if (activeSessionIsRunning || !nextText.trim()) return;
+    if (turnMutationBusy) return;
+    const selectedIndex = messages.findIndex((message) => message.id === messageId);
+    if (selectedIndex < 0) return;
+    const selected = messages[selectedIndex];
+    if (selected?.role !== 'user') return;
+    const assistantIndex = selectedIndex + 1;
+    const assistant =
+      messages[assistantIndex]?.role === 'assistant' ? messages[assistantIndex] : null;
+    const isUserOnlyTail = assistant == null && selectedIndex === messages.length - 1;
+    if (!isUserOnlyTail && assistantIndex !== messages.length - 1) return;
+    if (assistant?.status === 'streaming') return;
+    setTurnMutationBusy(true);
+
+    const snapshot = messages;
+    const previousDraft = composerRef.current?.getValue() ?? '';
+    const previousFolder = composerRef.current?.getAttachedFolder() ?? null;
+    const restoredFolder = messageFolders[selected.id] ?? null;
+    const preserved = messages.slice(0, assistant ? assistantIndex - 1 : selectedIndex);
+    const sessionId = assistant?.meta?.sessionId ?? currentSessionId() ?? liveSessionId;
+
+    // Do not enqueue the replacement until the old pair has been removed from
+    // the ACP/JSONL head. replayContext contains only the retained turns.
+    undoSessionPlanRef.current = {
+      replayMessages: preserved
+        .filter((message) => message.role === 'user' || message.role === 'assistant')
+        .map((message) => ({
+          role: message.role as 'user' | 'assistant',
+          content: message.content,
+        })),
+    };
+    undoneUserContentRef.current = selected.content;
+    suppressLiveRehydrateRef.current = true;
+    if (sessionId) {
+      pendingUndoVisibleMessagesRef.current = { sessionId, messages: preserved };
+    }
+    // Mirror Undo: remove the old pair from the visible transcript before the
+    // replacement is enqueued. The backend rewind is still authoritative for
+    // model context; this optimistic UI update prevents appendMessage from
+    // appending the edited turn after the stale pair. `restore` below puts the
+    // exact snapshot back if rewind fails.
+    messagesRef.current = preserved;
+    setMessages(preserved);
+
+    const restore = () => {
+      undoSessionPlanRef.current = null;
+      undoneUserContentRef.current = null;
+      pendingUndoVisibleMessagesRef.current = null;
+      editResumeSessionInPlaceRef.current = null;
+      suppressLiveRehydrateRef.current = false;
+      messagesRef.current = snapshot;
+      setMessages(snapshot);
+      composerRef.current?.setValue(previousDraft);
+      composerRef.current?.setAttachedFolder(previousFolder);
+      setSessionNotice(t('message.editFailed'));
+      setTurnMutationBusy(false);
+    };
+
+    if (!hasTauriRuntime() && !sessionId) {
+      suppressLiveRehydrateRef.current = false;
+      composerRef.current?.setValue(nextText.trim());
+      await composerRef.current?.submit();
+      setTurnMutationBusy(false);
+      return;
+    }
+    if (!sessionId) {
+      restore();
+      return;
+    }
+    const rewound = await persistUndoToGrokSession(sessionId, { resumeInPlace: true });
+    if (!rewound) {
+      restore();
+      return;
+    }
+    composerRef.current?.setValue(nextText.trim());
+    composerRef.current?.setAttachedFolder(restoredFolder);
+    await composerRef.current?.submit();
+    setTurnMutationBusy(false);
+  }
+
+  async function persistUndoToGrokSession(
+    sessionId: string,
+    options: { resumeInPlace?: boolean } = {},
+  ): Promise<boolean> {
     try {
       const undoPlan = undoSessionPlanRef.current;
       const wasLive = liveSessionId === sessionId;
@@ -1435,6 +1518,8 @@ function App() {
         suppressLiveRehydrateRef.current = false;
         const nextSessionId = result.sessionId || sessionId;
         const rebased = result.rebased || nextSessionId !== sessionId;
+        editResumeSessionInPlaceRef.current =
+          options.resumeInPlace && !rebased ? nextSessionId : null;
         if (rebased) {
           // The fallback creates a fresh session containing only the retained
           // context. Point the visible head and live owner at it immediately;
@@ -1491,12 +1576,15 @@ function App() {
             // Desktop transcript is already synced; CLI reopen is best-effort.
           }
         }
+        return true;
       } else {
         // Cannot truncate to empty via ACP. Stop poll so CLI cannot restore.
         linkLiveSession(null);
+        return false;
       }
     } catch {
       linkLiveSession(null);
+      return false;
     } finally {
       suppressLiveRehydrateRef.current = false;
     }
@@ -1507,8 +1595,20 @@ function App() {
     const latestMessage = messages[latestIndex];
     const latestTurnCanUndo = Boolean(
       latestMessage &&
-        !activeSessionIsRunning &&
-        (latestMessage?.role === 'user' || latestMessage?.status !== 'streaming'),
+      !activeSessionIsRunning &&
+      (latestMessage?.role === 'user' || latestMessage?.status !== 'streaming'),
+    );
+    const latestUserIndex =
+      latestMessage?.role === 'assistant' && latestMessage.status !== 'streaming'
+        ? latestIndex - 1
+        : latestMessage?.role === 'user'
+          ? latestIndex
+          : -1;
+    const latestTurnCanEdit = Boolean(
+      !activeSessionIsRunning &&
+      latestUserIndex >= 0 &&
+      messages[latestUserIndex]?.role === 'user' &&
+      messages[latestUserIndex]?.content.trim(),
     );
     return messages.map((m, index) =>
       m.role === 'user'
@@ -1524,6 +1624,8 @@ function App() {
             attachments: messageAttachments[m.id],
             canUndo: index === latestIndex && latestTurnCanUndo,
             showUndo: index === latestIndex && latestTurnCanUndo,
+            canEdit: index === latestUserIndex && latestTurnCanEdit,
+            showEdit: index === latestUserIndex,
           }
         : {
             // Live runs keep their real id; restored/legacy assistant
@@ -1658,6 +1760,9 @@ function App() {
                   onAttachmentClick={setAttachmentPreview}
                   onUndoAssistant={undoLatestTurn}
                   onUndoUser={undoLatestTurn}
+                  onEditUser={(messageId, text) => {
+                    void editLatestTurn(messageId, text);
+                  }}
                 />
               )}
             </div>
@@ -1689,6 +1794,7 @@ function App() {
               actionPolicy={actionPolicy}
               setActionPolicy={setActionPolicy}
               onHostSlash={handleHostSlash}
+              locked={turnMutationBusy}
               grokIsRunning={activeSessionIsRunning}
               activeRunId={activeSessionRunId}
               laneId={activeTabId}

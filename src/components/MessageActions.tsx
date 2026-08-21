@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, Copy, Undo2 } from 'lucide-react';
+import { Check, Copy, Pencil, Undo2 } from 'lucide-react';
 import { t } from '../i18n';
 
 interface Props {
@@ -7,11 +7,16 @@ interface Props {
   canUndo: boolean;
   onUndo?: () => void;
   showUndo?: boolean;
+  canEdit?: boolean;
+  onEdit?: () => void;
+  showEdit?: boolean;
   showCopy?: boolean;
   toolbarLabel?: string;
   copyLabel?: string;
   undoLabel?: string;
   undoDisabledLabel?: string;
+  editLabel?: string;
+  editDisabledLabel?: string;
 }
 
 export function MessageActions({
@@ -19,11 +24,16 @@ export function MessageActions({
   canUndo,
   onUndo,
   showUndo = true,
+  canEdit = false,
+  onEdit,
+  showEdit = false,
   showCopy = true,
   toolbarLabel = t('message.actions'),
   copyLabel = t('message.copy'),
   undoLabel = t('message.undoResponse'),
   undoDisabledLabel = t('message.undoLatestOnly'),
+  editLabel = t('message.editPrompt'),
+  editDisabledLabel = t('message.editPromptLatestOnly'),
 }: Props) {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<number | null>(null);
@@ -48,7 +58,7 @@ export function MessageActions({
     }
   }
 
-  if (!showCopy && !showUndo) return null;
+  if (!showCopy && !showEdit && !showUndo) return null;
 
   return (
     <div className="message-actions" role="toolbar" aria-label={toolbarLabel}>
@@ -62,6 +72,18 @@ export function MessageActions({
           title={copied ? t('message.copied') : copyLabel}
         >
           {copied ? <Check size={13} /> : <Copy size={13} />}
+        </button>
+      ) : null}
+      {showEdit ? (
+        <button
+          className="message-action"
+          type="button"
+          onClick={onEdit}
+          disabled={!canEdit || !onEdit}
+          aria-label={editLabel}
+          title={canEdit ? editLabel : editDisabledLabel}
+        >
+          <Pencil size={13} />
         </button>
       ) : null}
       {showUndo ? (
