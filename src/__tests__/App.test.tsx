@@ -909,6 +909,60 @@ describe('composer submit → queued run → streamed reply', () => {
 });
 
 describe('session tabs and history', () => {
+  it('forks a conversation from the selected assistant response', async () => {
+    const ctx = await bootApp();
+    const { tauri, user } = ctx;
+
+    const runId = await submitPrompt(ctx, 'Explore two approaches');
+    expect(convo().queryByRole('button', { name: t('message.fork') })).not.toBeInTheDocument();
+    await act(async () => {
+      await tauri.streamReply(runId, ['The first approach is ready.']);
+    });
+    await waitFor(() => {
+      expect(document.querySelector('.message-assistant')).toHaveTextContent(
+        'The first approach is ready.',
+      );
+    });
+    expect(convo().getByRole('button', { name: t('message.fork') })).toBeInTheDocument();
+
+    await user.click(convo().getByRole('button', { name: t('message.fork') }));
+    expect(await convo().findByText('Explore two approaches')).toBeInTheDocument();
+    expect(await convo().findByText('The first approach is ready.')).toBeInTheDocument();
+
+    await submitPrompt(ctx, 'Try the second approach');
+    const enqueue = [...tauri.calls].reverse().find((call) => call.cmd === 'enqueue_run')!;
+    expect(enqueue.args.args).toContain('--resume');
+    expect(enqueue.args.args).toContain('s-1');
+    expect(enqueue.args.args).toContain('--fork-session');
+  });
+
+  it('replays only the selected branch when forking an older response', async () => {
+    const ctx = await bootApp();
+    const { tauri, user } = ctx;
+
+    const firstRun = await submitPrompt(ctx, 'First branch point');
+    await act(async () => {
+      await tauri.streamReply(firstRun, ['First response']);
+    });
+    const secondRun = await submitPrompt(ctx, 'Later turn to exclude');
+    await act(async () => {
+      await tauri.streamReply(secondRun, ['Later response']);
+    });
+
+    const forkButtons = convo().getAllByRole('button', { name: t('message.fork') });
+    await user.click(forkButtons[0]!);
+    expect(convo().queryByText('Later turn to exclude')).not.toBeInTheDocument();
+    expect(convo().queryByText('Later response')).not.toBeInTheDocument();
+
+    await submitPrompt(ctx, 'Continue this older branch');
+    const enqueue = [...tauri.calls].reverse().find((call) => call.cmd === 'enqueue_run')!;
+    expect(enqueue.args.args).not.toContain('--resume');
+    const args = enqueue.args.args as string[];
+    const rules = args[args.indexOf('--rules') + 1] ?? '';
+    expect(rules).toContain('First response');
+    expect(rules).not.toContain('Later response');
+  });
+
   it('creates a fresh session and switches back through the history row', async () => {
     const ctx = await bootApp();
     const { tauri, user } = ctx;

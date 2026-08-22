@@ -25,6 +25,9 @@ export interface Tab {
   cwd: string;
   messages: TabMessage[];
   createdAt: number;
+  /** Root tab and ordinal for Fork sessions shown in the history sidebar. */
+  forkRootId?: string;
+  forkIndex?: number;
 }
 
 let counter = 0;

@@ -151,6 +151,54 @@ export function useSessionTabs(deps: SessionTabsDeps) {
     focusComposer();
   }
 
+  /**
+   * Create a new conversation from a completed assistant response. The copied
+   * messages are the visible branch; App decides whether the next prompt can
+   * use native `--fork-session` or needs a replay for an older response.
+   */
+  function forkSession(sourceMessages: ChatMessage[]): string | null {
+    const current = sessionStateRef.current;
+    if (!current.activeTabId || sourceMessages.length === 0) return null;
+    const sourceTab = current.tabs.find((tab) => tab.id === current.activeTabId);
+    const forkedMessages = sourceMessages.map((message) => ({
+      ...message,
+      meta: message.meta ? { ...message.meta } : undefined,
+      attachments: message.attachments ? [...message.attachments] : undefined,
+    }));
+    const forkRootId = sourceTab?.forkRootId ?? sourceTab?.id ?? current.activeTabId;
+    const forkIndex =
+      current.tabs
+        .filter((tab) => tab.forkRootId === forkRootId)
+        .reduce((max, tab) => Math.max(max, tab.forkIndex ?? 0), 0) + 1;
+    const fresh = {
+      ...makeTab(
+        current.codingCwd,
+        forkedMessages as unknown as TabMessage[],
+        sourceTab ? `${sourceTab.name} (${forkIndex})` : `Fork ${current.tabs.length + 1}`,
+      ),
+      forkRootId,
+      forkIndex,
+    };
+    const outgoingMessages = current.messages as unknown as TabMessage[];
+    setTabs((existing) => [
+      ...existing.map((tab) =>
+        tab.id === current.activeTabId
+          ? { ...tab, cwd: current.codingCwd, messages: outgoingMessages }
+          : tab,
+      ),
+      fresh,
+    ]);
+    setActiveTabId(fresh.id);
+    setCodingCwd(fresh.cwd);
+    setMessages(forkedMessages);
+    setDrafts({ standard: '', coding: '' });
+    setComposerValue('');
+    setSessionNotice(null);
+    closePalette();
+    focusComposer();
+    return fresh.id;
+  }
+
   // Persist tabs (and the active id) whenever the array changes. This is the
   // single source of truth across reloads; localStorage hydrates on next boot.
   useEffect(() => {
@@ -333,6 +381,7 @@ export function useSessionTabs(deps: SessionTabsDeps) {
     tabs,
     activeTabId,
     handleTabCreate,
+    forkSession,
     switchToSession,
     openGrokSessionTab,
     deleteSession,

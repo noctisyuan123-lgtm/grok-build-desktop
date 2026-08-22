@@ -71,6 +71,30 @@ describe('recentPrompts derivation', () => {
     expect(rows.find((r) => r.id === 't1')!.active).toBe(true);
   });
 
+  it('adds the fork ordinal to the sidebar title', () => {
+    const fork = {
+      ...tabs[0],
+      id: 'fork-1',
+      forkRootId: tabs[0].id,
+      forkIndex: 2,
+    };
+    const closeContextMenu = vi.fn();
+    const { result } = renderHook(() =>
+      useHistoryOrganization({
+        tabs: [...tabs, fork],
+        activeTabId: 't1',
+        messages: tabs[0].messages as ChatMessage[],
+        sessionFirstPrompt: (id) =>
+          ([...tabs, fork].find((tab) => tab.id === id)?.messages.find((m) => m.role === 'user')
+            ?.content as string) ?? null,
+        closeContextMenu,
+      }),
+    );
+    expect(result.current.recentPrompts.find((row) => row.id === 'fork-1')?.title).toBe(
+      'fix the flaky login test (2)',
+    );
+  });
+
   it('filters rows by title, detail, and group', () => {
     const { result } = render();
     act(() => result.current.setHistoryFilter('release'));
@@ -85,7 +109,9 @@ describe('pin / archive / group organization', () => {
     const { result } = render();
     const view = result.current.historyView;
     expect(view.projectGroups.map(([path]) => path)).toEqual(['/b', '/a', '/old']);
-    expect(view.projectGroups.find(([path]) => path === '/a')?.[1].map((r) => r.id)).toEqual(['t1']);
+    expect(view.projectGroups.find(([path]) => path === '/a')?.[1].map((r) => r.id)).toEqual([
+      't1',
+    ]);
     expect(view.ungrouped).toEqual([]);
   });
 

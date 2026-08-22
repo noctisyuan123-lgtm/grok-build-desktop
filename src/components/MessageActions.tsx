@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, Copy, Pencil, Undo2 } from 'lucide-react';
+import { Check, Copy, GitFork, Pencil, Undo2 } from 'lucide-react';
 import { t } from '../i18n';
 
 interface Props {
@@ -11,12 +11,17 @@ interface Props {
   onEdit?: () => void;
   showEdit?: boolean;
   showCopy?: boolean;
+  canFork?: boolean;
+  onFork?: () => void;
+  showFork?: boolean;
   toolbarLabel?: string;
   copyLabel?: string;
   undoLabel?: string;
   undoDisabledLabel?: string;
   editLabel?: string;
   editDisabledLabel?: string;
+  forkLabel?: string;
+  forkDisabledLabel?: string;
 }
 
 export function MessageActions({
@@ -28,12 +33,17 @@ export function MessageActions({
   onEdit,
   showEdit = false,
   showCopy = true,
+  canFork = false,
+  onFork,
+  showFork = false,
   toolbarLabel = t('message.actions'),
   copyLabel = t('message.copy'),
   undoLabel = t('message.undoResponse'),
   undoDisabledLabel = t('message.undoLatestOnly'),
   editLabel = t('message.editPrompt'),
   editDisabledLabel = t('message.editPromptLatestOnly'),
+  forkLabel = t('message.fork'),
+  forkDisabledLabel = t('message.forkDisabled'),
 }: Props) {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<number | null>(null);
@@ -58,7 +68,7 @@ export function MessageActions({
     }
   }
 
-  if (!showCopy && !showEdit && !showUndo) return null;
+  if (!showCopy && !showEdit && !showUndo && !showFork) return null;
 
   return (
     <div className="message-actions" role="toolbar" aria-label={toolbarLabel}>
@@ -96,6 +106,18 @@ export function MessageActions({
           title={canUndo ? undoLabel : undoDisabledLabel}
         >
           <Undo2 size={13} />
+        </button>
+      ) : null}
+      {showFork ? (
+        <button
+          className="message-action"
+          type="button"
+          onClick={onFork}
+          disabled={!canFork || !onFork}
+          aria-label={forkLabel}
+          title={canFork ? forkLabel : forkDisabledLabel}
+        >
+          <GitFork size={13} />
         </button>
       ) : null}
     </div>

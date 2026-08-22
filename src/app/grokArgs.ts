@@ -2,7 +2,7 @@
 // behavior must match the composer's submit path exactly.
 import type { ActionPolicy, Mode, PermissionMode, ReasoningEffort } from './types';
 
-/** Visible chat turns re-seeded into a fresh ACP session after Undo. */
+/** Visible chat turns re-seeded into a fresh ACP session. */
 export type ReplayMessage = {
   role: 'user' | 'assistant';
   content: string;
@@ -43,9 +43,8 @@ export interface GrokRunConfig {
 }
 
 /**
- * Honest post-Undo context block: only the still-visible conversation, never
- * the removed final user+assistant pair. Carried via `--rules` so the Composer
- * prompt stays an exact mirror of what the user typed.
+ * Visible conversation context carried via `--rules` so the Composer prompt
+ * stays an exact mirror of what the user typed.
  */
 export function buildConversationReplayBlock(messages: readonly ReplayMessage[]): string | null {
   const usable = messages
@@ -61,12 +60,7 @@ export function buildConversationReplayBlock(messages: readonly ReplayMessage[])
       return `${label}:\n${message.content}`;
     })
     .join('\n\n');
-  return [
-    'Prior conversation re-seeded into a fresh session after Undo.',
-    'The undone turn is intentionally absent. Use only this earlier context:',
-    '',
-    body,
-  ].join('\n');
+  return body;
 }
 
 // The user turn is EXACTLY what the user typed. grok-build already ships a
@@ -113,9 +107,7 @@ function mapGrokEffort(value: string): string {
   return value === 'max' ? 'xhigh' : value;
 }
 
-export function resolveGrokEffort(
-  config: Pick<GrokRunConfig, 'reasoningEffort'>,
-): string | null {
+export function resolveGrokEffort(config: Pick<GrokRunConfig, 'reasoningEffort'>): string | null {
   if (!config.reasoningEffort || config.reasoningEffort === 'off') return null;
   return mapGrokEffort(config.reasoningEffort);
 }

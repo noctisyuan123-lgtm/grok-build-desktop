@@ -34,6 +34,8 @@ export interface MessageRef {
   autoExpandWork?: boolean;
   canUndo?: boolean;
   showUndo?: boolean;
+  canFork?: boolean;
+  showFork?: boolean;
   canEdit?: boolean;
   showEdit?: boolean;
   attachments?: ComposerAttachment[];
@@ -47,6 +49,7 @@ interface Props {
   focusNonce?: number;
   onUndoAssistant?: (messageId: string) => void;
   onUndoUser?: (messageId: string) => void;
+  onForkAssistant?: (messageId: string) => void;
   onEditUser?: (messageId: string, text: string) => void;
   onAttachmentClick?: (attachment: ComposerAttachment) => void;
 }
@@ -57,6 +60,7 @@ export function MessageList({
   focusNonce,
   onUndoAssistant,
   onUndoUser,
+  onForkAssistant,
   onEditUser,
   onAttachmentClick,
 }: Props) {
@@ -337,8 +341,13 @@ export function MessageList({
               autoExpandWork={msg.autoExpandWork}
               canUndo={Boolean(msg.canUndo)}
               showUndo={Boolean(msg.showUndo)}
+              canFork={Boolean(msg.canFork)}
+              showFork={Boolean(msg.showFork)}
               onUndo={
                 assistantId && onUndoAssistant ? () => onUndoAssistant(assistantId) : undefined
+              }
+              onFork={
+                assistantId && onForkAssistant ? () => onForkAssistant(assistantId) : undefined
               }
             />
           </div>

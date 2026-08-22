@@ -275,6 +275,8 @@ export const en = {
   'message.editSend': 'Send edit',
   'message.editFailed': 'Edit could not safely replace the old context. Nothing was sent.',
   'message.copied': 'Copied',
+  'message.fork': 'Fork response',
+  'message.forkDisabled': 'Only completed responses can be forked',
   'message.undoResponse': 'Undo response',
   'message.undoLatestOnly': 'Only the latest completed response can be undone',
   'message.undoPrompt': 'Undo prompt',

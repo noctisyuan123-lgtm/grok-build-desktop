@@ -23,6 +23,9 @@ interface Props {
   canUndo?: boolean;
   showUndo?: boolean;
   onUndo?: () => void;
+  canFork?: boolean;
+  showFork?: boolean;
+  onFork?: () => void;
 }
 
 function MessageItemImpl({
@@ -37,6 +40,9 @@ function MessageItemImpl({
   canUndo = false,
   showUndo = true,
   onUndo,
+  canFork = false,
+  showFork = false,
+  onFork,
 }: Props) {
   const snap = useRunSnapshot(runId);
   const html = useRunHtml(runId);
@@ -60,6 +66,8 @@ function MessageItemImpl({
   // actually arrived, otherwise the last intermediate response briefly gets
   // promoted into the final answer and then jumps back into the work rail.
   const responseTerminalReady = !snap || snap.lastEventType === 'end' || snap.stopReason != null;
+  const forkVisible = showFork && (!snap || (!runIsLive && responseTerminalReady));
+  const forkEnabled = canFork && forkVisible;
 
   // markdown-it does not sanitize; strip scripts/handlers before injecting.
   const safeHtml = useMemo(() => (html ? sanitizeHtml(html) : html), [html]);
@@ -111,6 +119,9 @@ function MessageItemImpl({
           canUndo={canUndo}
           showUndo={showUndo}
           onUndo={onUndo}
+          canFork={forkEnabled}
+          showFork={forkVisible}
+          onFork={onFork}
           planNode={planNode}
         />
       );
@@ -130,6 +141,9 @@ function MessageItemImpl({
             showCopy
             showUndo={showUndo}
             onUndo={onUndo}
+            canFork={forkEnabled}
+            showFork={forkVisible}
+            onFork={onFork}
           />
           {planNode}
         </>
@@ -146,6 +160,9 @@ function MessageItemImpl({
             showCopy
             showUndo={showUndo}
             onUndo={onUndo}
+            canFork={forkEnabled}
+            showFork={forkVisible}
+            onFork={onFork}
           />
           {planNode}
         </>
@@ -175,6 +192,9 @@ function MessageItemImpl({
           canUndo={canUndo && !runIsLive}
           showUndo={showUndo}
           onUndo={onUndo}
+          canFork={forkEnabled}
+          showFork={forkVisible}
+          onFork={onFork}
           planNode={planNode}
         />
       ) : (
@@ -227,6 +247,9 @@ function MessageItemImpl({
             showCopy={!runIsLive && responseTerminalReady}
             showUndo={showUndo}
             onUndo={onUndo}
+            canFork={forkEnabled}
+            showFork={forkVisible}
+            onFork={onFork}
           />
           {planNode}
         </>
@@ -250,6 +273,9 @@ export function TranscriptMessage({
   canUndo,
   showUndo,
   onUndo,
+  canFork = false,
+  showFork = false,
+  onFork,
   planNode,
 }: {
   runId: string;
@@ -264,6 +290,9 @@ export function TranscriptMessage({
   canUndo: boolean;
   showUndo: boolean;
   onUndo?: () => void;
+  canFork?: boolean;
+  showFork?: boolean;
+  onFork?: () => void;
   planNode?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(autoExpandWork);
@@ -399,6 +428,9 @@ export function TranscriptMessage({
         showCopy={!live && responseTerminalReady}
         showUndo={showUndo}
         onUndo={onUndo}
+        canFork={canFork}
+        showFork={showFork}
+        onFork={onFork}
       />
       {planNode}
     </>

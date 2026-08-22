@@ -43,4 +43,27 @@ describe('MessageActions', () => {
 
     expect(screen.queryByRole('button', { name: t('message.copy') })).not.toBeInTheDocument();
   });
+
+  it('invokes an enabled fork action and keeps it disabled for incomplete responses', async () => {
+    const user = userEvent.setup();
+    const onFork = vi.fn();
+    const { rerender } = render(
+      <MessageActions
+        sourceText="answer"
+        canUndo={false}
+        canFork={false}
+        showFork
+        onFork={onFork}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: t('message.fork') }));
+    expect(onFork).not.toHaveBeenCalled();
+
+    rerender(
+      <MessageActions sourceText="answer" canUndo={false} canFork showFork onFork={onFork} />,
+    );
+    await user.click(screen.getByRole('button', { name: t('message.fork') }));
+    expect(onFork).toHaveBeenCalledTimes(1);
+  });
 });

@@ -123,9 +123,7 @@ describe('buildGrokArgs', () => {
   });
 
   it('shares the session head without forking when live-linked to CLI', () => {
-    const shared = buildGrokArgs(
-      config({ resumeSessionId: 'live-session', shareSession: true }),
-    );
+    const shared = buildGrokArgs(config({ resumeSessionId: 'live-session', shareSession: true }));
     expect(flagValue(shared, '--resume')).toBe('live-session');
     expect(shared).toContain('--share-session');
     expect(shared).not.toContain('--fork-session');
@@ -190,7 +188,8 @@ describe('buildGrokArgs', () => {
     );
     expect(args).not.toContain('--resume');
     const rules = flagValue(args, '--rules')!;
-    expect(rules).toContain('re-seeded into a fresh session after Undo');
+    expect(rules).not.toContain('Undo');
+    expect(rules).not.toContain('Fork');
     expect(rules).toContain('First question');
     expect(rules).toContain('First answer');
     // Coding rules still present alongside the replay block.
@@ -217,6 +216,7 @@ describe('buildConversationReplayBlock', () => {
     ])!;
     expect(block).toContain('User:\nKeep me');
     expect(block).toContain('Assistant:\nVisible reply');
-    expect(block).toContain('intentionally absent');
+    expect(block).not.toContain('Undo');
+    expect(block).not.toContain('Fork');
   });
 });

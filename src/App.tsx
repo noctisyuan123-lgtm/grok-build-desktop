@@ -126,6 +126,13 @@ function App() {
   const undoSessionPlanRef = useRef<{
     replayMessages: Array<{ role: 'user' | 'assistant'; content: string }>;
   } | null>(null);
+  // Older responses cannot safely use the session-level Grok id because it
+  // may also contain later turns. Keep their exact visible branch as replay
+  // context until the first new prompt.
+  const forkSessionPlanRef = useRef<{
+    tabId: string;
+    replayMessages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  } | null>(null);
   const setComposerValue = useCallback((value: string) => {
     composerRef.current?.setValue(value);
   }, []);
@@ -204,6 +211,7 @@ function App() {
     tabs,
     activeTabId,
     handleTabCreate: createSessionTab,
+    forkSession,
     switchToSession,
     openGrokSessionTab,
     deleteSession,
@@ -874,9 +882,14 @@ function App() {
     // turn).
     const resumeSessionId = undoPlan
       ? null
-      : activeSessionHasInflightRun
+      : forkSessionPlanRef.current?.tabId === activeTabId
         ? null
-        : previousSessionId;
+        : activeSessionHasInflightRun
+          ? null
+          : previousSessionId;
+    const forkPlan =
+      forkSessionPlanRef.current?.tabId === activeTabId ? forkSessionPlanRef.current : null;
+    const forceNewSession = Boolean(undoPlan || forkPlan);
     // Share (no fork) only when this tab still owns the live link AND the
     // visible head is that same session.
     const shareSession = Boolean(
@@ -896,8 +909,8 @@ function App() {
       // Composer sends the active run id separately; the queue resolves that
       // exact run's emitted session id just before launching this follow-up.
       continueLatestSession: false,
-      forceNewSession: Boolean(undoPlan),
-      replayMessages: undoPlan?.replayMessages,
+      forceNewSession,
+      replayMessages: undoPlan?.replayMessages ?? forkPlan?.replayMessages,
       shareSession,
       resumeSessionInPlace:
         resumeSessionId != null && editResumeSessionInPlaceRef.current === resumeSessionId,
@@ -951,6 +964,9 @@ function App() {
   }) {
     // Post-Undo re-seed has been consumed. Later turns resume the new session.
     undoSessionPlanRef.current = null;
+    if (forkSessionPlanRef.current?.tabId === activeTabId) {
+      forkSessionPlanRef.current = null;
+    }
     undoneUserContentRef.current = null;
     pendingUndoVisibleMessagesRef.current = null;
     editResumeSessionInPlaceRef.current = null;
@@ -1414,6 +1430,35 @@ function App() {
     }
   }
 
+  function forkAssistantResponse(messageId: string) {
+    const selectedIndex = messages.findIndex((message) => message.id === messageId);
+    if (selectedIndex < 0) return;
+    const selected = messages[selectedIndex];
+    if (
+      selected?.role !== 'assistant' ||
+      selected.status === 'streaming' ||
+      !selected.content.trim()
+    ) {
+      return;
+    }
+    const branch = messages.slice(0, selectedIndex + 1);
+    const tabId = forkSession(branch);
+    if (!tabId) return;
+
+    // Only the current session tail can use native resume+fork. A session id
+    // is session-scoped, so older responses would otherwise fork from a head
+    // that includes turns after the clicked response.
+    if (selectedIndex !== messages.length - 1 || !selected.meta?.sessionId) {
+      forkSessionPlanRef.current = {
+        tabId,
+        replayMessages: branch.map((message) => ({
+          role: message.role,
+          content: message.content,
+        })),
+      };
+    }
+  }
+
   async function editLatestTurn(messageId: string, nextText: string) {
     if (activeSessionIsRunning || !nextText.trim()) return;
     if (turnMutationBusy) return;
@@ -1645,6 +1690,8 @@ function App() {
             id: m.id,
             canUndo: index === latestIndex && latestTurnCanUndo,
             showUndo: index === latestIndex && latestTurnCanUndo,
+            canFork: m.status !== 'streaming' && Boolean(m.content.trim()),
+            showFork: m.status !== 'streaming' && Boolean(m.content.trim()),
           },
     );
   }, [activeSessionIsRunning, messageAttachments, messages]);
@@ -1760,6 +1807,7 @@ function App() {
                   onAttachmentClick={setAttachmentPreview}
                   onUndoAssistant={undoLatestTurn}
                   onUndoUser={undoLatestTurn}
+                  onForkAssistant={forkAssistantResponse}
                   onEditUser={(messageId, text) => {
                     void editLatestTurn(messageId, text);
                   }}

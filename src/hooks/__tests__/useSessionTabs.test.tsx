@@ -230,6 +230,46 @@ describe('handleTabCreate', () => {
     expect(result.current.tabs).toHaveLength(1);
     expect(result.current.activeTabId).toBe('t1');
   });
+
+  it('creates a branch with the selected visible conversation and activates it', () => {
+    const source = [message('u1', 'first prompt'), sessionMessage('a1', 'session-head')];
+    const { result } = renderHook(() => useHarness(source));
+    const sourceTabId = result.current.activeTabId;
+
+    let forkId: string | null = null;
+    act(() => {
+      forkId = result.current.forkSession(source);
+    });
+
+    expect(forkId).toBe(result.current.activeTabId);
+    expect(forkId).not.toBe(sourceTabId);
+    expect(result.current.messages).toEqual(source);
+    expect(result.current.tabs).toHaveLength(2);
+    expect(result.current.tabs[0]?.messages).toEqual(source);
+    expect(result.current.tabs[1]?.messages).toEqual(source);
+    expect(result.current.tabs[1]?.forkRootId).toBe(sourceTabId);
+    expect(result.current.tabs[1]?.forkIndex).toBe(1);
+    expect(result.current.drafts).toEqual({ standard: '', coding: '' });
+  });
+
+  it('numbers multiple forks from the same conversation root', () => {
+    const source = [message('u1', 'first prompt'), sessionMessage('a1', 'session-head')];
+    const { result } = renderHook(() => useHarness(source));
+    const rootId = result.current.activeTabId;
+
+    act(() => {
+      result.current.forkSession(source);
+    });
+    act(() => {
+      result.current.switchToSession(rootId);
+    });
+    act(() => {
+      result.current.forkSession(source);
+    });
+
+    const forks = result.current.tabs.filter((tab) => tab.forkRootId === rootId);
+    expect(forks.map((tab) => tab.forkIndex)).toEqual([1, 2]);
+  });
 });
 
 describe('deleteSession', () => {

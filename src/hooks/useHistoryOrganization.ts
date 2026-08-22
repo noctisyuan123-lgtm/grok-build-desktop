@@ -187,10 +187,11 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
           ? Math.max(...msgs.map((m) => (m as { ts?: number }).ts ?? 0))
           : t.createdAt;
         const fallback = deriveConversationTitle(fp);
+        const titleBase = promptLabels[t.id] ?? fallback;
         return [
           {
             id: t.id,
-            title: promptLabels[t.id] ?? fallback,
+            title: t.forkIndex != null ? `${titleBase} (${t.forkIndex})` : titleBase,
             detail: '',
             time: timeLabel(lastTs),
             pinned: pinnedPromptIds.has(t.id),
