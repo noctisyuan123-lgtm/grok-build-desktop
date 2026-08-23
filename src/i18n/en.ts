@@ -71,6 +71,7 @@ export const en = {
   'composer.sendQueuing': 'Queuing…',
   'composer.sendEnqueue': 'Enqueue',
   'composer.send': 'Send',
+  'composer.chooseAttachment': 'Attach files or a folder',
   'composer.chooseFiles': 'Attach images or files',
   'composer.attachFolder': 'Attach a folder',
   'composer.attachments': 'Attached files',

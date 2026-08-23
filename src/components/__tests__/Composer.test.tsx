@@ -280,18 +280,34 @@ describe('Composer submit', () => {
     expect(screen.queryByText('notes.txt')).not.toBeInTheDocument();
   });
 
+  it('opens one native picker that accepts files and folders from the paperclip control', async () => {
+    const user = userEvent.setup();
+    const calls: Array<{ cmd: string; payload: unknown }> = [];
+    mockIPC((cmd, payload) => {
+      calls.push({ cmd, payload });
+      return cmd === 'pick_attachments' ? [] : undefined;
+    });
+    renderComposer({ cwd: '/repo' });
+
+    await user.click(screen.getByRole('button', { name: 'Attach files or a folder' }));
+
+    await waitFor(() => expect(calls.find((call) => call.cmd === 'pick_attachments')?.payload).toEqual({ initial: '/repo' }));
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
   it('attaches a local folder as a compact folder card and sends its path as context', async () => {
     const calls: Array<{ cmd: string; payload: unknown }> = [];
     mockIPC((cmd, payload) => {
       calls.push({ cmd, payload });
-      if (cmd === 'pick_project_folder') return '/repo/IndexTTS-heartbeats';
+      if (cmd === 'pick_attachments') return ['/repo/IndexTTS-heartbeats'];
+      if (cmd === 'path_is_directory') return true;
       if (cmd === 'enqueue_run') return { runId: 'folder-run', position: 0 };
       return undefined;
     });
     const user = userEvent.setup();
     const { onEnqueued, textarea } = renderComposer({ cwd: '/repo' });
 
-    await user.click(screen.getByRole('button', { name: 'Attach a folder' }));
+    await user.click(screen.getByRole('button', { name: 'Attach files or a folder' }));
     expect(await screen.findByText('IndexTTS-heartbeats')).toBeInTheDocument();
     expect(screen.getByText('Folder')).toBeInTheDocument();
 
@@ -304,18 +320,22 @@ describe('Composer submit', () => {
     expect(onEnqueued.mock.calls[0][0].prompt).toContain(
       'Attached folder:\n- IndexTTS-heartbeats (/repo/IndexTTS-heartbeats)',
     );
-    expect(calls.some((call) => call.cmd === 'pick_project_folder')).toBe(true);
+    expect(calls.some((call) => call.cmd === 'pick_attachments')).toBe(true);
     expect(textarea.value).toBe('');
 
     expect(screen.queryByText('IndexTTS-heartbeats')).not.toBeInTheDocument();
   });
 
   it('lets the user remove an attached folder before sending', async () => {
-    mockIPC((cmd) => (cmd === 'pick_project_folder' ? '/repo/docs' : undefined));
+    mockIPC((cmd) => {
+      if (cmd === 'pick_attachments') return ['/repo/docs'];
+      if (cmd === 'path_is_directory') return true;
+      return undefined;
+    });
     const user = userEvent.setup();
     renderComposer({ cwd: '/repo' });
 
-    await user.click(screen.getByRole('button', { name: 'Attach a folder' }));
+    await user.click(screen.getByRole('button', { name: 'Attach files or a folder' }));
     expect(await screen.findByText('docs')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Remove folder docs' }));
     expect(screen.queryByText('docs')).not.toBeInTheDocument();

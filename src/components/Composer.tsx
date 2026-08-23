@@ -162,7 +162,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const [activeOptionId, setActiveOptionId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [attachedFolder, setAttachedFolder] = useState<ComposerFolder | null>(null);
-  const [folderPickerBusy, setFolderPickerBusy] = useState(false);
+  const [attachmentPickerBusy, setAttachmentPickerBusy] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const onTextChangeRef = useRef(onTextChange);
@@ -278,19 +278,50 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     setAttachedFolder({ name, path });
   }, []);
 
-  const chooseFolder = useCallback(async () => {
-    if (folderPickerBusy) return;
+  const addNativePaths = useCallback(
+    async (paths: string[]) => {
+      const items = await Promise.all(
+        paths.map(async (path) => {
+          try {
+            if (await invoke<boolean>('path_is_directory', { path })) {
+              return { folderPath: path } as const;
+            }
+            return { attachment: await readNativeAttachment(path) } as const;
+          } catch (error) {
+            onError?.(error instanceof Error ? error.message : String(error));
+            return null;
+          }
+        }),
+      );
+      const folder = items.find(
+        (item): item is { folderPath: string } => item?.folderPath !== undefined,
+      );
+      if (folder) attachFolderPath(folder.folderPath);
+      addAttachments(
+        items
+          .filter(
+            (item): item is { attachment: ComposerAttachment } => item?.attachment !== undefined,
+          )
+          .map((item) => item.attachment),
+      );
+    },
+    [addAttachments, attachFolderPath, onError],
+  );
+
+  const chooseAttachment = useCallback(async () => {
+    if (attachmentPickerBusy) return;
+    // The web fallback still supports file selection; the installed desktop
+    // app uses one native picker that permits both files and directories.
     if (!hasTauriRuntime()) {
-      onError?.(t('notices.folderPickerUnavailable'));
+      fileInputRef.current?.click();
       return;
     }
-    setFolderPickerBusy(true);
+    setAttachmentPickerBusy(true);
     try {
-      const path = await invoke<string | null>('pick_project_folder', {
+      const paths = await invoke<string[]>('pick_attachments', {
         initial: cwd || null,
       });
-      if (!path) return;
-      attachFolderPath(path);
+      await addNativePaths(paths);
     } catch (error) {
       onError?.(
         t('notices.folderPickerFailed', {
@@ -298,9 +329,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         }),
       );
     } finally {
-      setFolderPickerBusy(false);
+      setAttachmentPickerBusy(false);
     }
-  }, [attachFolderPath, cwd, folderPickerBusy, onError]);
+  }, [addNativePaths, attachmentPickerBusy, cwd, onError]);
 
   // Finder drops are delivered by Tauri as native paths rather than DOM File
   // objects. Keep the normal HTML drop handlers too so browser/dev mode works.
@@ -327,31 +358,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           return;
         }
         setDragActive(false);
-        void Promise.all(
-          event.payload.paths.map(async (path) => {
-            try {
-              const isDirectory = await invoke<boolean>('path_is_directory', { path });
-              if (isDirectory) return { folderPath: path } as const;
-              return { attachment: await readNativeAttachment(path) } as const;
-            } catch (error) {
-              onError?.(error instanceof Error ? error.message : String(error));
-              return null;
-            }
-          }),
-        ).then((items) => {
-          const folder = items.find(
-            (item): item is { folderPath: string } => item?.folderPath !== undefined,
-          );
-          if (folder) attachFolderPath(folder.folderPath);
-          addAttachments(
-            items
-              .filter(
-                (item): item is { attachment: ComposerAttachment } =>
-                  item?.attachment !== undefined,
-              )
-              .map((item) => item.attachment),
-          );
-        });
+        void addNativePaths(event.payload.paths);
       })
       .then((stop) => {
         if (disposed) stop();
@@ -362,7 +369,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       disposed = true;
       unlisten?.();
     };
-  }, [addAttachments, attachFolderPath, onError]);
+  }, [addNativePaths, onError]);
 
   // Apply initialValue once on mount.
   useEffect(() => {
@@ -758,26 +765,16 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           <button
             className="composer-attach"
             type="button"
-            disabled={submitting || locked}
-            aria-label={t('composer.chooseFiles')}
-            title={t('composer.chooseFiles')}
-            onClick={() => fileInputRef.current?.click()}
+            disabled={submitting || locked || attachmentPickerBusy}
+            aria-label={t('composer.chooseAttachment')}
+            title={t('composer.chooseAttachment')}
+            onClick={() => void chooseAttachment()}
           >
             {attachments.some((item) => item.mimeType.startsWith('image/')) ? (
               <FileImage size={15} />
             ) : (
               <Paperclip size={15} />
             )}
-          </button>
-          <button
-            className="composer-folder-attach"
-            type="button"
-            disabled={submitting || locked || folderPickerBusy}
-            aria-label={t('composer.attachFolder')}
-            title={t('composer.attachFolder')}
-            onClick={() => void chooseFolder()}
-          >
-            <FolderOpen size={15} />
           </button>
           {controls}
           {onStop ? (

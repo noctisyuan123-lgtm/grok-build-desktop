@@ -33,6 +33,10 @@ pub mod runs;
 
 use crate::runs::db::Db;
 use crate::runs::queue::{QueueMessage, QueueMessageKind, RunQueue};
+#[cfg(target_os = "macos")]
+use objc2::MainThreadMarker;
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{NSModalResponseOK, NSOpenPanel};
 use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
@@ -3481,6 +3485,53 @@ async fn pick_project_folder(initial: Option<String>) -> Result<Option<String>, 
         .map_err(|error| error.to_string())?
 }
 
+/// Opens one macOS picker that accepts both ordinary files and directories.
+/// The Composer classifies the returned paths so files become multimodal
+/// attachments while a directory remains explicit workspace context.
+#[tauri::command]
+async fn pick_attachments(
+    app: tauri::AppHandle,
+    _initial: Option<String>,
+) -> Result<Vec<String>, String> {
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    app.run_on_main_thread(move || {
+        let _ = sender.send(pick_attachments_native());
+    })
+    .map_err(|error| format!("Could not open attachment picker: {error}"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        receiver
+            .recv()
+            .map_err(|error| format!("Attachment picker did not return: {error}"))?
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[cfg(target_os = "macos")]
+fn pick_attachments_native() -> Result<Vec<String>, String> {
+    let marker = MainThreadMarker::new().ok_or("Attachment picker must run on the main thread.")?;
+    let panel = NSOpenPanel::openPanel(marker);
+    panel.setCanChooseFiles(true);
+    panel.setCanChooseDirectories(true);
+    panel.setAllowsMultipleSelection(true);
+    if panel.runModal() != NSModalResponseOK {
+        return Ok(Vec::new());
+    }
+    let urls = panel.URLs();
+    let mut paths = Vec::with_capacity(urls.count());
+    for index in 0..urls.count() {
+        if let Some(path) = urls.objectAtIndex(index).path() {
+            paths.push(path.to_string());
+        }
+    }
+    Ok(paths)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn pick_attachments_native() -> Result<Vec<String>, String> {
+    Err("The attachment picker is available only on macOS.".to_string())
+}
+
 fn pick_project_folder_blocking(initial: Option<String>) -> Result<Option<String>, String> {
     let starting_dir = initial
         .map(|value| value.trim().to_string())
@@ -4237,6 +4288,7 @@ pub fn run() {
             run_absorb_repo,
             run_doctor,
             pick_project_folder,
+            pick_attachments,
             enqueue_run,
             prewarm_run,
             cancel_run,
