@@ -115,6 +115,7 @@ export function installTauriAppMock(overrides: Record<string, CommandHandler> = 
       return { runId, position: 0 };
     },
     cancel_run: () => true,
+    show_completion_popup: () => null,
     clear_queue: () => 0,
     resume_pending_runs: () => 0,
     cancel_pending_runs: () => 0,

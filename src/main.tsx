@@ -9,6 +9,9 @@ import 'katex/dist/katex.min.css';
 import App from './App';
 import { I18nProvider } from './i18n';
 import { ActivityPreview } from './dev/ActivityPreview';
+import { CompletionPopup } from './components/CompletionPopup';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { hasTauriRuntime } from './lib/runtime';
 
 const STORAGE_KEY_PREFIX = 'grok-desktop-';
 
@@ -110,11 +113,24 @@ rootCache.main = root;
 
 const showActivityPreview =
   import.meta.env.DEV && new URLSearchParams(window.location.search).has('activity-preview');
+const showCompletionPopupWindow = hasTauriRuntime()
+  ? getCurrentWebviewWindow().label === 'completion-alert'
+  : new URLSearchParams(window.location.search).has('completion-popup');
+
+if (showCompletionPopupWindow) document.body.dataset.completionPopup = 'true';
 
 root.render(
   <React.StrictMode>
     <AppErrorBoundary>
-      <I18nProvider>{showActivityPreview ? <ActivityPreview /> : <App />}</I18nProvider>
+      <I18nProvider>
+        {showCompletionPopupWindow ? (
+          <CompletionPopup />
+        ) : showActivityPreview ? (
+          <ActivityPreview />
+        ) : (
+          <App />
+        )}
+      </I18nProvider>
     </AppErrorBoundary>
   </React.StrictMode>,
 );

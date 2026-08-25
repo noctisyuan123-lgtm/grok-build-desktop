@@ -15,6 +15,7 @@ import { cancelRun, ensureStreamListenersAttached, prewarmRun } from './lib/grok
 import { hasTauriRuntime } from './lib/runtime';
 import { streamStore } from './lib/streamStore';
 import { playCompletionSound, primeCompletionSound } from './lib/completionSound';
+import { showCompletionPopup } from './lib/completionPopup';
 import { isBackgroundSessionRun } from './lib/completionNotification';
 import { mergeStreamIntoMessages } from './lib/mergeStreamMessages';
 import { shouldShowPlan } from './components/PlanTodoList';
@@ -361,7 +362,10 @@ function App() {
       const foreground = document.visibilityState === 'visible' && document.hasFocus();
       const { activeTabId, messages, tabs } = completionSessionRef.current;
       const otherSessionFinished = isBackgroundSessionRun(runId, activeTabId, messages, tabs);
-      if (!foreground || otherSessionFinished) playCompletionSound();
+      if (!foreground || otherSessionFinished) {
+        playCompletionSound();
+        void showCompletionPopup();
+      }
     });
   }, [completionSoundEnabled]);
   // Session notices (folder pick, restore/save failures, …) show as a

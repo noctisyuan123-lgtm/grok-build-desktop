@@ -27,6 +27,25 @@
           "state": "active",
           "radius": 12
         }
+      },
+      {
+        "label": "completion-alert",
+        "title": "Completion",
+        "url": "index.html?completion-popup=1",
+        "width": 370,
+        "height": 88,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "closable": false,
+        "focus": false,
+        "visible": false,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "visibleOnAllWorkspaces": true,
+        "skipTaskbar": true,
+        "shadow": false
       }
     ],
     "macOSPrivateApi": true,

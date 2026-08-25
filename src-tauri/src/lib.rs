@@ -46,11 +46,14 @@ use std::{
     io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex, OnceLock,
+    },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tauri::{Manager, PhysicalSize, Size, WindowEvent};
+use tauri::{Manager, PhysicalPosition, PhysicalSize, Position, Size, WindowEvent};
 
 const WINDOW_STATE_FILE: &str = "window-state.json";
 const DEFAULT_WINDOW_WIDTH: u32 = 1120;
@@ -58,6 +61,9 @@ const DEFAULT_WINDOW_HEIGHT: u32 = 780;
 const MIN_WINDOW_WIDTH: u32 = 480;
 const MIN_WINDOW_HEIGHT: u32 = 600;
 const DESKTOP_HANDOFF_FILE: &str = "desktop-handoff.json";
+
+#[derive(Default)]
+struct CompletionPopupState(Arc<AtomicU64>);
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -4044,12 +4050,59 @@ fn forward_queue_message(app: &tauri::AppHandle, msg: &QueueMessage) {
     }
 }
 
+#[tauri::command]
+async fn show_completion_popup(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CompletionPopupState>,
+) -> Result<(), String> {
+    let popup = app
+        .get_webview_window("completion-alert")
+        .ok_or_else(|| "completion popup window is unavailable".to_string())?;
+    let main = app.get_webview_window("main");
+    let popup_for_show = popup.clone();
+    app.run_on_main_thread(move || {
+        // Follow the main window's current display and use the monitor work
+        // area so the banner clears the menu bar, notch, and Dock.
+        if let Some(main) = main {
+            if let (Ok(Some(monitor)), Ok(popup_size)) =
+                (main.current_monitor(), popup_for_show.outer_size())
+            {
+                let work = monitor.work_area();
+                let x =
+                    work.position.x + work.size.width as i32 - popup_size.width as i32 - 18;
+                let y = work.position.y + 18;
+                let _ = popup_for_show
+                    .set_position(Position::Physical(PhysicalPosition::new(x, y)));
+            }
+        }
+        let _ = popup_for_show.show();
+    })
+    .map_err(|error| error.to_string())?;
+
+    // A later completion replaces the timer rather than letting an older
+    // timer hide the newly shown banner early.
+    let serial = state.0.fetch_add(1, Ordering::SeqCst) + 1;
+    let latest = state.0.clone();
+    let app_for_hide = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(6)).await;
+        if latest.load(Ordering::SeqCst) == serial {
+            let _ = app_for_hide.run_on_main_thread(move || {
+                let _ = popup.hide();
+            });
+        }
+    });
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(PreviewState::default())
         .manage(TerminalState::default())
+        .manage(CompletionPopupState::default())
         // The static-site preview iframe loads from this scheme instead of
         // srcdoc: the served document carries its own (permissive) CSP, so
         // the app CSP can stay strict (script-src 'self') without breaking
@@ -4307,7 +4360,8 @@ pub fn run() {
             load_attachment,
             desktop::desktop_list_apps,
             desktop::desktop_query,
-            desktop::desktop_activate
+            desktop::desktop_activate,
+            show_completion_popup
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
