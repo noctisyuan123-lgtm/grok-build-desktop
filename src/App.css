@@ -223,8 +223,8 @@ select {
 input:focus,
 textarea:focus,
 select:focus {
-  border-color: #10a7b5;
-  box-shadow: 0 0 0 3px rgba(16, 167, 181, 0.15);
+  border-color: #95c8f8;
+  box-shadow: 0 0 0 3px rgba(149, 200, 248, 0.15);
 }
 
 code,
@@ -433,13 +433,13 @@ pre {
 
 .nav-list button.active,
 .history-list button.active {
-  background: rgba(63, 226, 219, 0.16);
+  background: rgba(149, 200, 248, 0.16);
   color: #f7feff;
 }
 
 .nav-list button.active svg,
 .history-list button.active svg {
-  color: #4fe2d4;
+  color: #95c8f8;
 }
 
 .nav-list button span,
@@ -550,8 +550,8 @@ pre {
 }
 
 .health-pill.ready {
-  background: rgba(79, 226, 212, 0.16);
-  color: #bdfaf2;
+  background: rgba(149, 200, 248, 0.16);
+  color: #95c8f8;
 }
 
 .health-pill.missing,
@@ -692,7 +692,7 @@ pre {
 }
 
 .model-chip svg {
-  color: #4fe2d4;
+  color: #95c8f8;
 }
 
 .model-chip select {
@@ -750,7 +750,7 @@ pre {
 
 .check-chip input,
 .checkline input {
-  accent-color: #10a7b5;
+  accent-color: #95c8f8;
 }
 
 .connection-pill {
@@ -764,7 +764,7 @@ pre {
 }
 
 .connection-pill.ready {
-  color: #71f0d9;
+  color: #95c8f8;
 }
 
 .connection-pill.blocked {
@@ -785,7 +785,7 @@ pre {
 
 .primary-run:hover:not(:disabled),
 .mini-run:hover:not(:disabled) {
-  box-shadow: 0 8px 20px rgba(79, 226, 212, 0.2);
+  box-shadow: 0 8px 20px rgba(149, 200, 248, 0.2);
 }
 
 .mode-tabs {
@@ -810,8 +810,8 @@ pre {
 }
 
 .mode-tabs button.active {
-  border-bottom-color: #10a7b5;
-  color: #087c8a;
+  border-bottom-color: #95c8f8;
+  color: #95c8f8;
 }
 
 .mode-tabs kbd {
@@ -1021,7 +1021,7 @@ pre {
 }
 
 .message-meta span {
-  color: #087c8a;
+  color: #95c8f8;
   font-weight: 750;
 }
 
@@ -1059,7 +1059,7 @@ pre {
 }
 
 .plan-row svg {
-  color: #10a7b5;
+  color: #95c8f8;
 }
 
 .plan-row strong {
@@ -1120,8 +1120,8 @@ pre {
 }
 
 .composer-tabs button.active {
-  border-bottom-color: #10a7b5;
-  color: #087c8a;
+  border-bottom-color: #95c8f8;
+  color: #95c8f8;
 }
 
 .composer-tabs span {
@@ -1221,7 +1221,7 @@ pre {
 }
 
 .inspector-tabs button.active {
-  border-bottom-color: #4fe2d4;
+  border-bottom-color: #95c8f8;
   color: #f6fbfd;
 }
 
@@ -1375,7 +1375,7 @@ pre {
 }
 
 .toggle-row input {
-  accent-color: #10a7b5;
+  accent-color: #95c8f8;
 }
 
 .repo-readout {
@@ -1422,7 +1422,7 @@ pre {
 
 .workflow-grid button.active {
   background: #ffffff;
-  color: #087c8a;
+  color: #95c8f8;
   box-shadow: 0 1px 3px rgba(16, 24, 40, 0.08);
 }
 
@@ -1494,7 +1494,7 @@ pre {
 .safety-list svg,
 .capability-list svg,
 .model-select svg:last-child {
-  color: #10a7b5;
+  color: #95c8f8;
 }
 
 .approval-select {
@@ -1574,7 +1574,7 @@ pre {
 }
 
 .terminal-head span.running {
-  color: #087c8a;
+  color: #95c8f8;
 }
 
 .terminal-actions {
@@ -1660,8 +1660,8 @@ pre {
 
 .terminal-code {
   background: rgba(255, 255, 255, 0.05);
-  border-left: 2px solid rgba(79, 226, 212, 0.9);
-  color: #d8fff5;
+  border-left: 2px solid rgba(149, 200, 248, 0.9);
+  color: #95c8f8;
   margin: 1px 0;
   padding: 2px 0;
 }
@@ -1721,8 +1721,8 @@ pre {
 }
 
 .bridge-pill.connected {
-  background: #e4f7f4;
-  color: #087c8a;
+  background: rgba(149, 200, 248, 0.16);
+  color: #95c8f8;
 }
 
 .bridge-pill.offline {
@@ -1786,8 +1786,8 @@ pre {
   --button-primary-text: #0b0c0d;
   --selected: #202326;
   --selected-strong: #292d31;
-  --accent: #5aa89d;
-  --accent-soft: rgba(90, 168, 157, 0.12);
+  --accent: #95c8f8;
+  --accent-soft: rgba(149, 200, 248, 0.12);
   --terminal-bg: #090a0b;
   --terminal-text: #e5e7eb;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.36);
@@ -1859,8 +1859,8 @@ pre {
   --button-primary-text: #ffffff;
   --selected: #ededeb;
   --selected-strong: #e5e5e0;
-  --accent: #4d8f83;
-  --accent-soft: rgba(77, 143, 131, 0.08);
+  --accent: #95c8f8;
+  --accent-soft: rgba(149, 200, 248, 0.08);
   --terminal-bg: #111111;
   --terminal-text: #f4f4f4;
   --shadow: 0 1px 2px rgba(15, 15, 15, 0.06);
@@ -2925,7 +2925,7 @@ body[data-completion-popup='true'] {
 
 /* VSCode-style blockquotes: colored left border, subtle bg */
 .markdown-body blockquote {
-  background: rgba(90, 168, 157, 0.06);
+  background: rgba(149, 200, 248, 0.06);
   border-left: 3px solid var(--accent);
   border-radius: 0 6px 6px 0;
   color: var(--text-2);
@@ -4787,7 +4787,7 @@ body[data-completion-popup='true'] {
   display: block;
 }
 .message.message-assistant .markdown-body a {
-  color: var(--accent);
+  color: var(--accent) !important;
   text-decoration: none;
 }
 .message.message-assistant .markdown-body a:hover {
@@ -4976,8 +4976,8 @@ body[data-completion-popup='true'] {
   /* Flat mono primary — the old gradient + inset-gloss pill read as a shiny
      white lozenge that fought the restrained graphite/parchment canvas.
      NOTE: `var(--accent)` would be the wrong token here — .app-shell.theme-*
-     redefines it to legacy teal (#5aa89d / #4d8f83), and cream --accent-ink
-     on the light teal measures ~3:1 (below AA). --text-1 / --accent-ink /
+     redefines it to Codex blue (#95c8f8), and cream --accent-ink
+     on the light blue measures ~3:1 (below AA). --text-1 / --accent-ink /
      --accent-hover flip with data-theme and are NOT overridden by the legacy
      app-shell blocks, so the button stays mono in both modes. */
   background: var(--text-1);
@@ -6257,7 +6257,7 @@ button.history-section-head.toggle:hover {
   margin-right: 5px;
   vertical-align: -1px;
 }
-/* Active conversation — subtle mono highlight (overrides the legacy teal
+/* Active conversation — subtle mono highlight (overrides the legacy accent
    `.history-list button.active` rule, which predates the graphite theme). */
 .history-list button.history-row.active {
   background: var(--accent-soft);
@@ -9074,6 +9074,7 @@ body,
   position: relative;
 }
 .cmp-trigger-label {
+  color: var(--accent);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -9105,7 +9106,7 @@ body,
   color: var(--text-1);
 }
 .composer-config-dot {
-  background: #79b7ad;
+  background: #95c8f8;
   border: 1px solid #202020;
   border-radius: 50%;
   height: 5px;
@@ -9250,7 +9251,7 @@ body,
   min-width: 0;
 }
 .cmp-option-title {
-  color: var(--text-1);
+  color: var(--accent);
   font-size: 13px;
   font-weight: 550;
   letter-spacing: -0.01em;
@@ -9327,7 +9328,6 @@ body,
   color: var(--text-3);
 }
 .theme-light .cmp-option,
-.theme-light .cmp-option-title,
 .theme-light .cmp-dd-value,
 .theme-light .cmp-dd-trigger {
   color: var(--text-1);
