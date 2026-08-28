@@ -321,7 +321,7 @@ export function Sidebar({
             openHistoryMenu(item, { x: rect.left + 16, y: rect.bottom - 4 });
           }
         }}
-        title={t('sidebar.rowTitle')}
+        title={item.title}
         type="button"
         aria-haspopup="menu"
         aria-current={item.active ? 'true' : undefined}
