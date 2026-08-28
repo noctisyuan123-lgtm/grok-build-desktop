@@ -1832,8 +1832,12 @@ pre {
   background: transparent;
   border-color: rgba(255, 255, 255, 0.055);
 }
-.app-shell.theme-dark .app-sidebar .history-row.active {
+.app-shell.theme-dark .app-sidebar .history-row.active,
+.app-shell.theme-dark .app-sidebar .history-row.menu-open {
   background: rgba(255, 255, 255, 0.085);
+}
+.app-shell.theme-dark .app-sidebar .history-row:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.05);
 }
 .app-shell.theme-dark .app-sidebar .account-strip {
   border-top-color: rgba(255, 255, 255, 0.06);
@@ -2322,7 +2326,7 @@ select:focus {
   padding: 5px 9px;
 }
 
-.history-list button.history-row strong {
+.history-list .history-row strong {
   font-family: inherit;
   font-size: 13px;
   font-weight: 500;
@@ -6296,14 +6300,14 @@ button.history-section-head.toggle:hover {
 }
 /* Active conversation — subtle mono highlight (overrides the legacy accent
    `.history-list button.active` rule, which predates the graphite theme). */
-.history-list button.history-row.active {
+.history-list .history-row.active {
   background: var(--accent-soft);
   color: var(--text-1);
 }
-.history-list button.history-row.active svg {
+.history-list .history-row.active .pin-dot {
   color: var(--accent);
 }
-.history-list button.history-row.active strong {
+.history-list .history-row.active strong {
   color: var(--text-1);
 }
 .history-rename {
@@ -7058,24 +7062,77 @@ button.history-section-head.toggle:hover {
 }
 
 /* Conversation names should read as a compact list, not a stack of cards. */
-.history-list button.history-row {
+.history-list .history-row {
   align-items: center;
+  border-radius: 7px;
+  column-gap: 2px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   min-height: 31px;
-  padding: 3px 9px;
+  padding: 1px 3px 1px 6px;
 }
-.history-list button.history-row > span {
+.history-list .history-row > span,
+.history-list .history-row-open {
   align-items: center;
   gap: 1px;
 }
-.history-list button.history-row > .history-row-main {
+.history-list .history-row > .history-row-main,
+.history-list .history-row-open .history-row-main {
   align-items: center;
   align-self: center;
 }
-.history-list button.history-row > time {
+.history-list .history-row > time {
   align-self: center;
 }
-.history-list button.history-row strong {
+.history-list .history-row strong {
   line-height: 1.2;
+}
+.history-list .history-row-open {
+  background: transparent;
+  column-gap: 0;
+  display: flex;
+  grid-template-columns: none;
+  min-height: 27px;
+  min-width: 0;
+  padding: 3px 2px 3px 3px;
+}
+.history-list .history-row-more {
+  align-items: center;
+  background: transparent;
+  border-radius: 6px;
+  color: var(--text-3);
+  display: inline-flex;
+  height: 22px;
+  justify-content: center;
+  justify-self: end;
+  min-height: 22px;
+  min-width: 22px;
+  opacity: 0.55;
+  padding: 0;
+  width: 22px;
+}
+.history-list .history-row:hover .history-row-more,
+.history-list .history-row:focus-within .history-row-more,
+.history-list .history-row.menu-open .history-row-more,
+.history-list .history-row.active .history-row-more {
+  opacity: 1;
+}
+.history-list .history-row-more:hover,
+.history-list .history-row-more:focus-visible {
+  background: color-mix(in srgb, var(--text-1) 10%, transparent);
+  color: var(--text-1);
+}
+.history-list .history-row.active .history-row-more,
+.history-list .history-row.menu-open .history-row-more {
+  color: var(--text-2);
+}
+.history-list .history-row-more svg {
+  color: inherit;
+}
+@media (hover: none) {
+  .history-list .history-row-more {
+    opacity: 1;
+  }
 }
 
 /* Copy/Undo are quiet response actions; keep only the icon and hover tint. */
@@ -8442,8 +8499,12 @@ body,
   border-color: rgba(43, 43, 38, 0.1);
 }
 
-.app-shell.theme-light .app-sidebar .history-row.active {
+.app-shell.theme-light .app-sidebar .history-row.active,
+.app-shell.theme-light .app-sidebar .history-row.menu-open {
   background: rgba(255, 255, 255, 0.48);
+}
+.app-shell.theme-light .app-sidebar .history-row:hover:not(.active) {
+  background: rgba(43, 43, 38, 0.05);
 }
 
 .app-shell.theme-light .app-sidebar .account-strip {

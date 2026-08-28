@@ -21,6 +21,7 @@ import {
   FolderPlus,
   History,
   Loader2,
+  MoreHorizontal,
   Pencil,
   Pin,
   PinOff,
@@ -49,6 +50,7 @@ export interface SidebarProps {
   deleteSession: (id: string) => void;
   handleTabCreate: () => void;
   focusComposer: () => void;
+  contextMenu: ContextMenuState | null;
   setContextMenu: (menu: ContextMenuState | null) => void;
   paletteOpen: boolean;
   setPaletteOpen: (open: boolean) => void;
@@ -78,6 +80,7 @@ export function Sidebar({
   deleteSession,
   handleTabCreate,
   focusComposer,
+  contextMenu,
   setContextMenu,
   paletteOpen,
   setPaletteOpen,
@@ -165,11 +168,19 @@ export function Sidebar({
     coding: t('sidebar.mode.coding'),
   };
 
-  // Claude-class right-click menu for a history row. Section header, icons,
+  // Claude-class management menu for a history row. Section header, icons,
   // shortcut accelerators, two flyout submenus (Open with / Move to group).
-  // Reachable via right-click AND the keyboard (Shift+F10 / the ContextMenu
-  // key on a focused row), so `at` is a caller-supplied anchor point.
-  function openHistoryMenu(item: HistoryPreview, at: { x: number; y: number }) {
+  // Primary trigger is the row ⋯ button; right-click and the keyboard
+  // (Shift+F10 / ContextMenu) still open the same menu at a caller-supplied
+  // anchor point.
+  function openHistoryMenu(
+    item: HistoryPreview,
+    at: {
+      x: number;
+      y: number;
+      anchor?: { top: number; bottom: number; left: number; right: number };
+    },
+  ) {
     const id = item.id; // tab/session id
     const text = sessionFirstPrompt(id) ?? item.title;
     const pinned = pinnedPromptIds.has(id);
@@ -261,11 +272,28 @@ export function Sidebar({
         onClick: () => deleteSession(id),
       },
     ];
-    setContextMenu({ x: at.x, y: at.y, items });
+    setContextMenu({ x: at.x, y: at.y, items, id: item.id, anchor: at.anchor });
+  }
+
+  function openHistoryMenuFromTrigger(
+    item: HistoryPreview,
+    trigger: HTMLElement,
+    alreadyOpen: boolean,
+  ) {
+    if (alreadyOpen) {
+      setContextMenu(null);
+      return;
+    }
+    const rect = trigger.getBoundingClientRect();
+    openHistoryMenu(item, {
+      x: rect.left,
+      y: rect.bottom + 4,
+      anchor: { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right },
+    });
   }
 
   // One history row — inline rename/new-group input when being edited,
-  // otherwise a click-to-restore / right-click-for-actions button.
+  // otherwise a click-to-open row with a ⋯ actions button.
   function renderHistoryRow(item: HistoryRow) {
     if (rowEdit?.id === item.id) {
       return (
@@ -302,40 +330,63 @@ export function Sidebar({
         </div>
       );
     }
+    const menuOpen = contextMenu?.id === item.id;
     return (
-      <button
-        className={`history-row${item.pinned ? ' pinned' : ''}${item.active ? ' active' : ''}`}
+      <div
+        className={`history-row${item.pinned ? ' pinned' : ''}${item.active ? ' active' : ''}${menuOpen ? ' menu-open' : ''}`}
         key={item.id}
-        onClick={() => switchToSession(item.id)}
-        onDoubleClick={() => startRename(item.id)}
         onContextMenu={(e) => {
           e.preventDefault();
           openHistoryMenu(item, { x: e.clientX, y: e.clientY });
         }}
-        onKeyDown={(e) => {
-          // Keyboard route to the same management menu: Shift+F10 or the
-          // dedicated ContextMenu key, anchored to the focused row.
-          if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
-            e.preventDefault();
-            const rect = e.currentTarget.getBoundingClientRect();
-            openHistoryMenu(item, { x: rect.left + 16, y: rect.bottom - 4 });
-          }
-        }}
-        title={item.title}
-        type="button"
-        aria-haspopup="menu"
-        aria-current={item.active ? 'true' : undefined}
       >
-        <span className="history-row-main">
-          <span className="history-activity-slot" aria-hidden="true">
-            {workingSessionIds?.has(item.id) ? <span className="history-activity-dot" /> : null}
+        <button
+          className="history-row-open"
+          onClick={() => switchToSession(item.id)}
+          onDoubleClick={() => startRename(item.id)}
+          onKeyDown={(e) => {
+            // Keyboard route to the same management menu: Shift+F10 or the
+            // dedicated ContextMenu key, anchored to the row's ⋯ button.
+            if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+              e.preventDefault();
+              const more = e.currentTarget.parentElement?.querySelector('.history-row-more');
+              openHistoryMenuFromTrigger(
+                item,
+                (more as HTMLElement | null) ?? e.currentTarget,
+                menuOpen,
+              );
+            }
+          }}
+          title={item.title}
+          type="button"
+          aria-current={item.active ? 'true' : undefined}
+        >
+          <span className="history-row-main">
+            <span className="history-activity-slot" aria-hidden="true">
+              {workingSessionIds?.has(item.id) ? <span className="history-activity-dot" /> : null}
+            </span>
+            <strong>
+              {item.pinned ? <Pin size={11} className="pin-dot" /> : null}
+              {item.title}
+            </strong>
           </span>
-          <strong>
-            {item.pinned ? <Pin size={11} className="pin-dot" /> : null}
-            {item.title}
-          </strong>
-        </span>
-      </button>
+        </button>
+        <button
+          className="history-row-more"
+          type="button"
+          aria-label={t('sidebar.menu.moreActions')}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          title={t('sidebar.menu.moreActions')}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openHistoryMenuFromTrigger(item, e.currentTarget, menuOpen);
+          }}
+        >
+          <MoreHorizontal size={14} />
+        </button>
+      </div>
     );
   }
 

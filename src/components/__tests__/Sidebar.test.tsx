@@ -94,6 +94,7 @@ function Harness({ workingSessionIds }: { workingSessionIds?: ReadonlySet<string
         deleteSession={deleteConversation}
         handleTabCreate={tabsApi.handleTabCreate}
         focusComposer={() => {}}
+        contextMenu={contextMenu}
         setContextMenu={setContextMenu}
         paletteOpen={false}
         setPaletteOpen={() => {}}
@@ -163,7 +164,7 @@ describe('Sidebar conversations list', () => {
   it('lists every conversation and marks the open one active', () => {
     render(<Harness />);
     expect(historyRow('fix the login flake')).toHaveAttribute('aria-current', 'true');
-    expect(historyRow('fix the login flake')).toHaveClass('active');
+    expect(historyRow('fix the login flake').closest('.history-row')).toHaveClass('active');
     expect(historyRow('write release notes')).not.toHaveAttribute('aria-current');
   });
 
@@ -192,8 +193,9 @@ describe('Sidebar conversations list', () => {
       within(project as HTMLElement).queryByText('fix the login flake'),
     ).not.toBeInTheDocument();
     expect(screen.getByText('b').closest('.project-history-group')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Projects' }).querySelector('.project-list-count'))
-      .toHaveTextContent('2');
+    expect(
+      screen.getByRole('button', { name: 'Projects' }).querySelector('.project-list-count'),
+    ).toHaveTextContent('2');
     expect(within(project as HTMLElement).getByText('1')).toHaveClass('project-count');
     expect(screen.getByRole('button', { name: 'a' })).toHaveClass('current');
     expect(screen.getByRole('button', { name: 'b' })).not.toHaveClass('current');
@@ -254,6 +256,17 @@ describe('Sidebar conversations list', () => {
 });
 
 describe('Sidebar right-click actions', () => {
+  it('opens the management menu from the row more button', async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    const row = historyRow('write release notes').closest('.history-row') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: 'Conversation actions' }));
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: /Delete conversation/ })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: /Rename…/ })).toBeInTheDocument();
+    expect(screen.getByTestId('active-conversation')).toHaveTextContent('m100');
+  });
+
   it('deletes a conversation via the context menu', async () => {
     const user = userEvent.setup();
     render(<Harness />);
@@ -316,7 +329,8 @@ describe('Sidebar keyboard access to row actions', () => {
   it('Shift+F10 on a focused row opens the same management menu', async () => {
     render(<Harness />);
     const row = historyRow('write release notes');
-    expect(row).toHaveAttribute('aria-haspopup', 'menu');
+    const more = row.closest('.history-row')!.querySelector('.history-row-more') as HTMLElement;
+    expect(more).toHaveAttribute('aria-haspopup', 'menu');
     row.focus();
     fireEvent.keyDown(row, { key: 'F10', shiftKey: true });
     const menu = await screen.findByRole('menu');

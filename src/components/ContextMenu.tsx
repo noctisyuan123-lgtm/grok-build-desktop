@@ -22,6 +22,11 @@ export interface ContextMenuState {
   x: number;
   y: number;
   items: ContextMenuItem[];
+  /** Optional owner id so a trigger (e.g. a row ⋯ button) can toggle closed. */
+  id?: string;
+  /** When set, the menu prefers opening below this rect and flips above if
+   *  it would clip the window (⋯ button). Cursor opens ignore this. */
+  anchor?: { top: number; bottom: number; left: number; right: number };
 }
 
 interface Props {
@@ -44,23 +49,46 @@ export function ContextMenu({ menu, onClose }: Props) {
   const openSubRef = useRef(openSub);
   openSubRef.current = openSub;
 
-  // Position at the cursor, clamped into the viewport once measured. Written
-  // through the CSSOM (element.style) instead of a React style prop: the
-  // shipped CSP is `style-src 'self'` with no 'unsafe-inline', and while CSP
-  // only blocks style ATTRIBUTES parsed from markup (CSSOM writes are exempt
-  // by spec), keeping the tree free of style props keeps that invariant
-  // grep-able. Runs in a layout effect, so it lands before first paint.
+  // Position at the cursor (or below an anchor), clamped into the visual
+  // viewport once measured. Bottom inset is generous so macOS window
+  // rounding doesn't clip the last row. Written through the CSSOM
+  // (element.style) instead of a React style prop: the shipped CSP is
+  // `style-src 'self'` with no 'unsafe-inline', and while CSP only blocks
+  // style ATTRIBUTES parsed from markup (CSSOM writes are exempt by spec),
+  // keeping the tree free of style props keeps that invariant grep-able.
+  // Runs in a layout effect, so it lands before first paint.
   useLayoutEffect(() => {
     if (!menu) return;
     setOpenSub(null);
     const el = ref.current;
     if (!el) return;
     const { width, height } = el.getBoundingClientRect();
-    const pad = 8;
-    const x = Math.min(menu.x, window.innerWidth - width - pad);
-    const y = Math.min(menu.y, window.innerHeight - height - pad);
-    el.style.left = `${Math.max(pad, x)}px`;
-    el.style.top = `${Math.max(pad, y)}px`;
+    const edge = 10;
+    const bottom = 24;
+    const vv = window.visualViewport;
+    const vpLeft = vv?.offsetLeft ?? 0;
+    const vpTop = vv?.offsetTop ?? 0;
+    const vpRight = vpLeft + (vv?.width ?? window.innerWidth);
+    const vpBottom = vpTop + (vv?.height ?? window.innerHeight);
+    const minX = vpLeft + edge;
+    const minY = vpTop + edge;
+    const maxX = vpRight - width - edge;
+    const maxY = vpBottom - height - bottom;
+
+    let x = menu.x;
+    let y = menu.y;
+    if (menu.anchor) {
+      const gap = 4;
+      const below = menu.anchor.bottom + gap;
+      const above = menu.anchor.top - height - gap;
+      if (below <= maxY) y = below;
+      else if (above >= minY) y = above;
+      else y = maxY;
+      x = menu.anchor.left;
+    }
+
+    el.style.left = `${Math.max(minX, Math.min(x, maxX))}px`;
+    el.style.top = `${Math.max(minY, Math.min(y, maxY))}px`;
   }, [menu]);
 
   // Focus management: move focus into the menu on open (so arrow keys,

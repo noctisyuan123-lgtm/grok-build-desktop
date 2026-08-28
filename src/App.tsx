@@ -1777,6 +1777,7 @@ function App() {
         deleteSession={deleteConversation}
         handleTabCreate={handleTabCreate}
         focusComposer={() => composerRef.current?.focus()}
+        contextMenu={contextMenu}
         setContextMenu={setContextMenu}
         paletteOpen={paletteOpen}
         setPaletteOpen={setPaletteOpen}
