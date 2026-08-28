@@ -23,6 +23,17 @@ fi
 ditto "$SOURCE_APP" "$TARGET_APP"
 codesign --verify --deep --strict "$TARGET_APP"
 
+# Spotlight / Dock may still resolve com.grok.desktop to a leftover copy in
+# /Applications. Replace it when present so launches cannot pick a stale build.
+SYSTEM_APP="/Applications/$APP_NAME"
+if [[ -d "$SYSTEM_APP" && "$SYSTEM_APP" != "$TARGET_APP" ]]; then
+  rm -rf "$SYSTEM_APP"
+  ditto "$SOURCE_APP" "$SYSTEM_APP"
+  codesign --verify --deep --strict "$SYSTEM_APP"
+  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+    -f "$SYSTEM_APP" >/dev/null 2>&1 || true
+fi
+
 # Re-register with LaunchServices so `open` sees the freshly-written bundle.
 # Without this, `open` can race the rewrite and fail with -600 (procNotFound)
 # even though the app is perfectly valid on disk.

@@ -6,7 +6,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: tauri.invoke,
 }));
 
-import { showCompletionPopup } from '../completionPopup';
+import { showCompletionPopup, tabIdFromPayload } from '../completionPopup';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -21,8 +21,18 @@ describe('showCompletionPopup', () => {
   it('opens the app-owned completion window for every completion', async () => {
     tauri.invoke.mockResolvedValue();
 
-    await showCompletionPopup();
+    await showCompletionPopup('tab-1');
 
-    expect(tauri.invoke).toHaveBeenCalledWith('show_completion_popup');
+    expect(tauri.invoke).toHaveBeenCalledWith('show_completion_popup', { tabId: 'tab-1' });
+  });
+});
+
+describe('tabIdFromPayload', () => {
+  it('reads a bare string or { tabId } object', () => {
+    expect(tabIdFromPayload('tab-1')).toBe('tab-1');
+    expect(tabIdFromPayload({ tabId: 'tab-2' })).toBe('tab-2');
+    expect(tabIdFromPayload({})).toBeNull();
+    expect(tabIdFromPayload('')).toBeNull();
+    expect(tabIdFromPayload(null)).toBeNull();
   });
 });

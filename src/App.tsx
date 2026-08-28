@@ -8,6 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { Globe2, PanelRight, TerminalSquare } from 'lucide-react';
 import './App.css';
@@ -239,6 +240,9 @@ function App() {
   // current conversation instead of the render that first subscribed.
   const completionSessionRef = useRef({ activeTabId, messages, tabs });
   completionSessionRef.current = { activeTabId, messages, tabs };
+  const completionRunOwnerRef = useRef(new Map<string, string>());
+  const completionNavigationRef = useRef(switchToSession);
+  completionNavigationRef.current = switchToSession;
   const inflightRunKey = useSyncExternalStore(
     streamStore.subscribe,
     streamStore.getInflightRunIdsSnapshot,
@@ -362,12 +366,37 @@ function App() {
       const foreground = document.visibilityState === 'visible' && document.hasFocus();
       const { activeTabId, messages, tabs } = completionSessionRef.current;
       const otherSessionFinished = isBackgroundSessionRun(runId, activeTabId, messages, tabs);
+      const activeOwnsRun = messages.some((message) => message.runId === runId);
+      const ownerTabId =
+        completionRunOwnerRef.current.get(runId) ??
+        (activeOwnsRun
+          ? activeTabId
+          : tabs.find((tab) => tab.messages.some((message) => message.runId === runId))?.id);
+      completionRunOwnerRef.current.delete(runId);
       if (!foreground || otherSessionFinished) {
         playCompletionSound();
-        void showCompletionPopup();
+        // Background alerts are posted from Rust (Notification Center), the
+        // same way Claude Code / Codex surface a finished turn. The in-app
+        // banner is only for a finished session while this window is focused.
+        if (ownerTabId && foreground) void showCompletionPopup(ownerTabId);
       }
     });
   }, [completionSoundEnabled]);
+
+  useEffect(() => {
+    if (!hasTauriRuntime()) return;
+    let unlisten: (() => void) | undefined;
+    void listen<{ tabId?: string }>(
+      'grok-desktop://completion-popup-clicked',
+      (event) => {
+        const tabId = event.payload?.tabId;
+        if (tabId) completionNavigationRef.current(tabId);
+      },
+    ).then((cleanup) => {
+      unlisten = cleanup;
+    });
+    return () => unlisten?.();
+  }, []);
   // Session notices (folder pick, restore/save failures, …) show as a
   // transient toast over the conversation — previously they rendered only
   // inside the collapsed Terminal dock, where nobody saw them. Auto-dismiss
@@ -966,6 +995,7 @@ function App() {
     attachments: ComposerAttachment[];
     attachedFolder?: ComposerFolder;
   }) {
+    completionRunOwnerRef.current.set(info.runId, activeTabId);
     // Post-Undo re-seed has been consumed. Later turns resume the new session.
     undoSessionPlanRef.current = null;
     if (forkSessionPlanRef.current?.tabId === activeTabId) {
@@ -1763,6 +1793,7 @@ function App() {
         setSidebarCollapsed={setSidebarCollapsed}
         mode={mode}
         switchMode={switchMode}
+        codingCwd={codingCwd}
       />
       <div
         className="sidebar-resizer"

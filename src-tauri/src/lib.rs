@@ -31,12 +31,20 @@ pub mod customize;
 pub mod prompts;
 pub mod runs;
 
-use crate::runs::db::Db;
+use crate::runs::db::{Db, RunState};
 use crate::runs::queue::{QueueMessage, QueueMessageKind, RunQueue};
 #[cfg(target_os = "macos")]
 use objc2::MainThreadMarker;
 #[cfg(target_os = "macos")]
+use objc2::msg_send;
+#[cfg(target_os = "macos")]
+use objc2::rc::Retained;
+#[cfg(target_os = "macos")]
+use objc2::runtime::{AnyClass, AnyObject};
+#[cfg(target_os = "macos")]
 use objc2_app_kit::{NSModalResponseOK, NSOpenPanel};
+#[cfg(target_os = "macos")]
+use objc2_foundation::NSString;
 use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
@@ -63,7 +71,14 @@ const MIN_WINDOW_HEIGHT: u32 = 600;
 const DESKTOP_HANDOFF_FILE: &str = "desktop-handoff.json";
 
 #[derive(Default)]
-struct CompletionPopupState(Arc<AtomicU64>);
+struct CompletionPopupState {
+    serial: Arc<AtomicU64>,
+    tab_id: Mutex<Option<String>>,
+    /// Set when a system banner is posted while Grok is unfocused. Consumed
+    /// when the main window becomes key so clicking the banner (or just
+    /// returning to the app) opens the finished session.
+    restore_on_focus: Mutex<Option<String>>,
+}
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -4027,6 +4042,15 @@ fn forward_queue_message(app: &tauri::AppHandle, msg: &QueueMessage) {
                     "error": error,
                 }),
             );
+            // JS in a covered WKWebView can be throttled; show the banner from
+            // Rust so a backgrounded app still alerts when a turn finishes.
+            if matches!(state, RunState::Done | RunState::Failed) {
+                let app = app.clone();
+                let run_id = msg.run_id.clone();
+                tauri::async_runtime::spawn(async move {
+                    maybe_alert_background_completion(app, run_id).await;
+                });
+            }
         }
         QueueMessageKind::QueueChanged => {
             let q = app.state::<std::sync::Arc<RunQueue>>().inner().clone();
@@ -4050,26 +4074,125 @@ fn forward_queue_message(app: &tauri::AppHandle, msg: &QueueMessage) {
     }
 }
 
-#[tauri::command]
-async fn show_completion_popup(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, CompletionPopupState>,
+/// Native Notification Center banner — the same mechanism Claude Code and
+/// Codex use (`osascript` / `NSUserNotification`). Those banners are drawn by
+/// the system, so they appear over other apps' maximized windows. A custom
+/// NSWindow overlay cannot do that without becoming an NSPanel, and swapping
+/// Tao's window class crashes the event loop.
+#[cfg(target_os = "macos")]
+fn post_system_completion_notification() {
+    if post_ns_user_notification() {
+        return;
+    }
+    if std::process::Command::new("terminal-notifier")
+        .args([
+            "-title",
+            "Grok Build Desktop",
+            "-message",
+            "A response has finished.",
+            "-activate",
+            "com.grok.desktop",
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .is_ok()
+    {
+        return;
+    }
+    let _ = std::process::Command::new("osascript")
+        .args([
+            "-e",
+            "display notification \"A response has finished.\" with title \"Grok Build Desktop\"",
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
+#[cfg(target_os = "macos")]
+fn post_ns_user_notification() -> bool {
+    let Some(notif_cls) = AnyClass::get(c"NSUserNotification") else {
+        return false;
+    };
+    let Some(center_cls) = AnyClass::get(c"NSUserNotificationCenter") else {
+        return false;
+    };
+    let title = NSString::from_str("Grok Build Desktop");
+    let body = NSString::from_str("A response has finished.");
+    unsafe {
+        let notification: Retained<AnyObject> = msg_send![notif_cls, new];
+        let _: () = msg_send![&*notification, setTitle: &*title];
+        let _: () = msg_send![&*notification, setInformativeText: &*body];
+        let center: Retained<AnyObject> = msg_send![center_cls, defaultUserNotificationCenter];
+        let _: () = msg_send![&*center, deliverNotification: &*notification];
+    }
+    true
+}
+
+#[cfg(not(target_os = "macos"))]
+fn post_system_completion_notification() {}
+
+async fn maybe_alert_background_completion(app: tauri::AppHandle, run_id: String) {
+    if let Some(main) = app.get_webview_window("main") {
+        if main.is_focused().unwrap_or(false) {
+            return;
+        }
+    }
+    let tab_id = {
+        let queue = app.state::<std::sync::Arc<RunQueue>>();
+        match queue.db.fetch_run(&run_id).await {
+            Ok(Some(rec)) if !rec.lane_id.is_empty() => rec.lane_id,
+            _ => run_id,
+        }
+    };
+    let state = app.state::<CompletionPopupState>();
+    let _ = present_completion_popup(&app, &state, tab_id);
+}
+
+fn present_completion_popup(
+    app: &tauri::AppHandle,
+    state: &CompletionPopupState,
+    tab_id: String,
 ) -> Result<(), String> {
+    use tauri::Emitter as _;
+    {
+        let mut current = state
+            .tab_id
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *current = Some(tab_id.clone());
+    }
+    let main_focused = app
+        .get_webview_window("main")
+        .and_then(|window| window.is_focused().ok())
+        .unwrap_or(false);
+    if !main_focused {
+        {
+            let mut restore = state
+                .restore_on_focus
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            *restore = Some(tab_id);
+        }
+        post_system_completion_notification();
+        return Ok(());
+    }
+
     let popup = app
         .get_webview_window("completion-alert")
         .ok_or_else(|| "completion popup window is unavailable".to_string())?;
     let main = app.get_webview_window("main");
     let popup_for_show = popup.clone();
     app.run_on_main_thread(move || {
-        // Follow the main window's current display and use the monitor work
-        // area so the banner clears the menu bar, notch, and Dock.
         if let Some(main) = main {
             if let (Ok(Some(monitor)), Ok(popup_size)) =
                 (main.current_monitor(), popup_for_show.outer_size())
             {
                 let work = monitor.work_area();
-                let x =
-                    work.position.x + work.size.width as i32 - popup_size.width as i32 - 18;
+                let x = work.position.x + work.size.width as i32 - popup_size.width as i32 - 18;
                 let y = work.position.y + 18;
                 let _ = popup_for_show
                     .set_position(Position::Physical(PhysicalPosition::new(x, y)));
@@ -4078,11 +4201,11 @@ async fn show_completion_popup(
         let _ = popup_for_show.show();
     })
     .map_err(|error| error.to_string())?;
+    app.emit_to("completion-alert", "grok-desktop://completion-popup", tab_id)
+        .map_err(|error| error.to_string())?;
 
-    // A later completion replaces the timer rather than letting an older
-    // timer hide the newly shown banner early.
-    let serial = state.0.fetch_add(1, Ordering::SeqCst) + 1;
-    let latest = state.0.clone();
+    let serial = state.serial.fetch_add(1, Ordering::SeqCst) + 1;
+    let latest = state.serial.clone();
     let app_for_hide = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_secs(6)).await;
@@ -4094,6 +4217,59 @@ async fn show_completion_popup(
     });
 
     Ok(())
+}
+
+#[tauri::command]
+async fn show_completion_popup(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CompletionPopupState>,
+    tab_id: String,
+) -> Result<(), String> {
+    present_completion_popup(&app, &state, tab_id)
+}
+
+#[tauri::command]
+fn open_completion_session(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CompletionPopupState>,
+    tab_id: Option<String>,
+) -> Result<(), String> {
+    use tauri::Emitter as _;
+    let tab_id = tab_id
+        .filter(|id| !id.is_empty())
+        .or_else(|| {
+            state
+                .tab_id
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone()
+        })
+        .ok_or_else(|| "no completed session to open".to_string())?;
+    let main = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window is unavailable".to_string())?;
+    let popup = app.get_webview_window("completion-alert");
+
+    // Deliver the navigation before macOS spends time restoring and focusing
+    // the main window, so the requested session is already selected when the
+    // window becomes visible. Hide the banner from Rust: the popup webview
+    // does not have window:allow-hide, so a JS hide() would fail the click.
+    app.emit_to(
+        "main",
+        "grok-desktop://completion-popup-clicked",
+        serde_json::json!({ "tabId": tab_id }),
+    )
+    .map_err(|error| error.to_string())?;
+
+    app.run_on_main_thread(move || {
+        if let Some(popup) = popup {
+            let _ = popup.hide();
+        }
+        let _ = main.show();
+        let _ = main.unminimize();
+        let _ = main.set_focus();
+    })
+    .map_err(|error| error.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -4145,6 +4321,7 @@ pub fn run() {
                 }
                 let state_path_for_close = window_state_path.clone();
                 let window_for_close = window.clone();
+                let app_for_focus = app.handle().clone();
                 window.on_window_event(move |event| {
                     match event {
                         // Persist as the user drags rather than waiting for a
@@ -4152,6 +4329,22 @@ pub fn run() {
                         // per-window CloseRequested notification.
                         WindowEvent::Resized(size) => {
                             save_window_state(&state_path_for_close, *size);
+                        }
+                        WindowEvent::Focused(true) => {
+                            let state = app_for_focus.state::<CompletionPopupState>();
+                            let tab_id = state
+                                .restore_on_focus
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                                .take();
+                            if let Some(tab_id) = tab_id {
+                                use tauri::Emitter as _;
+                                let _ = app_for_focus.emit_to(
+                                    "main",
+                                    "grok-desktop://completion-popup-clicked",
+                                    serde_json::json!({ "tabId": tab_id }),
+                                );
+                            }
                         }
                         WindowEvent::CloseRequested { api, .. } => {
                             // Closing the document window should keep the
@@ -4361,7 +4554,8 @@ pub fn run() {
             desktop::desktop_list_apps,
             desktop::desktop_query,
             desktop::desktop_activate,
-            show_completion_popup
+            show_completion_popup,
+            open_completion_session
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
