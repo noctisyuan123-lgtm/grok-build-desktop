@@ -173,14 +173,7 @@ export function Sidebar({
   // Primary trigger is the row ⋯ button; right-click and the keyboard
   // (Shift+F10 / ContextMenu) still open the same menu at a caller-supplied
   // anchor point.
-  function openHistoryMenu(
-    item: HistoryPreview,
-    at: {
-      x: number;
-      y: number;
-      anchor?: { top: number; bottom: number; left: number; right: number };
-    },
-  ) {
+  function openHistoryMenu(item: HistoryPreview, at: { x: number; y: number }) {
     const id = item.id; // tab/session id
     const text = sessionFirstPrompt(id) ?? item.title;
     const pinned = pinnedPromptIds.has(id);
@@ -272,24 +265,19 @@ export function Sidebar({
         onClick: () => deleteSession(id),
       },
     ];
-    setContextMenu({ x: at.x, y: at.y, items, id: item.id, anchor: at.anchor });
+    setContextMenu({ x: at.x, y: at.y, items, id: item.id });
   }
 
-  function openHistoryMenuFromTrigger(
+  function openHistoryMenuFromPointer(
     item: HistoryPreview,
-    trigger: HTMLElement,
+    at: { x: number; y: number },
     alreadyOpen: boolean,
   ) {
     if (alreadyOpen) {
       setContextMenu(null);
       return;
     }
-    const rect = trigger.getBoundingClientRect();
-    openHistoryMenu(item, {
-      x: rect.left,
-      y: rect.bottom + 4,
-      anchor: { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right },
-    });
+    openHistoryMenu(item, at);
   }
 
   // One history row — inline rename/new-group input when being edited,
@@ -346,15 +334,12 @@ export function Sidebar({
           onDoubleClick={() => startRename(item.id)}
           onKeyDown={(e) => {
             // Keyboard route to the same management menu: Shift+F10 or the
-            // dedicated ContextMenu key, anchored to the row's ⋯ button.
+            // dedicated ContextMenu key, as if the pointer were on the ⋯.
             if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
               e.preventDefault();
               const more = e.currentTarget.parentElement?.querySelector('.history-row-more');
-              openHistoryMenuFromTrigger(
-                item,
-                (more as HTMLElement | null) ?? e.currentTarget,
-                menuOpen,
-              );
+              const rect = ((more as HTMLElement | null) ?? e.currentTarget).getBoundingClientRect();
+              openHistoryMenuFromPointer(item, { x: rect.left, y: rect.top }, menuOpen);
             }
           }}
           title={item.title}
@@ -381,7 +366,7 @@ export function Sidebar({
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            openHistoryMenuFromTrigger(item, e.currentTarget, menuOpen);
+            openHistoryMenuFromPointer(item, { x: e.clientX, y: e.clientY }, menuOpen);
           }}
         >
           <MoreHorizontal size={14} />
