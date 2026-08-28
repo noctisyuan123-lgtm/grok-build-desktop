@@ -182,6 +182,7 @@ export const en = {
   'sidebar.conversations': 'Conversations',
   'sidebar.emptyHistory': 'Your conversations will show up here.',
   'sidebar.pinned': 'Pinned',
+  'sidebar.projects': 'Projects',
   'sidebar.recent': 'Recent',
   'sidebar.archivedCount': 'Archived ({count})',
   'sidebar.toolHealth': 'Tool health',

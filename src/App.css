@@ -2532,10 +2532,11 @@ body[data-completion-popup='true'] {
 
 .completion-popup-shell {
   align-items: stretch;
+  cursor: pointer;
   display: flex;
   height: 100vh;
   padding: 8px;
-  pointer-events: none;
+  pointer-events: auto;
   width: 100vw;
 }
 
@@ -6084,65 +6085,96 @@ body.subagent-drawer-resizing * {
 .project-history-group + .project-history-group {
   margin-top: 0;
 }
-.project-list-label {
+.history-list button.project-list-label {
   align-items: center;
-  border: 0;
   background: transparent;
+  border: 0;
   color: var(--text-3);
+  column-gap: 6px;
   cursor: pointer;
-  display: flex;
-  font-size: 13px;
-  font-weight: 500;
-  gap: 0;
-  letter-spacing: 0;
+  display: flex !important;
+  font-size: 10.5px;
+  font-weight: 600;
+  gap: 6px;
+  grid-template-columns: none;
+  justify-content: flex-start;
+  letter-spacing: 0.06em;
   line-height: 1.2;
   min-height: 0;
-  padding: 6px 10px 2px 18px;
-  position: static;
+  padding: 9px 10px 4px;
   text-align: left;
-  text-transform: none;
+  text-transform: uppercase;
   width: 100%;
 }
-.history-list .project-list-label {
-  display: flex !important;
-  justify-content: flex-start;
-  min-height: 0;
-}
-.project-list-label svg {
+.history-list button.project-list-label svg {
   color: var(--text-4);
   display: block;
   flex: 0 0 auto;
 }
-.project-list-label:hover {
-  color: var(--text-3);
+.history-list button.project-list-label:hover {
+  background: transparent;
+  color: var(--text-2);
+}
+.project-list-count,
+.project-count {
+  color: var(--text-4);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1;
+  margin-left: auto;
+  text-transform: none;
+}
+.history-list button.project-list-label .project-list-count {
+  margin-left: auto;
+}
+.history-list button.project-list-label .chev {
+  margin-left: 0;
 }
 #project-list-content {
-  margin-top: -1px;
+  margin-top: 0;
 }
-.history-section-head.project-section-head {
+.history-list button.project-section-head {
   align-items: center;
-  display: flex;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  color: var(--text-2);
+  column-gap: 6px;
+  cursor: pointer;
+  display: flex !important;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  gap: 6px;
   grid-template-columns: none;
   justify-content: flex-start;
-  gap: 7px;
-  min-height: 34px;
-  padding: 3px 10px 3px 18px;
-  position: relative;
-  font-family: inherit;
-  font-size: 15px;
-  font-weight: 400;
   letter-spacing: 0;
   line-height: 1.25;
-  text-transform: none;
-  color: var(--text-2);
+  min-height: 28px;
+  padding: 2px 8px 2px 6px;
+  position: relative;
   text-align: left;
+  text-transform: none;
   width: 100%;
 }
+.history-list button.project-section-head:hover {
+  background: color-mix(in srgb, var(--text-1) 6%, transparent);
+  color: var(--text-1);
+}
+.history-list button.project-section-head.current {
+  color: var(--text-1);
+}
 .project-section-head svg {
-  color: var(--text-2);
+  color: var(--text-3);
   flex: 0 0 auto;
 }
-.project-section-head > span:last-child {
+.history-list button.project-section-head:hover svg,
+.history-list button.project-section-head.current svg {
+  color: var(--text-2);
+}
+.project-section-head > .project-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6151,26 +6183,31 @@ body.subagent-drawer-resizing * {
 .project-section-head > .history-activity-slot {
   align-items: center;
   display: inline-flex;
-  flex: 0 0 5px;
-  height: 5px;
+  flex: 0 0 8px;
+  height: 8px;
   justify-content: center;
   overflow: visible;
-  position: absolute;
-  left: 5px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 5px;
+  position: static;
+  transform: none;
+  width: 8px;
 }
 .project-section-head > .history-activity-slot .history-activity-dot {
   transform: none;
 }
 .project-folder-icon {
-  color: var(--text-2);
-  height: 16px;
-  width: 16px;
+  color: var(--text-3);
+  height: 14px;
+  width: 14px;
+}
+.project-chev {
+  color: var(--text-4);
+  transition: transform 120ms ease;
+}
+.project-chev.open {
+  transform: rotate(90deg);
 }
 .project-history-group .history-row {
-  padding-left: 44px;
+  padding-left: 42px;
 }
 .project-history-group .history-row strong {
   font-size: 12px;

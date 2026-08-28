@@ -116,6 +116,7 @@ function Harness({ workingSessionIds }: { workingSessionIds?: ReadonlySet<string
         setSidebarCollapsed={setSidebarCollapsed}
         mode="coding"
         switchMode={() => {}}
+        codingCwd={codingCwd}
       />
     </>
   );
@@ -191,6 +192,11 @@ describe('Sidebar conversations list', () => {
       within(project as HTMLElement).queryByText('fix the login flake'),
     ).not.toBeInTheDocument();
     expect(screen.getByText('b').closest('.project-history-group')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Projects' }).querySelector('.project-list-count'))
+      .toHaveTextContent('2');
+    expect(within(project as HTMLElement).getByText('1')).toHaveClass('project-count');
+    expect(screen.getByRole('button', { name: 'a' })).toHaveClass('current');
+    expect(screen.getByRole('button', { name: 'b' })).not.toHaveClass('current');
   });
 
   it('collapses and reopens the whole project bar', async () => {

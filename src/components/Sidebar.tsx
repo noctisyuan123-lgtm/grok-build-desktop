@@ -9,6 +9,7 @@ import {
   BookmarkPlus,
   Blocks,
   ChevronDown,
+  ChevronRight,
   PanelLeftClose,
   PanelLeftOpen,
   ClipboardCheck,
@@ -16,6 +17,7 @@ import {
   CornerUpLeft,
   FolderInput,
   Folder,
+  FolderOpen,
   FolderPlus,
   History,
   Loader2,
@@ -65,6 +67,8 @@ export interface SidebarProps {
   /** Active interaction mode; the Chat/Code segment lives in the brand block. */
   mode: Mode;
   switchMode: (mode: Mode) => void;
+  /** Current workspace path; used to tint the matching project folder. */
+  codingCwd?: string;
 }
 
 export function Sidebar({
@@ -90,6 +94,7 @@ export function Sidebar({
   setSidebarCollapsed,
   mode,
   switchMode,
+  codingCwd = '',
 }: SidebarProps) {
   const {
     pinnedPromptIds,
@@ -127,8 +132,12 @@ export function Sidebar({
     setCollapsedProjects((current) => new Set([...current, ...newPaths]));
   }, [historyView.projectGroups]);
 
+  function normalizePath(path: string): string {
+    return path.replace(/\/+$/, '');
+  }
+
   function projectName(path: string): string {
-    const trimmed = path.replace(/\/+$/, '');
+    const trimmed = normalizePath(path);
     return trimmed.split('/').filter(Boolean).pop() ?? path;
   }
 
@@ -449,23 +458,34 @@ export function Sidebar({
                   <div className="project-list">
                     <button
                       type="button"
-                      className="project-list-label"
+                      className="history-section-head toggle project-list-label"
                       aria-controls="project-list-content"
                       aria-expanded={!projectsCollapsed}
                       onClick={toggleProjects}
                     >
-                      <span>Projects</span>
+                      <span>{t('sidebar.projects')}</span>
+                      <span className="project-list-count" aria-hidden="true">
+                        {historyView.projectGroups.length}
+                      </span>
+                      <ChevronDown
+                        size={13}
+                        className={`chev${projectsCollapsed ? '' : ' open'}`}
+                      />
                     </button>
                     {!projectsCollapsed ? (
                       <div id="project-list-content">
                         {historyView.projectGroups.map(([path, rows]) => {
                           const collapsed = collapsedProjects.has(path);
                           const projectWorking = rows.some((row) => workingSessionIds?.has(row.id));
+                          const current =
+                            codingCwd.length > 0 &&
+                            normalizePath(path) === normalizePath(codingCwd);
+                          const FolderIcon = collapsed ? Folder : FolderOpen;
                           return (
                             <div className="history-group project-history-group" key={`hp-${path}`}>
                               <button
                                 type="button"
-                                className="history-section-head project-section-head"
+                                className={`history-section-head project-section-head${current ? ' current' : ''}`}
                                 title={path}
                                 aria-expanded={!collapsed}
                                 onClick={() => toggleProject(path)}
@@ -475,12 +495,20 @@ export function Sidebar({
                                     <span className="history-activity-dot" />
                                   ) : null}
                                 </span>
-                                <Folder
-                                  size={18}
+                                <ChevronRight
+                                  size={12}
+                                  className={`project-chev${collapsed ? '' : ' open'}`}
+                                  aria-hidden="true"
+                                />
+                                <FolderIcon
+                                  size={14}
                                   className="project-folder-icon"
                                   aria-hidden="true"
                                 />
-                                <span>{projectName(path)}</span>
+                                <span className="project-name">{projectName(path)}</span>
+                                <span className="project-count" aria-hidden="true">
+                                  {rows.length}
+                                </span>
                               </button>
                               {!collapsed ? rows.map(renderHistoryRow) : null}
                             </div>
