@@ -1,6 +1,8 @@
 // Adapter that maps App-level state (model config, session, panels) onto
 // SettingsPage's option-list props. Extracted from App.tsx unchanged.
-import { SettingsPage, type SettingsSection } from './SettingsPage';
+import { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { SettingsPage, type SettingsSection, type CliUsage } from './SettingsPage';
 import packageJson from '../../package.json';
 import type { useModelConfig } from '../hooks/useModelConfig';
 import type {
@@ -71,6 +73,43 @@ export function SettingsHost({
     selectedModelValue,
     modelOptions,
   } = modelConfig;
+  const [cliUsage, setCliUsage] = useState<CliUsage | null>(null);
+  const [cliUsageLoading, setCliUsageLoading] = useState(false);
+  const [usageNonce, setUsageNonce] = useState(0);
+
+  useEffect(() => {
+    if (!open || section !== 'usage') return;
+    let cancelled = false;
+    setCliUsageLoading(true);
+    void invoke<CliUsage>('get_cli_usage')
+      .then((usage) => {
+        if (!cancelled) setCliUsage(usage);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setCliUsage({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+            creditUsagePercent: null,
+            periodType: null,
+            periodStart: null,
+            periodEnd: null,
+            onDemandCap: null,
+            onDemandUsed: null,
+            prepaidBalance: null,
+            unifiedBilling: false,
+            subscriptionTier: null,
+          });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCliUsageLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, section, usageNonce]);
+
   return (
     <SettingsPage
       open={open}
@@ -123,6 +162,9 @@ export function SettingsHost({
       setWebSearchEnabled={setWebSearchEnabled}
       appVersion={packageJson.version}
       grokVersionLine={grokVersionLine}
+      cliUsage={cliUsage}
+      cliUsageLoading={cliUsageLoading}
+      onRefreshUsage={() => setUsageNonce((n) => n + 1)}
     />
   );
 }

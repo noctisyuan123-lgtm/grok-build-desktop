@@ -34,17 +34,27 @@ pub mod runs;
 use crate::runs::db::{Db, RunState};
 use crate::runs::queue::{QueueMessage, QueueMessageKind, RunQueue};
 #[cfg(target_os = "macos")]
+use block2::{Block, RcBlock};
+#[cfg(target_os = "macos")]
+use objc2::define_class;
+#[cfg(target_os = "macos")]
 use objc2::MainThreadMarker;
 #[cfg(target_os = "macos")]
 use objc2::msg_send;
 #[cfg(target_os = "macos")]
 use objc2::rc::Retained;
 #[cfg(target_os = "macos")]
-use objc2::runtime::{AnyClass, AnyObject};
+use objc2::runtime::{AnyClass, AnyObject, NSObject};
+#[cfg(target_os = "macos")]
+use objc2::ClassType;
 #[cfg(target_os = "macos")]
 use objc2_app_kit::{NSModalResponseOK, NSOpenPanel};
 #[cfg(target_os = "macos")]
 use objc2_foundation::NSString;
+
+#[cfg(target_os = "macos")]
+#[link(name = "UserNotifications", kind = "framework")]
+extern "C" {}
 use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
@@ -4074,66 +4084,151 @@ fn forward_queue_message(app: &tauri::AppHandle, msg: &QueueMessage) {
     }
 }
 
-/// Native Notification Center banner — the same mechanism Claude Code and
-/// Codex use (`osascript` / `NSUserNotification`). Those banners are drawn by
-/// the system, so they appear over other apps' maximized windows. A custom
-/// NSWindow overlay cannot do that without becoming an NSPanel, and swapping
-/// Tao's window class crashes the event loop.
-#[cfg(target_os = "macos")]
+/// Notification Center when Grok is not frontmost. A custom NSWindow cannot
+/// appear over another app's fullscreen space.
 fn post_system_completion_notification() {
-    if post_ns_user_notification() {
-        return;
-    }
-    if std::process::Command::new("terminal-notifier")
-        .args([
-            "-title",
-            "Grok Build Desktop",
-            "-message",
-            "A response has finished.",
-            "-activate",
-            "com.grok.desktop",
-        ])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .is_ok()
+    #[cfg(target_os = "macos")]
     {
-        return;
+        install_notification_delegate();
+        if post_un_user_notification() {
+            return;
+        }
+        let _ = std::process::Command::new("osascript")
+            .args([
+                "-e",
+                "display notification \"A response has finished.\" with title \"Grok Build Desktop\"",
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
     }
-    let _ = std::process::Command::new("osascript")
-        .args([
-            "-e",
-            "display notification \"A response has finished.\" with title \"Grok Build Desktop\"",
-        ])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn();
 }
 
 #[cfg(target_os = "macos")]
-fn post_ns_user_notification() -> bool {
-    let Some(notif_cls) = AnyClass::get(c"NSUserNotification") else {
+define_class!(
+    #[unsafe(super(NSObject))]
+    #[name = "GrokCompletionUNDelegate"]
+    struct CompletionUNDelegate;
+
+    impl CompletionUNDelegate {
+        // Banner | List | Sound. Without this, a still-active Grok process
+        // gets UNNotificationPresentationOptionNone and the banner is silent.
+        #[unsafe(method(userNotificationCenter:willPresentNotification:withCompletionHandler:))]
+        unsafe fn will_present(
+            &self,
+            _center: Option<&AnyObject>,
+            _notification: Option<&AnyObject>,
+            completion: Option<&Block<dyn Fn(usize)>>,
+        ) {
+            if let Some(completion) = completion {
+                // Banner + List only. Sound is the in-app completion chime.
+                completion.call(((1 << 4) | (1 << 3),));
+            }
+        }
+
+        #[unsafe(method(userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:))]
+        unsafe fn did_receive(
+            &self,
+            _center: Option<&AnyObject>,
+            _response: Option<&AnyObject>,
+            completion: Option<&Block<dyn Fn()>>,
+        ) {
+            if let Some(completion) = completion {
+                completion.call(());
+            }
+        }
+    }
+);
+
+#[cfg(target_os = "macos")]
+static UN_DELEGATE: OnceLock<Retained<CompletionUNDelegate>> = OnceLock::new();
+
+#[cfg(target_os = "macos")]
+fn install_notification_delegate() {
+    let Some(cls) = AnyClass::get(c"UNUserNotificationCenter") else {
+        return;
+    };
+    let delegate = UN_DELEGATE.get_or_init(|| unsafe { msg_send![CompletionUNDelegate::class(), new] });
+    unsafe {
+        let center: Retained<AnyObject> = msg_send![cls, currentNotificationCenter];
+        let _: () = msg_send![&*center, setDelegate: &**delegate];
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn request_notification_permission() {
+    install_notification_delegate();
+    let Some(cls) = AnyClass::get(c"UNUserNotificationCenter") else {
+        return;
+    };
+    unsafe {
+        let center: Retained<AnyObject> = msg_send![cls, currentNotificationCenter];
+        let handler = RcBlock::new(|_granted: objc2::runtime::Bool, _error: *mut AnyObject| {});
+        let options: usize = (1 << 2) | (1 << 1);
+        let _: () = msg_send![
+            &*center,
+            requestAuthorizationWithOptions: options,
+            completionHandler: &*handler
+        ];
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn post_un_user_notification() -> bool {
+    let Some(center_cls) = AnyClass::get(c"UNUserNotificationCenter") else {
         return false;
     };
-    let Some(center_cls) = AnyClass::get(c"NSUserNotificationCenter") else {
+    let Some(content_cls) = AnyClass::get(c"UNMutableNotificationContent") else {
         return false;
     };
+    let Some(request_cls) = AnyClass::get(c"UNNotificationRequest") else {
+        return false;
+    };
+    install_notification_delegate();
     let title = NSString::from_str("Grok Build Desktop");
     let body = NSString::from_str("A response has finished.");
+    let ident = NSString::from_str(&format!(
+        "grok-complete-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
+    ));
     unsafe {
-        let notification: Retained<AnyObject> = msg_send![notif_cls, new];
-        let _: () = msg_send![&*notification, setTitle: &*title];
-        let _: () = msg_send![&*notification, setInformativeText: &*body];
-        let center: Retained<AnyObject> = msg_send![center_cls, defaultUserNotificationCenter];
-        let _: () = msg_send![&*center, deliverNotification: &*notification];
+        let center: Retained<AnyObject> = msg_send![center_cls, currentNotificationCenter];
+        let content: Retained<AnyObject> = msg_send![content_cls, new];
+        let _: () = msg_send![&*content, setTitle: &*title];
+        let _: () = msg_send![&*content, setBody: &*body];
+        let request: Retained<AnyObject> = msg_send![
+            request_cls,
+            requestWithIdentifier: &*ident,
+            content: &*content,
+            trigger: std::ptr::null::<AnyObject>()
+        ];
+        let handler = RcBlock::new(|_error: *mut AnyObject| {});
+        let _: () = msg_send![
+            &*center,
+            addNotificationRequest: &*request,
+            withCompletionHandler: &*handler
+        ];
     }
     true
 }
 
-#[cfg(not(target_os = "macos"))]
-fn post_system_completion_notification() {}
+#[tauri::command]
+async fn get_cli_usage() -> crate::runs::billing::CliUsage {
+    let program = env::var("GROK_DESKTOP_GROK_CMD").unwrap_or_else(|_| default_grok_binary());
+    let path = command_path();
+    match tauri::async_runtime::spawn_blocking(move || {
+        crate::runs::billing::fetch_cli_billing(&program, &path)
+    })
+    .await
+    {
+        Ok(usage) => usage,
+        Err(error) => crate::runs::billing::CliUsage::fail(error.to_string()),
+    }
+}
 
 async fn maybe_alert_background_completion(app: tauri::AppHandle, run_id: String) {
     if let Some(main) = app.get_webview_window("main") {
@@ -4300,6 +4395,8 @@ pub fn run() {
             if let Err(error) = ensure_desktop_handoff_skill() {
                 eprintln!("[grok-desktop] refresh /desktop handoff skipped: {error}");
             }
+            #[cfg(target_os = "macos")]
+            request_notification_permission();
             let app_handle = app.handle().clone();
             let resource_dir = app
                 .path()
@@ -4555,7 +4652,8 @@ pub fn run() {
             desktop::desktop_query,
             desktop::desktop_activate,
             show_completion_popup,
-            open_completion_session
+            open_completion_session,
+            get_cli_usage
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

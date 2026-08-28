@@ -1,3 +1,4 @@
+pub mod billing;
 pub mod core;
 pub mod db;
 pub mod event;

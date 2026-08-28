@@ -55,6 +55,21 @@ function makeProps(overrides: Partial<SettingsPageProps> = {}): SettingsPageProp
     setWebSearchEnabled: vi.fn(),
     appVersion: '0.4.0',
     grokVersionLine: 'Grok CLI 1.0',
+    cliUsage: {
+      ok: true,
+      error: null,
+      creditUsagePercent: 66,
+      periodType: 'weekly',
+      periodStart: '2026-08-25T09:58:55.164008+00:00',
+      periodEnd: '2026-09-01T09:58:55.164008+00:00',
+      onDemandCap: 0,
+      onDemandUsed: 0,
+      prepaidBalance: 0,
+      unifiedBilling: true,
+      subscriptionTier: 'SuperGrok',
+    },
+    cliUsageLoading: false,
+    onRefreshUsage: vi.fn(),
     ...overrides,
   };
 }
@@ -88,7 +103,7 @@ describe('SettingsPage', () => {
 
     // First focusable is the "General" nav item; last is the completion sound toggle.
     const first = screen.getByRole('button', { name: 'General' });
-    const last = screen.getByRole('switch', { name: 'Background completion sound' });
+    const last = screen.getByRole('switch', { name: 'Background completion alerts' });
 
     first.focus();
     await user.tab({ shift: true }); // wrap: first → last
@@ -107,7 +122,7 @@ describe('SettingsPage', () => {
     expect(props.setDockPosition).toHaveBeenCalledWith('bottom');
     await user.click(screen.getByRole('switch', { name: 'Collapse sidebar' }));
     expect(props.setSidebarCollapsed).toHaveBeenCalledWith(true);
-    await user.click(screen.getByRole('switch', { name: 'Background completion sound' }));
+    await user.click(screen.getByRole('switch', { name: 'Background completion alerts' }));
     expect(props.setCompletionSoundEnabled).toHaveBeenCalledWith(false);
   });
 
@@ -154,5 +169,24 @@ describe('SettingsPage', () => {
     expect(screen.getByText('v0.4.0')).toBeInTheDocument();
     expect(screen.getByText('Grok CLI 1.0')).toBeInTheDocument();
     expect(document.querySelector('.set-about-mark')).toHaveAttribute('src');
+  });
+
+  it('about: does not show CLI usage', () => {
+    render(<SettingsPage {...makeProps({ section: 'about' })} />);
+    expect(screen.queryByText('SuperGrok')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Refresh' })).not.toBeInTheDocument();
+  });
+
+  it('usage: shows a credit ring, period, and refresh', async () => {
+    const user = userEvent.setup();
+    const props = makeProps({ section: 'usage' });
+    render(<SettingsPage {...props} />);
+    expect(screen.getByRole('heading', { name: 'Usage' })).toBeInTheDocument();
+    expect(screen.getByText('SuperGrok')).toBeInTheDocument();
+    expect(screen.getByText('Weekly allowance')).toBeInTheDocument();
+    expect(screen.getByText('66% used')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /66% of Weekly allowance credits used/ })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(props.onRefreshUsage).toHaveBeenCalledTimes(1);
   });
 });

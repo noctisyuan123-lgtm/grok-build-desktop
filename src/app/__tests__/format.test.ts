@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { ToolRun } from '../../lib/grok';
 import {
   formatOutput,
+  formatRunDuration,
+  formatUsdAmount,
+  formatUsageReset,
   grokInspectCount,
   grokInspectLine,
   grokInspectSection,
@@ -38,6 +41,30 @@ describe('makeId', () => {
     const b = makeId('u');
     expect(a.startsWith('u-')).toBe(true);
     expect(a).not.toBe(b);
+  });
+});
+
+describe('formatRunDuration', () => {
+  it('formats minutes and hours without padding noise', () => {
+    expect(formatRunDuration(12_000)).toBe('under 1 min');
+    expect(formatRunDuration(47 * 60_000)).toBe('47 min');
+    expect(formatRunDuration(3 * 60 * 60_000)).toBe('3h');
+    expect(formatRunDuration(3 * 60 * 60_000 + 12 * 60_000)).toBe('3h 12m');
+  });
+});
+
+describe('formatUsdAmount', () => {
+  it('renders whole dollars without cents noise', () => {
+    expect(formatUsdAmount(0)).toBe('$0');
+    expect(formatUsdAmount(12.5)).toBe('$12.50');
+    expect(formatUsdAmount(null)).toBe('—');
+  });
+});
+
+describe('formatUsageReset', () => {
+  it('returns empty for missing timestamps and keeps unparsable strings', () => {
+    expect(formatUsageReset(undefined)).toBe('');
+    expect(formatUsageReset('not-a-date')).toBe('not-a-date');
   });
 });
 

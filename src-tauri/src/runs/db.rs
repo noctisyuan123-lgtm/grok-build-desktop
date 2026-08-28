@@ -34,6 +34,16 @@ impl RunState {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WeeklyUsage {
+    pub completed: i64,
+    pub failed: i64,
+    pub cancelled: i64,
+    pub duration_ms: i64,
+    pub since: i64,
+}
+
 #[derive(Debug, Clone)]
 pub struct RunRecord {
     pub id: String,
@@ -234,6 +244,39 @@ impl Db {
             .bind(state.as_str())
             .fetch_all(&self.pool).await?;
         Ok(rows.into_iter().map(run_record).collect())
+    }
+
+    /// Counts finished runs in the trailing window, plus summed run duration.
+    pub async fn weekly_usage(&self, window_ms: i64) -> Result<WeeklyUsage, sqlx::Error> {
+        let since = chrono::Utc::now().timestamp_millis() - window_ms;
+        let rows: Vec<(String, i64, i64)> = sqlx::query_as(
+            "SELECT state, COUNT(*), COALESCE(SUM(CASE
+                WHEN started_at IS NOT NULL AND ended_at IS NOT NULL AND ended_at >= started_at
+                THEN ended_at - started_at ELSE 0 END), 0)
+             FROM runs
+             WHERE COALESCE(ended_at, enqueued_at) >= ?
+             GROUP BY state",
+        )
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut usage = WeeklyUsage {
+            completed: 0,
+            failed: 0,
+            cancelled: 0,
+            duration_ms: 0,
+            since,
+        };
+        for (state, count, duration_ms) in rows {
+            usage.duration_ms += duration_ms;
+            match state.as_str() {
+                "Done" => usage.completed = count,
+                "Failed" => usage.failed = count,
+                "Cancelled" => usage.cancelled = count,
+                _ => {}
+            }
+        }
+        Ok(usage)
     }
 
     /// Delete finished runs older than `retention_ms`. Returns count deleted.

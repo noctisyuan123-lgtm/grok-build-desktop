@@ -96,3 +96,64 @@ async fn vacuum_drops_old_finished_runs() {
     assert!(db.fetch_run("old").await.unwrap().is_none());
     assert!(db.fetch_run("new").await.unwrap().is_some());
 }
+
+#[tokio::test]
+async fn weekly_usage_counts_recent_finished_runs() {
+    let db = Db::open_memory().await.unwrap();
+    let now = Utc::now().timestamp_millis();
+    let week_ms = 7 * 24 * 60 * 60 * 1000;
+    db.insert_run(&RunRecord {
+        id: "done".into(),
+        prompt: "p".into(),
+        cwd: "/tmp".into(),
+        args_json: "[]".into(),
+        state: RunState::Done,
+        enqueued_at: now - 60_000,
+        started_at: Some(now - 60_000),
+        ended_at: Some(now - 10_000),
+        stop_reason: Some("EndTurn".into()),
+        error: None,
+        lane_id: String::new(),
+        parent_run_id: None,
+    })
+    .await
+    .unwrap();
+    db.insert_run(&RunRecord {
+        id: "fail".into(),
+        prompt: "p".into(),
+        cwd: "/tmp".into(),
+        args_json: "[]".into(),
+        state: RunState::Failed,
+        enqueued_at: now - 30_000,
+        started_at: Some(now - 30_000),
+        ended_at: Some(now - 20_000),
+        stop_reason: None,
+        error: Some("boom".into()),
+        lane_id: String::new(),
+        parent_run_id: None,
+    })
+    .await
+    .unwrap();
+    db.insert_run(&RunRecord {
+        id: "old".into(),
+        prompt: "p".into(),
+        cwd: "/tmp".into(),
+        args_json: "[]".into(),
+        state: RunState::Done,
+        enqueued_at: now - week_ms - 5_000,
+        started_at: Some(now - week_ms - 5_000),
+        ended_at: Some(now - week_ms - 4_000),
+        stop_reason: Some("EndTurn".into()),
+        error: None,
+        lane_id: String::new(),
+        parent_run_id: None,
+    })
+    .await
+    .unwrap();
+
+    let usage = db.weekly_usage(week_ms).await.unwrap();
+    assert_eq!(usage.completed, 1);
+    assert_eq!(usage.failed, 1);
+    assert_eq!(usage.cancelled, 0);
+    assert_eq!(usage.duration_ms, 50_000 + 10_000);
+}

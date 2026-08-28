@@ -113,9 +113,9 @@ rootCache.main = root;
 
 const showActivityPreview =
   import.meta.env.DEV && new URLSearchParams(window.location.search).has('activity-preview');
-const showCompletionPopupWindow = hasTauriRuntime()
-  ? getCurrentWebviewWindow().label === 'completion-alert'
-  : new URLSearchParams(window.location.search).has('completion-popup');
+const showCompletionPopupWindow =
+  new URLSearchParams(window.location.search).has('completion-popup') ||
+  (hasTauriRuntime() && getCurrentWebviewWindow().label === 'completion-alert');
 
 if (showCompletionPopupWindow) document.body.dataset.completionPopup = 'true';
 

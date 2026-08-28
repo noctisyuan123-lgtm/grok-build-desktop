@@ -116,6 +116,7 @@ export const en = {
   'settings.nav.general': 'General',
   'settings.nav.model': 'Model & reasoning',
   'settings.nav.permissions': 'Tool permissions',
+  'settings.nav.usage': 'Usage',
   'settings.nav.about': 'About',
   'settings.appearance': 'Appearance',
   'settings.appearanceHint': 'Light uses a warm parchment palette; dark is graphite.',
@@ -151,6 +152,25 @@ export const en = {
   'settings.aboutVersion': 'v{version}',
   'settings.aboutBlurb':
     'A premium desktop client for the Grok Build CLI — non-blocking streaming, multi-session tabs, and a prompt library.',
+  'settings.usageHint':
+    'Credit usage from the signed-in Grok CLI (`/usage`). Loaded when you open this page.',
+  'settings.usageRefresh': 'Refresh',
+  'settings.usageLoading': 'Asking the Grok CLI…',
+  'settings.usageError': "Couldn't load usage from the Grok CLI.",
+  'settings.usagePercent': '{percent} used',
+  'settings.usageRemaining': '{percent} remaining',
+  'settings.usageTier': '{tier}',
+  'settings.usagePeriodWeekly': 'Weekly allowance',
+  'settings.usagePeriodMonthly': 'Monthly allowance',
+  'settings.usagePeriodUnknown': 'Current period',
+  'settings.usageReset': 'Resets {when}',
+  'settings.usageOnDemand': 'Pay as you go',
+  'settings.usageOnDemandOff': 'Pay as you go is off',
+  'settings.usageOnDemandUsed': '{used} of {cap}',
+  'settings.usagePrepaid': 'Prepaid balance',
+  'settings.usageUsedSeg': 'Used',
+  'settings.usageFreeSeg': 'Remaining',
+  'settings.usageAria': '{percent} of {period} credits used',
 
   // ── Tools & Skills modal ──────────────────────────────────────────────────
   'tools.ariaLabel': 'Tools',

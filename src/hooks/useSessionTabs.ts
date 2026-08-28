@@ -243,15 +243,20 @@ export function useSessionTabs(deps: SessionTabsDeps) {
   // list of conversations — clicking one loads that conversation in full, the
   // way Claude / ChatGPT switch chats. `id` is a tab id.
   function switchToSession(id: string) {
+    const current = sessionStateRef.current;
     closePalette();
-    if (id === activeTabId) return;
-    const target = tabs.find((t) => t.id === id);
+    if (id === current.activeTabId) return;
+    const target = current.tabs.find((t) => t.id === id);
     if (!target) return;
     // Persist the current conversation back into its tab, then load the target.
-    setTabs((current) =>
-      current.map((t) =>
-        t.id === activeTabId
-          ? { ...t, cwd: codingCwd, messages: messages as unknown as TabMessage[] }
+    setTabs((existing) =>
+      existing.map((t) =>
+        t.id === current.activeTabId
+          ? {
+              ...t,
+              cwd: current.codingCwd,
+              messages: current.messages as unknown as TabMessage[],
+            }
           : t,
       ),
     );

@@ -6590,6 +6590,167 @@ button.history-section-head.toggle:hover {
   color: var(--text-2);
   line-height: 1.6;
 }
+.set-cli-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.set-cli-usage-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.set-cli-usage-hint {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.set-cli-refresh {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  background: var(--bg-3);
+  color: var(--text-1);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.set-cli-refresh:hover:not(:disabled) {
+  background: var(--bg-4);
+}
+.set-cli-refresh:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.set-cli-usage-hero {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+.set-credit-ring {
+  position: relative;
+  width: 92px;
+  height: 92px;
+  flex-shrink: 0;
+}
+.set-credit-svg {
+  display: block;
+}
+.set-credit-track {
+  stroke: var(--border-2);
+}
+.set-credit-progress {
+  stroke: var(--text-1);
+  transition:
+    stroke-dashoffset 280ms var(--ease-out),
+    stroke 180ms ease;
+}
+.set-credit-ring.tone-amber .set-credit-progress {
+  stroke: var(--warn);
+}
+.set-credit-ring.tone-orange .set-credit-progress {
+  stroke: #c4894a;
+}
+.set-credit-ring.tone-red .set-credit-progress {
+  stroke: var(--error);
+}
+.set-credit-ring.tone-empty .set-credit-progress,
+.set-credit-ring.tone-loading .set-credit-progress,
+.set-credit-ring.tone-error .set-credit-progress {
+  stroke: var(--border-strong);
+  opacity: 0.55;
+}
+.set-credit-ring.is-loading .set-credit-progress {
+  animation: context-usage-pulse 1.6s var(--ease-in-out) infinite;
+}
+.set-credit-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--text-1);
+}
+.set-cli-usage-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.set-cli-tier {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-1);
+}
+.set-cli-period,
+.set-cli-used {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.set-cli-remain,
+.set-cli-reset,
+.set-cli-extra,
+.set-cli-muted {
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.45;
+}
+.set-cli-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 99px;
+  overflow: hidden;
+  background: var(--bg-4);
+}
+.set-cli-bar-seg {
+  display: block;
+  height: 100%;
+}
+.set-cli-bar-seg.seg-used,
+.set-cli-swatch.seg-used {
+  background: var(--text-1);
+}
+.set-cli-bar-seg.seg-free,
+.set-cli-swatch.seg-free {
+  background: color-mix(in srgb, var(--text-3) 45%, transparent);
+}
+.set-cli-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.set-cli-legend > li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.set-cli-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 99px;
+  flex-shrink: 0;
+}
+.set-cli-legend-value {
+  margin-left: auto;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.app-shell.theme-light .set-cli-bar-seg.seg-used,
+.app-shell.theme-light .set-cli-swatch.seg-used {
+  background: var(--text-1);
+}
 
 /* ===== Tools / MCP hub ===== */
 .tools-modal {

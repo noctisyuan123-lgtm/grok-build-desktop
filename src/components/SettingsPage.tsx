@@ -2,11 +2,13 @@ import { useRef } from 'react';
 import { useModalFocus } from '../hooks/useModalFocus';
 import { t } from '../i18n';
 import appIcon from '../../src-tauri/icons/icon.png';
+import { UsageMeter, type CliUsage } from './UsageMeter';
 
 type ThemeMode = 'dark' | 'light';
 type DockPosition = 'right' | 'bottom';
 
-export type SettingsSection = 'general' | 'model' | 'permissions' | 'about';
+export type SettingsSection = 'general' | 'model' | 'permissions' | 'usage' | 'about';
+export type { CliUsage };
 
 interface Option {
   value: string;
@@ -61,12 +63,18 @@ export interface SettingsPageProps {
   // About
   appVersion: string;
   grokVersionLine: string;
+
+  // Usage (Grok CLI `/usage`)
+  cliUsage: CliUsage | null;
+  cliUsageLoading: boolean;
+  onRefreshUsage: () => void;
 }
 
 const NAV: { id: SettingsSection; label: string }[] = [
   { id: 'general', label: t('settings.nav.general') },
   { id: 'model', label: t('settings.nav.model') },
   { id: 'permissions', label: t('settings.nav.permissions') },
+  { id: 'usage', label: t('settings.nav.usage') },
   { id: 'about', label: t('settings.nav.about') },
 ];
 
@@ -325,6 +333,17 @@ export function SettingsPage(props: SettingsPageProps) {
                   label={t('settings.webSearch')}
                 />
               </Row>
+            </section>
+          ) : null}
+
+          {section === 'usage' ? (
+            <section className="settings-section">
+              <h2>{t('settings.nav.usage')}</h2>
+              <UsageMeter
+                usage={props.cliUsage}
+                loading={props.cliUsageLoading}
+                onRefresh={props.onRefreshUsage}
+              />
             </section>
           ) : null}
 

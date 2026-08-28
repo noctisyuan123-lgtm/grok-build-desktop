@@ -37,6 +37,7 @@ import { Toolbelt } from './components/Toolbelt';
 import { TitleBar } from './components/TitleBar';
 import { ComposerSection } from './components/ComposerSection';
 import { SettingsHost } from './components/SettingsHost';
+import type { SettingsSection } from './components/SettingsPage';
 import { UndoToast } from './components/UndoToast';
 import { useActiveRunKey } from './hooks/useActiveRun';
 import { useGrokRunners } from './hooks/useGrokRunners';
@@ -295,9 +296,7 @@ function App() {
   // Dedicated Settings page (Claude-Desktop-style modal). settingsSection
   // selects which left-nav panel is shown.
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<
-    'general' | 'model' | 'permissions' | 'about'
-  >('general');
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
   // Dedicated Tools / MCP hub (community-tool integration).
   const [toolsPageOpen, setToolsPageOpen] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);
@@ -361,7 +360,6 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!completionSoundEnabled) return;
     return streamStore.subscribeCompletions(({ runId }) => {
       const foreground = document.visibilityState === 'visible' && document.hasFocus();
       const { activeTabId, messages, tabs } = completionSessionRef.current;
@@ -373,12 +371,11 @@ function App() {
           ? activeTabId
           : tabs.find((tab) => tab.messages.some((message) => message.runId === runId))?.id);
       completionRunOwnerRef.current.delete(runId);
-      if (!foreground || otherSessionFinished) {
+      if (ownerTabId && foreground && otherSessionFinished) {
+        void showCompletionPopup(ownerTabId);
+      }
+      if (completionSoundEnabled && (!foreground || otherSessionFinished)) {
         playCompletionSound();
-        // Background alerts are posted from Rust (Notification Center), the
-        // same way Claude Code / Codex surface a finished turn. The in-app
-        // banner is only for a finished session while this window is focused.
-        if (ownerTabId && foreground) void showCompletionPopup(ownerTabId);
       }
     });
   }, [completionSoundEnabled]);

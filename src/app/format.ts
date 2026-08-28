@@ -74,6 +74,37 @@ export function timeLabel(ts: number) {
   }
 }
 
+/** Compact duration for settings usage: "47 min", "3h", "3h 12m". */
+export function formatRunDuration(ms: number): string {
+  const totalMin = Math.max(0, Math.round(ms / 60_000));
+  if (totalMin < 1) return 'under 1 min';
+  const hours = Math.floor(totalMin / 60);
+  const mins = totalMin % 60;
+  if (hours === 0) return `${totalMin} min`;
+  if (mins === 0) return `${hours}h`;
+  return `${hours}h ${mins}m`;
+}
+
+/** CLI `/usage` reset timestamp, e.g. "Sep 1, 5:58 PM". */
+export function formatUsageReset(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+/** Dollar amounts from grok billing `val` fields. */
+export function formatUsdAmount(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return '—';
+  if (Math.abs(n - Math.round(n)) < 1e-9) return `$${Math.round(n)}`;
+  return `$${n.toFixed(2)}`;
+}
+
 export function nativeUnavailable(command: string): ToolRun {
   return {
     ok: false,
