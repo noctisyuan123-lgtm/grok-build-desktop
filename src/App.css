@@ -3085,9 +3085,9 @@ body[data-completion-popup='true'] {
    bottom composer layout takes over without remounting a second input. */
 .conversation-panel.is-empty {
   justify-content: center;
-  /* Keep the empty-stage prompt slightly above the window's visual centre. */
-  padding-bottom: clamp(56px, 12vh, 120px);
-  padding-top: clamp(48px, 6vh, 72px);
+  /* Greeting + composer sit a little below the old visual centre (OpenCode). */
+  padding-bottom: clamp(28px, 6vh, 72px);
+  padding-top: clamp(20px, 4vh, 48px);
 }
 
 .conversation-panel.is-empty .conversation-scroll {
@@ -3121,22 +3121,72 @@ body[data-completion-popup='true'] {
 }
 
 .conversation-panel.is-empty .empty-state {
-  align-items: flex-start;
+  align-items: stretch;
+  container-type: inline-size;
   display: flex;
+  flex-direction: column;
   gap: 0;
   justify-content: flex-start;
   margin: 0 auto;
-  max-width: 640px;
+  max-width: 720px;
   min-height: 0;
   padding: 0 24px 8px;
   width: 100%;
+}
+
+.empty-greeting {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  margin: 0 0 clamp(20px, 3vh, 32px);
+  min-width: 0;
+  padding: 0 0 4px;
+  user-select: none;
+  width: 100%;
+}
+
+/* Closest live-type stand-in for OpenCode's WordmarkV2: huge, faint, fading
+   out at the foot. Their mark is a custom pixel SVG (inner window + 6–7%
+   fill); arbitrary greetings can't reuse that path, so this copies the
+   watermark register instead of a solid headline. */
+.empty-greeting-text {
+  color: color-mix(in srgb, var(--text-1) 26%, transparent);
+  font-family: 'Rubik Mono One', 'Geist Variable', ui-sans-serif, sans-serif;
+  font-size: clamp(34px, 4.6vw, 56px);
+  font-style: normal;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  line-height: 1.08;
+  margin: 0;
+  mask-image: linear-gradient(
+    to bottom,
+    #000 12%,
+    rgba(0, 0, 0, 0.78) 38%,
+    rgba(0, 0, 0, 0.28) 68%,
+    transparent 100%
+  );
+  overflow: hidden;
+  text-align: center;
+  text-overflow: clip;
+  white-space: nowrap;
+  width: 100%;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 12%,
+    rgba(0, 0, 0, 0.78) 38%,
+    rgba(0, 0, 0, 0.28) 68%,
+    transparent 100%
+  );
 }
 
 .new-session-context {
   align-items: center;
   display: flex;
   gap: 6px;
+  margin-inline: auto;
+  max-width: 640px;
   min-width: 0;
+  width: 100%;
 }
 
 .new-session-workspace {

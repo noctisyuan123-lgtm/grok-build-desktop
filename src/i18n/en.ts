@@ -262,6 +262,14 @@ export const en = {
   'emptyState.chooseWorkspace': 'Choose workspace',
   'emptyState.workspaceAria': 'Choose workspace folder',
   'emptyState.thisMac': 'This Mac',
+  'emptyState.greetingEarlyBird': 'Early bird',
+  'emptyState.greetingMorning': 'Good morning',
+  'emptyState.greetingAfternoon': 'Afternoon',
+  'emptyState.greetingEvening': 'Good evening',
+  'emptyState.greetingNightOwl': 'Night owl',
+  'emptyState.greetingFriday': 'Happy Friday',
+  'emptyState.greetingWeekend': 'Weekend',
+  'emptyState.greetingSunday': 'Lazy Sunday',
 
   // ── Status bar (Claude-Code-style) ────────────────────────────────────────
   'statusBar.thinking': 'thinking…',

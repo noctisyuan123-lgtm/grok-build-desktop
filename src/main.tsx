@@ -5,6 +5,7 @@ import ReactDOM from 'react-dom/client';
 // works offline and the CSP can drop remote style/font origins.
 import '@fontsource-variable/geist';
 import '@fontsource-variable/jetbrains-mono';
+import '@fontsource/rubik-mono-one';
 import 'katex/dist/katex.min.css';
 import App from './App';
 import { I18nProvider } from './i18n';
