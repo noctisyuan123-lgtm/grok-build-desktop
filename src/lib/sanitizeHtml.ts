@@ -16,5 +16,9 @@ export function sanitizeHtml(html: string): string {
   return DOMPurify.sanitize(html, {
     ADD_TAGS: ['semantics', 'annotation'],
     ADD_ATTR: ['encoding'],
+    // Default URI regexp omits file: so markdown links to local files would
+    // lose their href and clicks would do nothing.
+    ALLOWED_URI_REGEXP:
+      /^(?:(?:(?:f|ht)tps?|file|mailto|tel|callto|sms|cid|xmpp|matrix):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
   });
 }

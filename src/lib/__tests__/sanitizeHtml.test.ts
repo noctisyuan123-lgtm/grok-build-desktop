@@ -57,6 +57,16 @@ describe('sanitizeHtml', () => {
     expect(safe).toMatch(/<a[^>]+href="https:\/\/example\.com\/docs"/);
   });
 
+  it('keeps file:// and absolute filesystem links', () => {
+    const fromMarkdown = sanitizeHtml(
+      parse('[local](file:///Users/noctis/site/index.html)\n\n[abs](/Users/noctis/site/index.html)'),
+    );
+    const fromHtml = sanitizeHtml('<a href="file:///Users/noctis/site/index.html">local</a>');
+    expect(fromMarkdown).toMatch(/href="file:\/\/\/Users\/noctis\/site\/index\.html"/);
+    expect(fromMarkdown).toMatch(/href="\/Users\/noctis\/site\/index\.html"/);
+    expect(fromHtml).toMatch(/href="file:\/\/\/Users\/noctis\/site\/index\.html"/);
+  });
+
   it('keeps highlight.js code-block markup (classes and spans)', () => {
     const highlighted =
       '<pre class="code-block"><code class="hljs language-ts">' +

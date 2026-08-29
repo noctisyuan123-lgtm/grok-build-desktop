@@ -71,11 +71,12 @@ use std::{
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tauri::{Manager, PhysicalPosition, PhysicalSize, Position, Size, WindowEvent};
+use tauri::{Manager, PhysicalPosition, PhysicalSize, Position, Size, Url, WindowEvent};
 
 const WINDOW_STATE_FILE: &str = "window-state.json";
 const DEFAULT_WINDOW_WIDTH: u32 = 1120;
 const DEFAULT_WINDOW_HEIGHT: u32 = 780;
+const APP_DEV_SERVER_PORT: u16 = 1420;
 const MIN_WINDOW_WIDTH: u32 = 480;
 const MIN_WINDOW_HEIGHT: u32 = 600;
 const DESKTOP_HANDOFF_FILE: &str = "desktop-handoff.json";
@@ -4367,10 +4368,57 @@ fn open_completion_session(
     .map_err(|error| error.to_string())
 }
 
+/// Top-level webview navigations that would replace the React shell with an
+/// empty transparent window. Preview iframes use `grokpreview:`; everything
+/// else (remote sites, `file:`, generated `localhost:3000` servers) must stay
+/// out of this webview.
+fn is_allowed_app_navigation(url: &Url) -> bool {
+    match url.scheme() {
+        "tauri" | "asset" | "ipc" | "grokpreview" => true,
+        "http" | "https" => match url.host_str() {
+            Some("tauri.localhost" | "ipc.localhost" | "asset.localhost" | "grokpreview.localhost") => {
+                true
+            }
+            Some("localhost" | "127.0.0.1") => url.port() == Some(APP_DEV_SERVER_PORT),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn navigation_guard_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("navigation-guard")
+        .js_init_script(
+            r#"
+document.addEventListener('click', function (e) {
+  var t = e.target;
+  if (!t || !t.closest) return;
+  var a = t.closest('a[href], area[href]');
+  if (!a) return;
+  var href = a.getAttribute('href') || '';
+  if (!href || href.charAt(0) === '#') return;
+  e.preventDefault();
+}, true);
+document.addEventListener('auxclick', function (e) {
+  var t = e.target;
+  if (!t || !t.closest) return;
+  var a = t.closest('a[href], area[href]');
+  if (!a) return;
+  var href = a.getAttribute('href') || '';
+  if (!href || href.charAt(0) === '#') return;
+  e.preventDefault();
+}, true);
+"#,
+        )
+        .on_navigation(|_webview, url| is_allowed_app_navigation(url))
+        .build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(navigation_guard_plugin())
         .manage(PreviewState::default())
         .manage(TerminalState::default())
         .manage(CompletionPopupState::default())
@@ -4687,6 +4735,44 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse_url(raw: &str) -> Url {
+        raw.parse().expect("url")
+    }
+
+    #[test]
+    fn navigation_guard_keeps_the_app_shell_and_preview_iframe() {
+        for allowed in [
+            "http://localhost:1420/",
+            "http://localhost:1420/index.html",
+            "http://127.0.0.1:1420/",
+            "https://tauri.localhost/index.html",
+            "http://tauri.localhost/",
+            "http://ipc.localhost/",
+            "http://asset.localhost/grok-mark.svg",
+            "tauri://localhost/",
+            "grokpreview://localhost/index.html?token=abc",
+            "http://grokpreview.localhost/index.html",
+        ] {
+            assert!(
+                is_allowed_app_navigation(&parse_url(allowed)),
+                "should allow {allowed}"
+            );
+        }
+        for denied in [
+            "https://example.com/docs",
+            "http://localhost:3000/",
+            "http://127.0.0.1:5173/",
+            "file:///Users/noctis/index.html",
+            "about:blank",
+            "data:text/html,hi",
+        ] {
+            assert!(
+                !is_allowed_app_navigation(&parse_url(denied)),
+                "should deny {denied}"
+            );
+        }
+    }
 
     #[test]
     fn cli_process_metadata_is_strict_and_session_scoped() {

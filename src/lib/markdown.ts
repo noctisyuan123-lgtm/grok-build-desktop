@@ -43,6 +43,10 @@ const defaultFence = markdown.renderer.rules.fence!;
 markdown.renderer.rules.fence = (...args) =>
   defaultFence(...args).replace('</pre>', `${vscodeCopyButtonHtml()}</pre>`);
 
+const defaultValidateLink = markdown.validateLink.bind(markdown);
+markdown.validateLink = (url) =>
+  url.trim().toLowerCase().startsWith('file:') || defaultValidateLink(url);
+
 export function renderMarkdown(source: string): string {
   return markdown.render(normalizeMathDelimiters(source));
 }

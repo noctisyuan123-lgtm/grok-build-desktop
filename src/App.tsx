@@ -9,10 +9,11 @@ import {
 } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { openPath, openUrl } from '@tauri-apps/plugin-opener';
 import { Globe2, PanelRight, TerminalSquare } from 'lucide-react';
 import './App.css';
 import { cancelRun, ensureStreamListenersAttached, prewarmRun } from './lib/grok';
+import { onDocumentLinkClick } from './lib/externalLinks';
 import { hasTauriRuntime } from './lib/runtime';
 import { streamStore } from './lib/streamStore';
 import { playCompletionSound, primeCompletionSound } from './lib/completionSound';
@@ -1236,25 +1237,26 @@ function App() {
 
   // Open external links in the system browser. Assistant markdown renders raw
   // <a href> tags; in a Tauri webview a plain click would navigate the app
-  // window itself to the remote site, replacing the whole UI with no way back.
-  // Delegate at document level (capture) so every injected anchor is covered.
+  // window itself, replacing the whole UI with the transparent material and
+  // no way back. Capture-phase on click + middle-click so every injected
+  // anchor is covered, including file:// and relative paths the old https-only
+  // filter missed.
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
-      const target = e.target instanceof Element ? e.target : null;
-      const anchor = target?.closest('a[href]');
-      if (!anchor) return;
-      const href = anchor.getAttribute('href') ?? '';
-      if (!/^https?:\/\//i.test(href)) return;
-      e.preventDefault();
-      if (hasTauriRuntime()) {
-        void openUrl(href).catch(() => {});
-      } else {
-        window.open(href, '_blank', 'noopener');
-      }
+      onDocumentLinkClick(e, {
+        hasTauri: hasTauriRuntime(),
+        cwd: codingCwd,
+        openUrl,
+        openPath,
+      });
     };
     document.addEventListener('click', onClick, true);
-    return () => document.removeEventListener('click', onClick, true);
-  }, []);
+    document.addEventListener('auxclick', onClick, true);
+    return () => {
+      document.removeEventListener('click', onClick, true);
+      document.removeEventListener('auxclick', onClick, true);
+    };
+  }, [codingCwd]);
 
   // Persist sidebar-collapsed state so ⌘B is sticky across reloads.
   useEffect(() => {
