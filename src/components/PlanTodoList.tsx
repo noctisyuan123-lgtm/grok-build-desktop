@@ -1,19 +1,19 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Check } from 'lucide-react';
 import { extractPlanEntries, type PlanEntry } from '../lib/traceParser';
+import { useRunSnapshot } from '../hooks/useRunSnapshot';
+import { t } from '../i18n';
 
 /**
- * Sparse plan checklist for one assistant run. Renders at the bottom of that
- * response (session-scoped message data) — not as a live-only composer dock.
- *
- * Visual language matches rendered markdown task lists: disabled checkboxes
- * (same convention as `@mdit/plugin-tasklist`) with completed strike-through
- * and a subtle active state for in-progress — never raw `- [ ]` source syntax.
- * Returns null when there are no entries (occupies no layout space).
+ * Sparse plan checklist. Marks are dots / a check — never markdown task-list
+ * squares, which read as model output. The list itself has no chrome; the
+ * floating window around it is {@link PlanFloat}.
  */
 export function PlanTodoList({ entries }: { entries: readonly PlanEntry[] }) {
   if (!entries.length) return null;
 
   return (
-    <ul className="plan-todo-list task-list-container" aria-label="Plan">
+    <ul className="plan-todo-list" aria-label={t('plan.aria')}>
       {entries.map((entry, index) => {
         const statusClass =
           entry.status === 'in_progress'
@@ -21,28 +21,78 @@ export function PlanTodoList({ entries }: { entries: readonly PlanEntry[] }) {
             : entry.status === 'completed'
               ? 'is-completed'
               : 'is-pending';
-        const checked = entry.status === 'completed';
         return (
           <li
             key={`${index}:${entry.text}`}
-            className={`plan-todo-item task-list-item ${statusClass}`}
+            className={`plan-todo-item ${statusClass}`}
+            aria-current={entry.status === 'in_progress' ? 'step' : undefined}
           >
-            <input
-              type="checkbox"
-              className="task-list-item-checkbox plan-todo-checkbox"
-              checked={checked}
-              disabled
-              tabIndex={-1}
-              aria-hidden="true"
-              onChange={() => {
-                /* read-only status indicator */
-              }}
-            />
+            <span className="plan-todo-mark" aria-hidden="true">
+              {entry.status === 'completed' ? (
+                <Check size={12} strokeWidth={2.25} />
+              ) : entry.status === 'in_progress' ? (
+                <span className="plan-todo-dot" />
+              ) : (
+                <span className="plan-todo-ring" />
+              )}
+            </span>
             <span className="plan-todo-text">{entry.text}</span>
           </li>
         );
       })}
     </ul>
+  );
+}
+
+/**
+ * Compact plan chip docked above the composer (in-flow, not over the
+ * transcript). Session-scoped: one visible plan at a time.
+ */
+export function PlanFloat({
+  messages,
+  activeRunId = null,
+}: {
+  messages: readonly PlanMessageLike[];
+  activeRunId?: string | null;
+}) {
+  const persisted = useMemo(() => findVisiblePlan(messages), [messages]);
+  const runId = activeRunId || persisted?.runId || '';
+  const snap = useRunSnapshot(runId);
+  const liveEntries = useMemo(() => resolvePlanEntriesFromTraces(snap?.traces), [snap?.traces]);
+  const entries = liveEntries ?? persisted?.entries ?? null;
+  const allDone = entries ? isPlanAllCompleted(entries) : false;
+  const signature = entries?.map((entry) => `${entry.status}:${entry.text}`).join('\n') ?? '';
+  const [collapsed, setCollapsed] = useState(allDone);
+
+  useEffect(() => {
+    if (!signature) return;
+    setCollapsed(allDone);
+  }, [allDone, signature]);
+
+  if (!entries?.length) return null;
+
+  const done = entries.filter((entry) => entry.status === 'completed').length;
+
+  return (
+    <div className="plan-float-dock">
+      <aside
+        className={`plan-float${allDone ? ' is-complete' : ''}${collapsed ? ' is-collapsed' : ''}`}
+      >
+        <button
+          type="button"
+          className="plan-float-toggle"
+          aria-expanded={!collapsed}
+          aria-label={t('plan.toggle', { done, total: entries.length })}
+          onClick={() => setCollapsed((current) => !current)}
+        >
+          <span className="plan-float-title">{t('plan.title')}</span>
+          <span className="plan-float-count">
+            {t('plan.progress', { done, total: entries.length })}
+          </span>
+        </button>
+        {collapsed ? null : <PlanTodoList entries={entries} />}
+      </aside>
+    </div>
   );
 }
 
@@ -83,6 +133,7 @@ export function isPlanAllCompleted(entries: readonly PlanEntry[]): boolean {
 
 export type PlanMessageLike = {
   role: 'user' | 'assistant';
+  runId?: string;
   meta?: { planEntries?: PlanEntry[] } | null;
 };
 
@@ -120,4 +171,16 @@ export function shouldShowPlan(
   // 0: plan's turn just finished — keep. 1: one follow-up turn in flight/done
   // — keep. 2+: the turn after that has begun — hide.
   return userTurnsAfter < 2;
+}
+
+/** The single plan the HUD should show, or null when none is in lifecycle. */
+export function findVisiblePlan(
+  messages: readonly PlanMessageLike[],
+): { runId?: string; entries: PlanEntry[] } | null {
+  for (let index = 0; index < messages.length; index += 1) {
+    if (!shouldShowPlan(messages, index)) continue;
+    const message = messages[index]!;
+    return { runId: message.runId, entries: message.meta!.planEntries! };
+  }
+  return null;
 }

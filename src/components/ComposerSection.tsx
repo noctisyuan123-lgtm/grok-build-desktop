@@ -8,6 +8,7 @@ import { AlertTriangle, SlidersHorizontal } from 'lucide-react';
 import { Composer, type ComposerHandle } from './Composer';
 import { ContextUsageRing } from './ContextUsageRing';
 import { SubagentFloat } from './SubagentFloat';
+import { PlanFloat } from './PlanTodoList';
 import {
   ComposerChoiceList,
   ComposerDropdownField,
@@ -131,6 +132,7 @@ export function ComposerSection({
           </button>
         </div>
       ) : null}
+      <PlanFloat messages={messages} activeRunId={activeRunId} />
       <SubagentFloat
         sessionRunIds={messages
           .map((message) => message.runId)

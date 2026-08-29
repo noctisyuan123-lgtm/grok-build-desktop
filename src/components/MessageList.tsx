@@ -6,7 +6,7 @@ import { MessageActions } from './MessageActions';
 import { isLongUserText } from '../lib/longText';
 import { useSessionActiveRunProgress } from '../hooks/useActiveRun';
 import { t } from '../i18n';
-import type { PlanEntry, TraceEvent } from '../lib/traceParser';
+import type { TraceEvent } from '../lib/traceParser';
 import type { TranscriptSegment } from '../lib/streamStore';
 import type { ComposerAttachment } from '../lib/attachments';
 
@@ -26,10 +26,6 @@ export interface MessageRef {
   durationMs?: number;
   traces?: TraceEvent[];
   transcript?: TranscriptSegment[];
-  /** Persisted plan checklist for this assistant turn (session-scoped). */
-  planEntries?: PlanEntry[];
-  /** Lifecycle gate from {@link shouldShowPlan}; live runs may still show plans. */
-  showPlan?: boolean;
   /** Keep the work fold open only while this turn is actively streaming. */
   autoExpandWork?: boolean;
   canUndo?: boolean;
@@ -336,8 +332,6 @@ export function MessageList({
               durationMs={msg.durationMs}
               fallbackTraces={msg.traces}
               fallbackTranscript={msg.transcript}
-              planEntries={msg.planEntries}
-              showPlan={msg.showPlan}
               autoExpandWork={msg.autoExpandWork}
               canUndo={Boolean(msg.canUndo)}
               showUndo={Boolean(msg.showUndo)}

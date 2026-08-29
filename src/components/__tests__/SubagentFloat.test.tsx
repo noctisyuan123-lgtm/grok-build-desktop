@@ -37,6 +37,7 @@ describe('SubagentFloat', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('Review backend')).toBeInTheDocument();
     expect(screen.getByText('Running')).toBeInTheDocument();
+    expect(screen.getByText('Review backend').closest('.subagent-float')).toHaveClass('is-live');
   });
 
   it('does not render another tab session’s subagent', () => {

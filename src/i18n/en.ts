@@ -329,6 +329,12 @@ export const en = {
   'subagent.statusError': 'Error',
   'subagent.statusCancelled': 'Cancelled',
 
+  // ── Plan HUD ──────────────────────────────────────────────────────────────
+  'plan.title': 'Plan',
+  'plan.aria': 'Plan',
+  'plan.progress': '{done}/{total}',
+  'plan.toggle': 'Plan {done} of {total}',
+
   // ── Title bar ─────────────────────────────────────────────────────────────
   'titleBar.toLight': 'Switch to light theme',
   'titleBar.toDark': 'Switch to dark theme',

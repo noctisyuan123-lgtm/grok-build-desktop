@@ -1,13 +1,15 @@
 import { act, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  PlanFloat,
   PlanTodoList,
+  findVisiblePlan,
   isPlanAllCompleted,
   resolveActivePlanEntries,
   resolvePlanEntriesFromTraces,
   shouldShowPlan,
 } from '../PlanTodoList';
-import { MessageItem } from '../MessageItem';
 import { applyRunEvent, applyStateChange, streamStore } from '../../lib/streamStore';
 import type { PlanEntry } from '../../lib/traceParser';
 
@@ -22,37 +24,28 @@ const samplePlan: PlanEntry[] = [
 ];
 
 describe('PlanTodoList rendering', () => {
-  it('renders disabled task-list checkboxes (not raw markdown syntax) with status classes', () => {
+  it('renders status marks (not markdown checkboxes) with status classes', () => {
     const { container } = render(<PlanTodoList entries={samplePlan} />);
     const list = screen.getByRole('list', { name: 'Plan' });
-    expect(list).toHaveClass('task-list-container');
+    expect(list).not.toHaveClass('task-list-container');
     const items = container.querySelectorAll('.plan-todo-item');
     expect(items).toHaveLength(3);
-
-    const checkboxes = container.querySelectorAll<HTMLInputElement>(
-      'input.task-list-item-checkbox[type="checkbox"]',
-    );
-    expect(checkboxes).toHaveLength(3);
-    for (const box of checkboxes) {
-      expect(box.disabled).toBe(true);
-    }
+    expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
 
     expect(items[0]).toHaveClass('is-completed');
-    expect(checkboxes[0]?.checked).toBe(true);
     expect(items[0]).toHaveTextContent('Inspect code');
     expect(items[0]?.textContent).not.toMatch(/- \[[ x/]\]/);
+    expect(items[0]?.querySelector('.plan-todo-mark svg')).toBeTruthy();
 
     expect(items[1]).toHaveClass('is-active');
-    expect(checkboxes[1]?.checked).toBe(false);
+    expect(items[1]).toHaveAttribute('aria-current', 'step');
     expect(items[1]).toHaveTextContent('Implement fix');
-    expect(items[1]?.textContent).not.toMatch(/- \[[ x/]\]/);
+    expect(items[1]?.querySelector('.plan-todo-dot')).toBeTruthy();
 
     expect(items[2]).toHaveClass('is-pending');
-    expect(checkboxes[2]?.checked).toBe(false);
     expect(items[2]).toHaveTextContent('Verify tests');
-    expect(items[2]?.textContent).not.toMatch(/- \[[ x/]\]/);
+    expect(items[2]?.querySelector('.plan-todo-ring')).toBeTruthy();
 
-    // No raw markdown task-list source characters anywhere in the list.
     expect(list.textContent).not.toContain('[ ]');
     expect(list.textContent).not.toContain('[x]');
     expect(list.textContent).not.toContain('[/]');
@@ -63,32 +56,34 @@ describe('PlanTodoList rendering', () => {
     expect(container).toBeEmptyDOMElement();
     expect(screen.queryByRole('list', { name: 'Plan' })).toBeNull();
   });
+});
 
-  it('renders at the bottom of an assistant message after the body', () => {
-    // Restored / no-snapshot path: body + persisted plan, no live stream.
-    streamStore.setHtml('msg:plan-bottom', '<p>Working on it.</p>');
+describe('PlanFloat', () => {
+  it('docks a persisted incomplete plan above the composer, not in the message body', () => {
     const { container } = render(
-      <MessageItem
-        runId="msg:plan-bottom"
-        fallbackText="Working on it."
-        showPlan
-        planEntries={[
-          { text: 'Step one', status: 'pending' },
-          { text: 'Step two', status: 'in_progress' },
+      <PlanFloat
+        messages={[
+          {
+            role: 'assistant',
+            runId: 'run-1',
+            meta: {
+              planEntries: [
+                { text: 'Step one', status: 'pending' },
+                { text: 'Step two', status: 'in_progress' },
+              ],
+            },
+          },
         ]}
       />,
     );
-    const body = container.querySelector('.message-body');
-    const plan = screen.getByRole('list', { name: 'Plan' });
-    expect(body).toBeTruthy();
-    expect(plan).toBeInTheDocument();
-    // Plan is after the message body in document order.
-    expect(
-      Boolean(body && plan.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_PRECEDING),
-    ).toBe(true);
+    expect(container.querySelector('.plan-float-dock')).toBeTruthy();
+    expect(container.querySelector('.plan-float')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Plan 0 of 2' })).toBeInTheDocument();
+    expect(screen.getByText('Step one')).toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Plan' })).toBeInTheDocument();
   });
 
-  it('keeps a persisted plan after the run ends when showPlan is true', async () => {
+  it('keeps a persisted plan after the run ends', async () => {
     applyStateChange('plan-done', { state: 'Running', startedAt: Date.now() });
     await act(async () => {
       applyRunEvent(
@@ -108,30 +103,95 @@ describe('PlanTodoList rendering', () => {
     });
 
     render(
-      <MessageItem
-        runId="plan-done"
-        fallbackText="done"
-        showPlan
-        planEntries={[{ text: 'Still unfinished', status: 'in_progress' }]}
+      <PlanFloat
+        messages={[
+          {
+            role: 'assistant',
+            runId: 'plan-done',
+            meta: { planEntries: [{ text: 'Still unfinished', status: 'in_progress' }] },
+          },
+        ]}
       />,
     );
     expect(screen.getByText('Still unfinished')).toBeInTheDocument();
     expect(screen.getByRole('list', { name: 'Plan' })).toBeInTheDocument();
   });
 
-  it('hides a completed plan once lifecycle says so', () => {
+  it('prefers a live run plan over an older persisted plan', async () => {
+    await act(async () => {
+      applyStateChange('live-plan', { state: 'Running', startedAt: Date.now() });
+      applyRunEvent(
+        'live-plan',
+        { type: 'unknown' },
+        {
+          type: 'plan',
+          entries: [{ content: 'Fresh live step', status: 'in_progress' }],
+        },
+      );
+    });
+
     render(
-      <MessageItem
-        runId="msg:hidden"
-        fallbackText="done"
-        showPlan={false}
-        planEntries={[
-          { text: 'All done', status: 'completed' },
-          { text: 'Also done', status: 'completed' },
+      <PlanFloat
+        activeRunId="live-plan"
+        messages={[
+          {
+            role: 'assistant',
+            runId: 'old-run',
+            meta: { planEntries: [{ text: 'Stale step', status: 'pending' }] },
+          },
         ]}
       />,
     );
+    expect(screen.getByText('Fresh live step')).toBeInTheDocument();
+    expect(screen.queryByText('Stale step')).toBeNull();
+  });
+
+  it('hides when lifecycle says the plan should not show', () => {
+    const { container } = render(
+      <PlanFloat
+        messages={[
+          {
+            role: 'assistant',
+            meta: {
+              planEntries: [
+                { text: 'All done', status: 'completed' },
+                { text: 'Also done', status: 'completed' },
+              ],
+            },
+          },
+          { role: 'user' },
+          { role: 'assistant', meta: {} },
+          { role: 'user' },
+        ]}
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('collapses a completed plan and expands on toggle', async () => {
+    const user = userEvent.setup();
+    render(
+      <PlanFloat
+        messages={[
+          {
+            role: 'assistant',
+            meta: {
+              planEntries: [
+                { text: 'Done A', status: 'completed' },
+                { text: 'Done B', status: 'completed' },
+              ],
+            },
+          },
+        ]}
+      />,
+    );
+    const toggle = screen.getByRole('button', { name: 'Plan 2 of 2' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('list', { name: 'Plan' })).toBeNull();
+
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Done A')).toBeInTheDocument();
   });
 });
 
@@ -200,6 +260,7 @@ describe('plan lifecycle helpers', () => {
       { role: 'assistant' as const, meta: {} },
     ];
     expect(shouldShowPlan(messages, 1)).toBe(true);
+    expect(findVisiblePlan(messages)?.entries[0]?.text).toBe('A');
   });
 
   it('hides a completed plan only after the following turn has begun (second user turn)', () => {
@@ -236,6 +297,14 @@ describe('plan lifecycle helpers', () => {
         1,
       ),
     ).toBe(false);
+    expect(
+      findVisiblePlan([
+        ...base,
+        { role: 'user' as const },
+        { role: 'assistant' as const, meta: {} },
+        { role: 'user' as const },
+      ]),
+    ).toBeNull();
   });
 
   it('lets a later assistant plan supersede an earlier one', () => {
@@ -253,6 +322,7 @@ describe('plan lifecycle helpers', () => {
     ];
     expect(shouldShowPlan(messages, 1)).toBe(false);
     expect(shouldShowPlan(messages, 3)).toBe(true);
+    expect(findVisiblePlan(messages)?.entries[0]?.text).toBe('New');
   });
 
   it('never reads plans from another session when callers pass only this session', () => {
@@ -266,5 +336,6 @@ describe('plan lifecycle helpers', () => {
     ];
     expect(shouldShowPlan(thisSession, 0)).toBe(true);
     expect(shouldShowPlan([], 0)).toBe(false);
+    expect(findVisiblePlan([])).toBeNull();
   });
 });

@@ -252,10 +252,12 @@ function SubagentDrawerBody({ runId, subagent }: { runId: string; subagent: Trac
             autoExpandWork={live}
             canUndo={false}
             showUndo={false}
-            planNode={planNode}
           />
+          {planNode}
         </div>
-      ) : null}
+      ) : (
+        planNode
+      )}
       {children.length > 0 ? (
         <section className="subagent-drawer-children" aria-label={t('subagent.childTraces')}>
           <h3>{t('subagent.childTraces')}</h3>

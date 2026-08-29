@@ -20,7 +20,6 @@ import { playCompletionSound, primeCompletionSound } from './lib/completionSound
 import { showCompletionPopup } from './lib/completionPopup';
 import { isBackgroundSessionRun } from './lib/completionNotification';
 import { mergeStreamIntoMessages } from './lib/mergeStreamMessages';
-import { shouldShowPlan } from './components/PlanTodoList';
 import { MessageList, type MessageRef } from './components/MessageList';
 import type { ComposerFolder, ComposerHandle } from './components/Composer';
 import { QueueDock } from './components/QueueDock';
@@ -384,13 +383,10 @@ function App() {
   useEffect(() => {
     if (!hasTauriRuntime()) return;
     let unlisten: (() => void) | undefined;
-    void listen<{ tabId?: string }>(
-      'grok-desktop://completion-popup-clicked',
-      (event) => {
-        const tabId = event.payload?.tabId;
-        if (tabId) completionNavigationRef.current(tabId);
-      },
-    ).then((cleanup) => {
+    void listen<{ tabId?: string }>('grok-desktop://completion-popup-clicked', (event) => {
+      const tabId = event.payload?.tabId;
+      if (tabId) completionNavigationRef.current(tabId);
+    }).then((cleanup) => {
       unlisten = cleanup;
     });
     return () => unlisten?.();
@@ -1717,8 +1713,6 @@ function App() {
             durationMs: m.meta?.durationMs,
             traces: m.meta?.traces,
             transcript: m.meta?.transcript,
-            planEntries: m.meta?.planEntries,
-            showPlan: shouldShowPlan(messages, index),
             autoExpandWork: m.status === 'streaming',
             id: m.id,
             canUndo: index === latestIndex && latestTurnCanUndo,

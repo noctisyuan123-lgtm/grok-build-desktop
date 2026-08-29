@@ -4,11 +4,10 @@ import { useRunHtml, useRunSnapshot } from '../hooks/useRunSnapshot';
 import { sanitizeHtml } from '../lib/sanitizeHtml';
 import { ActivityGroup, TraceTimeline } from './TraceTimeline';
 import { MessageActions } from './MessageActions';
-import { PlanTodoList, resolvePlanEntriesFromTraces } from './PlanTodoList';
 import { t } from '../i18n';
 import { useElapsed } from '../hooks/useElapsed';
 import { sumEditStats, type EditStats } from '../lib/editStats';
-import type { PlanEntry, TraceEvent } from '../lib/traceParser';
+import type { TraceEvent } from '../lib/traceParser';
 import { exteriorMarkdownKey, type TranscriptSegment } from '../lib/streamStore';
 
 interface Props {
@@ -17,8 +16,6 @@ interface Props {
   durationMs?: number;
   fallbackTraces?: TraceEvent[];
   fallbackTranscript?: TranscriptSegment[];
-  planEntries?: PlanEntry[];
-  showPlan?: boolean;
   autoExpandWork?: boolean;
   canUndo?: boolean;
   showUndo?: boolean;
@@ -34,8 +31,6 @@ function MessageItemImpl({
   durationMs,
   fallbackTraces,
   fallbackTranscript,
-  planEntries: persistedPlan,
-  showPlan = false,
   autoExpandWork = false,
   canUndo = false,
   showUndo = true,
@@ -54,13 +49,6 @@ function MessageItemImpl({
   const runIsLive = snap?.state === 'queued' || snap?.state === 'running';
   const transcript = snap?.transcript.length ? snap.transcript : fallbackTranscript;
   const traces = snap?.traces.length ? snap.traces : fallbackTraces || [];
-  const livePlan = useMemo(
-    () => resolvePlanEntriesFromTraces(snap?.traces?.length ? snap.traces : fallbackTraces),
-    [snap?.traces, fallbackTraces],
-  );
-  const planEntries = livePlan ?? persistedPlan ?? null;
-  const planVisible = Boolean(planEntries?.length) && (runIsLive || showPlan);
-  const planNode = planVisible && planEntries ? <PlanTodoList entries={planEntries} /> : null;
   // The queue can publish a terminal state before the stream's `end` event.
   // Keep the transcript in its live/intermediate shape until that event has
   // actually arrived, otherwise the last intermediate response briefly gets
@@ -122,7 +110,6 @@ function MessageItemImpl({
           canFork={forkEnabled}
           showFork={forkVisible}
           onFork={onFork}
-          planNode={planNode}
         />
       );
     }
@@ -145,7 +132,6 @@ function MessageItemImpl({
             showFork={forkVisible}
             onFork={onFork}
           />
-          {planNode}
         </>
       );
     }
@@ -164,11 +150,10 @@ function MessageItemImpl({
             showFork={forkVisible}
             onFork={onFork}
           />
-          {planNode}
         </>
       );
     }
-    return planNode;
+    return null;
   }
 
   // The markdown worker is fed on every text event. Use its latest result as
@@ -195,7 +180,6 @@ function MessageItemImpl({
           canFork={forkEnabled}
           showFork={forkVisible}
           onFork={onFork}
-          planNode={planNode}
         />
       ) : (
         <>
@@ -251,7 +235,6 @@ function MessageItemImpl({
             showFork={forkVisible}
             onFork={onFork}
           />
-          {planNode}
         </>
       ) : null}
     </>
@@ -276,7 +259,6 @@ export function TranscriptMessage({
   canFork = false,
   showFork = false,
   onFork,
-  planNode,
 }: {
   runId: string;
   transcript: TranscriptSegment[];
@@ -293,7 +275,6 @@ export function TranscriptMessage({
   canFork?: boolean;
   showFork?: boolean;
   onFork?: () => void;
-  planNode?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(autoExpandWork);
   const wasLive = useRef(live);
@@ -432,7 +413,6 @@ export function TranscriptMessage({
         showFork={showFork}
         onFork={onFork}
       />
-      {planNode}
     </>
   );
 }
