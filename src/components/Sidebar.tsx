@@ -389,11 +389,7 @@ export function Sidebar({
       >
         {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
       </button>
-      <aside
-        className="app-sidebar"
-        aria-hidden={sidebarCollapsed}
-        inert={sidebarCollapsed ? true : undefined}
-      >
+      <aside className="app-sidebar">
         <div className="brand">
           {/* Chat/Code switch, moved up from the composer footer so the input
             card stays clean. Same state, same ⌘1/⌘2 shortcuts. */}
