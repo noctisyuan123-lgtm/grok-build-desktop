@@ -235,7 +235,7 @@ pre {
 .app-shell {
   background: #edf1f3;
   display: grid;
-  grid-template-columns: var(--sidebar-width, 336px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   height: 100vh;
   overflow: hidden;
   position: relative;
@@ -1797,7 +1797,6 @@ pre {
    subtle glow, while the WebKit-prefixed filter keeps this working in Tauri's
    WKWebView instead of silently falling back to an opaque panel. */
 .app-shell.theme-dark .app-sidebar {
-  position: relative;
   isolation: isolate;
   background: linear-gradient(165deg, rgba(27, 30, 33, 0.56), rgba(12, 14, 16, 0.38));
   -webkit-backdrop-filter: blur(30px) saturate(115%);
@@ -2262,7 +2261,7 @@ select:focus {
 
 /* Clean workspace pass: keep Claude/Codex-style clarity without cloning their trade dress. */
 .app-shell {
-  grid-template-columns: var(--sidebar-width, 336px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .app-sidebar {
@@ -3499,7 +3498,7 @@ body[data-completion-popup='true'] {
 
 @media (max-width: 1280px) {
   .app-shell {
-    grid-template-columns: var(--sidebar-width, 336px) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .window-titlebar {
@@ -7720,12 +7719,34 @@ button.history-section-head.toggle:hover {
   outline: 0;
 }
 
-/* ===== Sidebar collapse (⌘B) ===== */
-.app-shell.sidebar-transition-ready {
-  transition: grid-template-columns 180ms var(--ease-in-out);
+/* ===== Sidebar overlay (⌘B) =====
+ * Workspace is always the full window, so the 760px conversation rail never
+ * reflows. The rail slides over it; only transform is animated. */
+.app-shell > .app-sidebar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 50;
+  width: var(--sidebar-width, 336px);
+  max-width: none;
+  height: 100%;
+  transform: translate3d(0, 0, 0);
+  will-change: transform;
 }
-.app-shell.sidebar-collapsed {
-  grid-template-columns: 0 minmax(0, 1fr);
+.app-shell.sidebar-transition-ready > .app-sidebar,
+.app-shell.sidebar-transition-ready > .sidebar-resizer {
+  transition: transform 240ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.app-shell.sidebar-collapsed > .app-sidebar {
+  pointer-events: none;
+  transform: translate3d(-100%, 0, 0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell.sidebar-transition-ready > .app-sidebar,
+  .app-shell.sidebar-transition-ready > .sidebar-resizer {
+    transition: none;
+  }
 }
 
 .sidebar-resizer {
@@ -7758,12 +7779,16 @@ button.history-section-head.toggle:hover {
   user-select: none !important;
 }
 
-.sidebar-resizing .app-shell {
+.sidebar-resizing .app-shell > .app-sidebar,
+.sidebar-resizing .app-shell > .sidebar-resizer,
+.app-shell.sidebar-resizing > .app-sidebar,
+.app-shell.sidebar-resizing > .sidebar-resizer {
   transition: none;
 }
 
 .app-shell.sidebar-collapsed .sidebar-resizer {
-  display: none;
+  pointer-events: none;
+  transform: translate3d(calc(-1 * var(--sidebar-width, 336px)), 0, 0);
 }
 
 @media (max-width: 900px) {
@@ -7771,47 +7796,13 @@ button.history-section-head.toggle:hover {
     display: none;
   }
 }
-.app-shell.sidebar-collapsed .app-sidebar {
-  border-right-width: 0;
-  max-width: 0;
-  min-width: 0;
-  opacity: 0;
-  overflow: hidden;
-  padding-left: 0;
-  padding-right: 0;
-  pointer-events: none;
-  width: 0;
-  transition:
-    width 180ms ease,
-    min-width 180ms ease,
-    max-width 180ms ease,
-    opacity 120ms ease,
-    padding 180ms ease;
-}
-.app-shell.sidebar-collapsed .app-sidebar > *:not(.brand) {
-  display: none;
-}
-.app-shell.sidebar-collapsed .app-sidebar .brand h1,
-.app-shell.sidebar-collapsed .app-sidebar .brand span {
-  display: none;
-}
-.app-shell.sidebar-collapsed .app-sidebar .brand {
-  display: flex;
-  justify-content: center;
-  padding-inline: 0;
-}
+
 .brand-actions {
   align-items: center;
   display: flex;
   gap: 2px;
 }
-.app-shell.sidebar-collapsed .app-sidebar .brand-mark,
-.app-shell.sidebar-collapsed .app-sidebar .brand-chevron {
-  display: none;
-}
-.app-shell.sidebar-collapsed .app-sidebar .brand-actions {
-  display: flex;
-}
+
 .sidebar-expand-fab {
   align-items: center;
   background: transparent;
