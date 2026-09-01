@@ -254,6 +254,9 @@ describe('SubagentFloat', () => {
     const drawer = screen.getByRole('dialog', { name: /Subagent · Review backend/i });
     const resizer = screen.getByRole('separator', { name: 'Resize subagent window' });
     expect(drawer).toHaveStyle({ width: '520px' });
+    expect(document.documentElement.style.getPropertyValue('--subagent-drawer-open-width')).toBe(
+      '520px',
+    );
 
     fireEvent.pointerDown(resizer, { button: 0, clientX: 900 });
     fireEvent.pointerMove(window, { clientX: 820 });
@@ -261,6 +264,9 @@ describe('SubagentFloat', () => {
 
     expect(drawer).toHaveStyle({ width: '600px' });
     expect(window.localStorage.getItem('grok-desktop-subagent-drawer-width')).toBe('600');
+    expect(document.documentElement.style.getPropertyValue('--subagent-drawer-open-width')).toBe(
+      '600px',
+    );
   });
 
   it('closes the inspector when clicking outside the dock and drawer', async () => {

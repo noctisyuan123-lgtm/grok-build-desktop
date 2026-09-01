@@ -324,9 +324,16 @@ export const en = {
   'subagent.emptyLive': 'Waiting for this subagent.',
   'subagent.emptyDone': 'No output from this subagent.',
   'subagent.statusRunning': 'Running',
+  'subagent.statusWorking': 'Working',
   'subagent.statusDone': 'Done',
   'subagent.statusError': 'Error',
   'subagent.statusCancelled': 'Cancelled',
+  'subagent.railTitle': 'Agents',
+  'subagent.railWorkingCount': '{count} working',
+  'subagent.railActive': 'Active',
+  'subagent.railDone': 'Done',
+  'subagent.railCollapse': 'Hide agents',
+  'subagent.railExpand': 'Show agents',
 
   // ── Plan HUD ──────────────────────────────────────────────────────────────
   'plan.title': 'Plan',

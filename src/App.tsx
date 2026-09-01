@@ -36,6 +36,7 @@ import { TerminalDock } from './components/TerminalDock';
 import { Toolbelt } from './components/Toolbelt';
 import { TitleBar } from './components/TitleBar';
 import { ComposerSection } from './components/ComposerSection';
+import { SubagentRail, SubagentUiProvider } from './components/SubagentRail';
 import { SettingsHost } from './components/SettingsHost';
 import type { SettingsSection } from './components/SettingsPage';
 import { UndoToast } from './components/UndoToast';
@@ -1809,116 +1810,119 @@ function App() {
           anyPanelOpen={contextOpen || previewOpen || terminalOpen || toolsOpen}
           openPanelMenu={openPanelMenu}
         />
-        <section className="workbench">
-          <div
-            className={`conversation-panel${messages.length === 0 ? ' is-empty' : ''}`}
-            onContextMenu={openConversationMenu}
-          >
-            {/* Session tabs removed per request — Claude-Desktop-style single
+        <SubagentUiProvider messages={messages}>
+          <section className="workbench">
+            <div
+              className={`conversation-panel${messages.length === 0 ? ' is-empty' : ''}`}
+              onContextMenu={openConversationMenu}
+            >
+              {/* Session tabs removed per request — Claude-Desktop-style single
                 conversation. New Session starts fresh; earlier conversations
                 stay reachable from the HISTORY sidebar (which aggregates
                 across sessions). The tabs state machinery is retained purely
                 as the per-session history store. */}
-            {/* Scroll position is owned by MessageList's Virtuoso instance —
+              {/* Scroll position is owned by MessageList's Virtuoso instance —
                 this div only provides the flex sizing for it. */}
-            <div className="conversation-scroll">
-              {messages.length === 0 ? (
-                <EmptyState
-                  codingCwd={codingCwd}
-                  folderPickerBusy={folderPickerBusy}
-                  onPickWorkspace={() => {
-                    void pickFolder();
-                  }}
-                />
-              ) : (
-                <MessageList
-                  messages={messageRefs}
-                  onAttachmentClick={setAttachmentPreview}
-                  onUndoAssistant={undoLatestTurn}
-                  onUndoUser={undoLatestTurn}
-                  onForkAssistant={forkAssistantResponse}
-                  onEditUser={(messageId, text) => {
-                    void editLatestTurn(messageId, text);
-                  }}
-                />
-              )}
-            </div>
-
-            {sessionNotice ? (
-              <div className="session-toast" role="status">
-                {sessionNotice}
+              <div className="conversation-scroll">
+                {messages.length === 0 ? (
+                  <EmptyState
+                    codingCwd={codingCwd}
+                    folderPickerBusy={folderPickerBusy}
+                    onPickWorkspace={() => {
+                      void pickFolder();
+                    }}
+                  />
+                ) : (
+                  <MessageList
+                    messages={messageRefs}
+                    onAttachmentClick={setAttachmentPreview}
+                    onUndoAssistant={undoLatestTurn}
+                    onUndoUser={undoLatestTurn}
+                    onForkAssistant={forkAssistantResponse}
+                    onEditUser={(messageId, text) => {
+                      void editLatestTurn(messageId, text);
+                    }}
+                  />
+                )}
               </div>
-            ) : null}
-            <UndoToast toast={undoToast} onUndo={undoNow} />
 
-            <QueueDock
-              onError={(message) =>
-                setSessionNotice(t('notices.queueActionFailed', { error: message }))
-              }
+              {sessionNotice ? (
+                <div className="session-toast" role="status">
+                  {sessionNotice}
+                </div>
+              ) : null}
+              <UndoToast toast={undoToast} onUndo={undoNow} />
+
+              <QueueDock
+                onError={(message) =>
+                  setSessionNotice(t('notices.queueActionFailed', { error: message }))
+                }
+              />
+              <ComposerSection
+                composerRef={composerRef}
+                codingCwd={codingCwd}
+                messages={messages}
+                buildRunArgs={buildRunArgs}
+                drafts={drafts}
+                mode={mode}
+                setDrafts={setDrafts}
+                handleEnqueued={handleEnqueued}
+                setSessionNotice={setSessionNotice}
+                modelConfig={modelConfig}
+                availableModels={availableModels}
+                actionPolicy={actionPolicy}
+                setActionPolicy={setActionPolicy}
+                onHostSlash={handleHostSlash}
+                locked={turnMutationBusy}
+                grokIsRunning={activeSessionIsRunning}
+                activeRunId={activeSessionRunId}
+                laneId={activeTabId}
+                stopRun={stopRun}
+              />
+              <SubagentRail />
+            </div>
+            <PreviewPanel
+              open={previewOpen}
+              onClose={() => setPreviewOpen(false)}
+              staticPreview={staticPreview}
+              previewBusy={previewBusy}
+              onRefresh={() => refreshStaticPreview()}
             />
-            <ComposerSection
-              composerRef={composerRef}
-              codingCwd={codingCwd}
-              messages={messages}
-              buildRunArgs={buildRunArgs}
-              drafts={drafts}
-              mode={mode}
-              setDrafts={setDrafts}
-              handleEnqueued={handleEnqueued}
-              setSessionNotice={setSessionNotice}
+            <AttachmentPreviewPanel
+              attachment={attachmentPreview}
+              onClose={() => setAttachmentPreview(null)}
+            />
+            <InspectorDrawer
+              open={contextOpen}
+              onOpenPanel={() => togglePanel('context')}
+              onClose={() => setContextOpen(false)}
+              inspectorTab={inspectorTab}
+              setInspectorTab={setInspectorTab}
+              dockPosition={dockPosition}
+              onDockPositionChange={(next) => {
+                setDockPosition(next);
+                window.localStorage.setItem(storageKeys.dockPosition, next);
+              }}
+              runners={runners}
               modelConfig={modelConfig}
-              availableModels={availableModels}
               actionPolicy={actionPolicy}
               setActionPolicy={setActionPolicy}
-              onHostSlash={handleHostSlash}
-              locked={turnMutationBusy}
-              grokIsRunning={activeSessionIsRunning}
-              activeRunId={activeSessionRunId}
-              laneId={activeTabId}
-              stopRun={stopRun}
+              history={history}
+              lastRun={lastRun}
+              setLastRun={setLastRun}
+              clearRunHistory={clearRunHistory}
+              workspacePath={workspacePath}
+              onInsertDesktopContext={(text) => {
+                // Append into the active mode's draft so it lands in Composer
+                // on next render.
+                const next = (drafts[mode] ?? '') + text;
+                setDrafts((current) => ({ ...current, [mode]: next }));
+                composerRef.current?.setValue(next);
+                setSessionNotice(t('notices.desktopContextAppended'));
+              }}
             />
-          </div>
-          <PreviewPanel
-            open={previewOpen}
-            onClose={() => setPreviewOpen(false)}
-            staticPreview={staticPreview}
-            previewBusy={previewBusy}
-            onRefresh={() => refreshStaticPreview()}
-          />
-          <AttachmentPreviewPanel
-            attachment={attachmentPreview}
-            onClose={() => setAttachmentPreview(null)}
-          />
-          <InspectorDrawer
-            open={contextOpen}
-            onOpenPanel={() => togglePanel('context')}
-            onClose={() => setContextOpen(false)}
-            inspectorTab={inspectorTab}
-            setInspectorTab={setInspectorTab}
-            dockPosition={dockPosition}
-            onDockPositionChange={(next) => {
-              setDockPosition(next);
-              window.localStorage.setItem(storageKeys.dockPosition, next);
-            }}
-            runners={runners}
-            modelConfig={modelConfig}
-            actionPolicy={actionPolicy}
-            setActionPolicy={setActionPolicy}
-            history={history}
-            lastRun={lastRun}
-            setLastRun={setLastRun}
-            clearRunHistory={clearRunHistory}
-            workspacePath={workspacePath}
-            onInsertDesktopContext={(text) => {
-              // Append into the active mode's draft so it lands in Composer
-              // on next render.
-              const next = (drafts[mode] ?? '') + text;
-              setDrafts((current) => ({ ...current, [mode]: next }));
-              composerRef.current?.setValue(next);
-              setSessionNotice(t('notices.desktopContextAppended'));
-            }}
-          />
-        </section>
+          </section>
+        </SubagentUiProvider>
 
         <TerminalDock
           open={terminalOpen}
