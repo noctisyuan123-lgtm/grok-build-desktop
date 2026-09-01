@@ -141,6 +141,27 @@ describe('Sidebar collapse control', () => {
       'true',
     );
   });
+
+  it('peeks the collapsed sidebar from the left-edge hotspot and hides it again', async () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }));
+    const hotspot = document.querySelector('.sidebar-peek-hotspot');
+    const aside = document.querySelector('.app-sidebar');
+    expect(hotspot).toBeTruthy();
+    expect(aside).toBeTruthy();
+    expect(aside).not.toHaveClass('sidebar-peeking');
+    expect(aside).toHaveAttribute('aria-hidden', 'true');
+
+    fireEvent.pointerEnter(hotspot!);
+    expect(aside).toHaveClass('sidebar-peeking');
+    expect(aside).not.toHaveAttribute('aria-hidden');
+
+    fireEvent.pointerLeave(hotspot!);
+    fireEvent.pointerLeave(aside!);
+    expect(aside).toHaveClass('sidebar-peeking');
+    await waitFor(() => expect(aside).not.toHaveClass('sidebar-peeking'));
+    expect(aside).toHaveAttribute('aria-hidden', 'true');
+  });
 });
 
 function historyRow(title: RegExp | string) {

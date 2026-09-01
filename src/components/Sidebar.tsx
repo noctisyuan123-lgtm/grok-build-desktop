@@ -126,6 +126,11 @@ export function Sidebar({
     () => window.localStorage.getItem(PROJECT_LIST_COLLAPSED_KEY) !== 'expanded',
   );
   const seenProjectPaths = useRef(new Set(historyView.projectGroups.map(([path]) => path)));
+  const [sidebarPeek, setSidebarPeek] = useState(false);
+  const peekHoverRef = useRef(false);
+  const peekLeaveTimerRef = useRef<number | null>(null);
+  const contextMenuRef = useRef(contextMenu);
+  contextMenuRef.current = contextMenu;
   useEffect(() => {
     const newPaths = historyView.projectGroups
       .map(([path]) => path)
@@ -134,6 +139,48 @@ export function Sidebar({
     newPaths.forEach((path) => seenProjectPaths.current.add(path));
     setCollapsedProjects((current) => new Set([...current, ...newPaths]));
   }, [historyView.projectGroups]);
+
+  function cancelPeekLeave() {
+    if (peekLeaveTimerRef.current == null) return;
+    window.clearTimeout(peekLeaveTimerRef.current);
+    peekLeaveTimerRef.current = null;
+  }
+
+  function openSidebarPeek() {
+    if (!sidebarCollapsed) return;
+    peekHoverRef.current = true;
+    cancelPeekLeave();
+    setSidebarPeek(true);
+  }
+
+  function scheduleCloseSidebarPeek() {
+    peekHoverRef.current = false;
+    cancelPeekLeave();
+    peekLeaveTimerRef.current = window.setTimeout(() => {
+      peekLeaveTimerRef.current = null;
+      if (peekHoverRef.current || contextMenuRef.current) return;
+      setSidebarPeek(false);
+    }, 160);
+  }
+
+  useEffect(() => {
+    if (!sidebarCollapsed) {
+      peekHoverRef.current = false;
+      cancelPeekLeave();
+      setSidebarPeek(false);
+    }
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    if (contextMenu) {
+      cancelPeekLeave();
+      return;
+    }
+    if (peekHoverRef.current) return;
+    setSidebarPeek(false);
+  }, [contextMenu]);
+
+  useEffect(() => () => cancelPeekLeave(), []);
 
   function normalizePath(path: string): string {
     return path.replace(/\/+$/, '');
@@ -389,7 +436,21 @@ export function Sidebar({
       >
         {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
       </button>
-      <aside className="app-sidebar">
+      {sidebarCollapsed ? (
+        <div
+          className="sidebar-peek-hotspot"
+          aria-hidden="true"
+          onPointerEnter={openSidebarPeek}
+          onPointerLeave={scheduleCloseSidebarPeek}
+        />
+      ) : null}
+      <aside
+        className={`app-sidebar${sidebarPeek ? ' sidebar-peeking' : ''}`}
+        aria-hidden={sidebarCollapsed && !sidebarPeek ? true : undefined}
+        inert={sidebarCollapsed && !sidebarPeek ? true : undefined}
+        onPointerEnter={openSidebarPeek}
+        onPointerLeave={scheduleCloseSidebarPeek}
+      >
         <div className="brand">
           {/* Chat/Code switch, moved up from the composer footer so the input
             card stays clean. Same state, same ⌘1/⌘2 shortcuts. */}
