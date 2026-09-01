@@ -177,6 +177,7 @@ describe('streamStore', () => {
         type: 'subagent_spawned',
         subagent_id: 'sa_1',
         description: 'Check the frontend',
+        prompt: 'Review the frontend for missing tests.',
       },
     );
     applyRunEvent(
@@ -196,7 +197,42 @@ describe('streamStore', () => {
       label: 'Check the frontend',
       status: 'done',
       progress: '4 tools',
+      prompt: 'Review the frontend for missing tests.',
     });
+  });
+
+  it('copies a Task tool prompt onto the spawned subagent', () => {
+    applyRunEvent(
+      'inherit-prompt',
+      { type: 'unknown' },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'task-9',
+        title: 'Sleep helper',
+        kind: 'task',
+        rawInput: {
+          description: 'Sleep helper',
+          prompt: 'Sleep one second, then reply sleep-f-done.',
+        },
+      },
+    );
+    applyRunEvent(
+      'inherit-prompt',
+      { type: 'unknown' },
+      {
+        type: 'subagent_spawned',
+        subagent_id: 'sleep-1',
+        description: 'Sleep helper',
+      },
+    );
+    expect(streamStore.getRunSnapshot('inherit-prompt')?.traces).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'subagent:sleep-1',
+          prompt: 'Sleep one second, then reply sleep-f-done.',
+        }),
+      ]),
+    );
   });
 
   it('keeps child-session thought and response out of the parent transcript', () => {

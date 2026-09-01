@@ -23,6 +23,8 @@ export interface TraceEvent {
   sessionId?: string;
   /** Ordered thought/respond/tool transcript for an individual subagent. */
   transcript?: TranscriptSegment[];
+  /** Full prompt the parent agent sent this subagent. Preserved across updates. */
+  prompt?: string;
   detail?: string;
   parentKey?: string;
   progress?: string;
@@ -88,6 +90,52 @@ function readObj(
     }
   }
   return undefined;
+}
+
+/** Pull the parent agent's task text off a spawn / Task-tool payload. */
+export function extractSubagentPrompt(value: unknown, depth = 0): string | undefined {
+  if (depth > 3 || value == null) return undefined;
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text) return undefined;
+    if (text.startsWith('{') || text.startsWith('[')) {
+      try {
+        return extractSubagentPrompt(JSON.parse(text) as unknown, depth + 1) ?? undefined;
+      } catch {
+        return text;
+      }
+    }
+    return text;
+  }
+  if (typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const obj = value as Record<string, unknown>;
+  const direct = readField(obj, 'prompt', 'task', 'instruction', 'query');
+  if (direct) return direct;
+  for (const key of ['rawInput', 'raw_input', 'input', 'arguments', 'args', 'params', 'data']) {
+    const nested = extractSubagentPrompt(obj[key], depth + 1);
+    if (nested) return nested;
+  }
+  const description = readField(obj, 'description');
+  if (description && (description.includes('\n') || description.length > 80)) return description;
+  return undefined;
+}
+
+/** Prompt shown as the user bubble inside a subagent inspector. */
+export function resolveSubagentPrompt(
+  subagent: TraceEvent,
+  traces: readonly TraceEvent[] = [],
+): string {
+  const own = subagent.prompt?.trim() || extractSubagentPrompt(subagent.raw)?.trim();
+  if (own) return own;
+  const label = subagent.label.trim().toLowerCase();
+  for (const trace of traces) {
+    if (trace.key === subagent.key) continue;
+    const prompt = (trace.prompt || extractSubagentPrompt(trace.raw))?.trim();
+    if (!prompt) continue;
+    const toolLabel = trace.label.trim().toLowerCase();
+    if (toolLabel === label || toolLabel === 'task' || toolLabel === 'subagent') return prompt;
+  }
+  return '';
 }
 
 function shorten(value: unknown, max = 180): string | undefined {
@@ -211,7 +259,11 @@ export function classifyEvent(raw: unknown, now = Date.now()): TraceParseResult 
     return { kind: 'ignore' };
   }
 
-  if (type === 'plan' || type === 'plan_update' || type.includes('task')) {
+  if (
+    type === 'plan' ||
+    type === 'plan_update' ||
+    (type.includes('task') && Array.isArray(obj.entries))
+  ) {
     const id = readField(obj, 'id', 'taskId', 'task_id', 'planId', 'plan_id') ?? 'current-plan';
     const entries = obj.entries;
     const status = normaliseStatus(type, readField(obj, 'status'));
@@ -274,6 +326,7 @@ export function classifyEvent(raw: unknown, now = Date.now()): TraceParseResult 
   if (!id && !name && input == null && output == null && !error) return { kind: 'ignore' };
   const detail =
     status === 'error' ? (error ?? shorten(output)) : (shorten(output) ?? shorten(input));
+  const prompt = extractSubagentPrompt(obj) ?? extractSubagentPrompt(input);
   const parent = readField(obj, 'parentSessionId', 'parent_session_id', 'parentId', 'parent_id');
   const duration = readNumber(obj, 'durationMs', 'duration_ms');
   const toolCalls = readNumber(obj, 'toolCalls', 'tool_calls');
@@ -318,6 +371,7 @@ export function classifyEvent(raw: unknown, now = Date.now()): TraceParseResult 
       startedAt: duration != null && status !== 'running' ? Math.max(0, now - duration) : now,
       endedAt: status === 'running' ? null : now,
       sessionId,
+      prompt,
       detail,
       parentKey: parent ? `subagent:${parent}` : undefined,
       progress,

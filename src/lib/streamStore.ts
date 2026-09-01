@@ -193,9 +193,7 @@ class StreamStore {
     activeIds?: string[];
     items?: QueuedRunMeta[];
   }): void => {
-    const activeIds =
-      q.activeIds ??
-      (q.active ? [q.active] : []);
+    const activeIds = q.activeIds ?? (q.active ? [q.active] : []);
     this.queue = {
       active: q.active ?? activeIds[0] ?? null,
       activeIds,
@@ -318,10 +316,7 @@ export function applyRunEvent(
         // + final stitched together. MessageItem reads `${runId}:exterior:i`.
         const last = nextTranscript.at(-1);
         if (last?.kind === 'response') {
-          scheduleMarkdownParse(
-            exteriorMarkdownKey(runId, nextTranscript.length - 1),
-            last.text,
-          );
+          scheduleMarkdownParse(exteriorMarkdownKey(runId, nextTranscript.length - 1), last.text);
         }
       })
       .catch(() => {
@@ -336,8 +331,7 @@ export function applyRunEvent(
       }
       return -1;
     })();
-    const lastResponse =
-      lastResponseIndex >= 0 ? cur?.transcript[lastResponseIndex] : null;
+    const lastResponse = lastResponseIndex >= 0 ? cur?.transcript[lastResponseIndex] : null;
     if (cur?.text || (lastResponse?.kind === 'response' && lastResponse.text)) {
       import('./markdownWorker')
         .then(({ scheduleMarkdownParse }) => {
@@ -417,6 +411,7 @@ export function applyRunEvent(
               ? updated[idx]!.label
               : normalizedEvent.label,
           detail: normalizedEvent.detail ?? updated[idx]!.detail,
+          prompt: updated[idx]!.prompt || normalizedEvent.prompt,
           parentKey: normalizedEvent.parentKey ?? updated[idx]!.parentKey,
           progress: normalizedEvent.progress ?? updated[idx]!.progress,
           path: normalizedEvent.path ?? updated[idx]!.path,
@@ -427,14 +422,14 @@ export function applyRunEvent(
           transcript: updated[idx]!.transcript,
         };
         streamStore.patchRun(runId, {
-          traces: updated,
+          traces: inheritSubagentPrompts(updated),
           lastEventType: normalizedEvent.status === 'running' ? 'activity' : cur?.lastEventType,
           rootSessionId: cur?.rootSessionId ?? (owner ? null : sessionId) ?? null,
           state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
         });
       } else {
         streamStore.patchRun(runId, {
-          traces: [...existing, normalizedEvent],
+          traces: inheritSubagentPrompts([...existing, normalizedEvent]),
           transcript: owner
             ? (cur?.transcript ?? [])
             : appendTool(cur?.transcript ?? [], normalizedEvent.key),
@@ -506,6 +501,26 @@ function readSessionId(raw: unknown): string | undefined {
     if (typeof value === 'string' && value) return value;
   }
   return undefined;
+}
+
+/** Copy a Task-tool prompt onto the matching subagent spawn (either order). */
+function inheritSubagentPrompts(traces: TraceEvent[]): TraceEvent[] {
+  const byLabel = new Map<string, string>();
+  let lastToolPrompt: string | undefined;
+  for (const trace of traces) {
+    if (!trace.prompt || trace.kind === 'subagent') continue;
+    lastToolPrompt = trace.prompt;
+    byLabel.set(trace.label.trim().toLowerCase(), trace.prompt);
+  }
+  let changed = false;
+  const next = traces.map((trace) => {
+    if (trace.kind !== 'subagent' || trace.prompt) return trace;
+    const inherited = byLabel.get(trace.label.trim().toLowerCase()) ?? lastToolPrompt;
+    if (!inherited) return trace;
+    changed = true;
+    return { ...trace, prompt: inherited };
+  });
+  return changed ? next : traces;
 }
 
 function findSubagentOwner(
@@ -592,12 +607,9 @@ function reconcileOpenTraces(traces: TraceEvent[], status: TraceStatus): TraceEv
   );
 }
 
-export function replaceQueue(
-  q: Partial<QueueSnapshot> & { items: QueuedRunMeta[] },
-): void {
+export function replaceQueue(q: Partial<QueueSnapshot> & { items: QueuedRunMeta[] }): void {
   const activeIds =
-    q.activeIds ??
-    (q.active ? [q.active] : streamStore.getQueueSnapshot().activeIds);
+    q.activeIds ?? (q.active ? [q.active] : streamStore.getQueueSnapshot().activeIds);
   streamStore.setQueue({
     active: q.active ?? activeIds[0] ?? null,
     activeIds,

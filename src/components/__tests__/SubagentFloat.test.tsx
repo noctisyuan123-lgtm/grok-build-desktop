@@ -32,11 +32,12 @@ describe('SubagentFloat', () => {
       traces: [subagent()],
     });
     render(<SubagentFloat sessionRunIds={['session-run']} />);
-    expect(
-      screen.getByRole('button', { name: /Open subagent session: Review backend/i }),
-    ).toBeInTheDocument();
+    const card = screen.getByRole('button', { name: /Open subagent session: Review backend/i });
+    expect(card).toBeInTheDocument();
+    expect(card).toHaveAttribute('title', 'Review backend · Running · 2 tools');
     expect(screen.getByText('Review backend')).toBeInTheDocument();
     expect(screen.getByText('Running')).toBeInTheDocument();
+    expect(screen.getByText('2 tools')).toBeInTheDocument();
     expect(screen.getByText('Review backend').closest('.subagent-float')).toHaveClass('is-live');
   });
 
@@ -58,7 +59,7 @@ describe('SubagentFloat', () => {
       state: 'running',
       startedAt: 1_000,
       traces: [
-        subagent({ detail: 'Looking at auth' }),
+        subagent({ prompt: 'Look at auth and list the controllers.' }),
         {
           key: 'tool:1',
           kind: 'tool',
@@ -74,7 +75,12 @@ describe('SubagentFloat', () => {
 
     await user.click(screen.getByRole('button', { name: /Open subagent session/i }));
     expect(screen.getByRole('dialog', { name: /Subagent · Review backend/i })).toBeInTheDocument();
-    expect(screen.getByText('Looking at auth')).toBeInTheDocument();
+    expect(screen.getByText('Look at auth and list the controllers.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Look at auth and list the controllers.').closest('.message-user'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Activity')).toBeNull();
+    expect(screen.queryByText('Status')).toBeNull();
     expect(screen.getByText('Read auth.ts')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Close subagent session' }));
@@ -146,8 +152,48 @@ describe('SubagentFloat', () => {
       screen.getByRole('button', { name: /Open subagent session: Review frontend/i }),
     );
     expect(screen.getByRole('dialog', { name: /Subagent · Review frontend/i })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Switch subagent' })).toHaveValue(
+      'subagent:frontend',
+    );
     expect(screen.getByText('Frontend result')).toBeInTheDocument();
     expect(screen.queryByText('Backend result')).toBeNull();
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Switch subagent' }), [
+      'subagent:review',
+    ]);
+    expect(screen.getByRole('dialog', { name: /Subagent · Review backend/i })).toBeInTheDocument();
+    expect(screen.getByText('Backend result')).toBeInTheDocument();
+    expect(screen.queryByText('Frontend result')).toBeNull();
+  });
+
+  it('shows the parent Task prompt as a user bubble in the inspector', async () => {
+    const user = userEvent.setup();
+    streamStore.patchRun('session-run', {
+      state: 'done',
+      traces: [
+        {
+          key: 'tool:task-9',
+          kind: 'tool',
+          label: 'Review backend',
+          status: 'done',
+          startedAt: 900,
+          endedAt: 1_000,
+          prompt: 'Read auth.ts and summarize the controllers.',
+        },
+        subagent({
+          status: 'done',
+          endedAt: 2_000,
+          transcript: [{ key: 'response:0', kind: 'response', text: 'Two controllers.' }],
+        }),
+      ],
+    });
+    render(<SubagentFloat sessionRunIds={['session-run']} />);
+    await user.click(screen.getByRole('button', { name: /Open subagent session/i }));
+    expect(screen.getByText('Read auth.ts and summarize the controllers.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Read auth.ts and summarize the controllers.').closest('.message-user'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Two controllers.')).toBeInTheDocument();
   });
 
   it('uses the main workflow renderer inside the independent drawer', async () => {
@@ -192,7 +238,7 @@ describe('SubagentFloat', () => {
     await user.click(screen.getByRole('button', { name: 'Worked for 1.0s' }));
     await user.click(screen.getByRole('button', { name: 'Thought and used 1 tool' }));
     expect(screen.getByText('Thought briefly')).toBeInTheDocument();
-    expect(screen.getAllByText('Read workflow.ts')).toHaveLength(2);
+    expect(screen.getAllByText('Read workflow.ts')).toHaveLength(1);
   });
 
   it('resizes the drawer from its left edge and remembers the width', async () => {
@@ -207,13 +253,33 @@ describe('SubagentFloat', () => {
 
     const drawer = screen.getByRole('dialog', { name: /Subagent · Review backend/i });
     const resizer = screen.getByRole('separator', { name: 'Resize subagent window' });
-    expect(drawer).toHaveStyle({ width: '420px' });
+    expect(drawer).toHaveStyle({ width: '520px' });
 
     fireEvent.pointerDown(resizer, { button: 0, clientX: 900 });
     fireEvent.pointerMove(window, { clientX: 820 });
     fireEvent.pointerUp(window, { clientX: 820 });
 
-    expect(drawer).toHaveStyle({ width: '500px' });
-    expect(window.localStorage.getItem('grok-desktop-subagent-drawer-width')).toBe('500');
+    expect(drawer).toHaveStyle({ width: '600px' });
+    expect(window.localStorage.getItem('grok-desktop-subagent-drawer-width')).toBe('600');
+  });
+
+  it('closes the inspector when clicking outside the dock and drawer', async () => {
+    const user = userEvent.setup();
+    streamStore.patchRun('session-run', {
+      state: 'running',
+      traces: [subagent()],
+    });
+    render(
+      <div>
+        <button type="button">Outside</button>
+        <SubagentFloat sessionRunIds={['session-run']} />
+      </div>,
+    );
+
+    await user.click(screen.getByRole('button', { name: /Open subagent session/i }));
+    expect(screen.getByRole('dialog', { name: /Subagent · Review backend/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Outside' }));
+    expect(screen.queryByRole('dialog', { name: /Subagent · Review backend/i })).toBeNull();
   });
 });

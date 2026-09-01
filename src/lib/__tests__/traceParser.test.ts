@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  classifyEvent,
-  extractPlanEntries,
-  extractRunError,
-  extractUsage,
-} from '../traceParser';
+import { classifyEvent, extractPlanEntries, extractRunError, extractUsage } from '../traceParser';
 
 function eventOf(raw: unknown) {
   const result = classifyEvent(raw, 1_000);
@@ -132,6 +127,9 @@ describe('classifyEvent', () => {
       parent_session_id: 'parent_1',
       description: 'Review frontend quality',
       subagent_type: 'explore',
+      rawInput: {
+        prompt: 'Inspect the frontend for a11y regressions and list the files to change.',
+      },
     });
     const finished = eventOf({
       type: 'subagent_finished',
@@ -147,11 +145,33 @@ describe('classifyEvent', () => {
       label: 'Review frontend quality',
       status: 'running',
       parentKey: 'subagent:parent_1',
+      prompt: 'Inspect the frontend for a11y regressions and list the files to change.',
     });
     expect(finished.key).toBe(spawned.key);
     expect(finished.status).toBe('done');
     expect(finished.progress).toBe('17 tools · 2 turns');
     expect(finished.startedAt).toBe(0);
+  });
+
+  it('reads the parent prompt off an ACP Task tool_call', () => {
+    const event = eventOf({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'task-1',
+      title: 'Explore workspace again',
+      kind: 'task',
+      status: 'in_progress',
+      rawInput: {
+        description: 'Explore workspace again',
+        prompt: 'List the files in the workspace and say what each one is for.',
+        subagent_type: 'explore',
+      },
+    });
+    expect(event).toMatchObject({
+      key: 'tool:task-1',
+      kind: 'tool',
+      label: 'Explore workspace again',
+      prompt: 'List the files in the workspace and say what each one is for.',
+    });
   });
 
   it('reduces plan entries into one progress row', () => {

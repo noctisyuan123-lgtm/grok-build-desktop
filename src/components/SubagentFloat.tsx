@@ -10,22 +10,23 @@ import { createPortal } from 'react-dom';
 import { Bot, X } from 'lucide-react';
 import { useElapsed } from '../hooks/useElapsed';
 import { useRunSnapshot } from '../hooks/useRunSnapshot';
-import { useModalFocus } from '../hooks/useModalFocus';
 import { streamStore } from '../lib/streamStore';
-import type { TraceEvent, TraceStatus } from '../lib/traceParser';
+import { resolveSubagentPrompt, type TraceEvent, type TraceStatus } from '../lib/traceParser';
 import { PlanTodoList, resolvePlanEntriesFromTraces } from './PlanTodoList';
+import { LongTextMessage } from './LongTextMessage';
 import { TranscriptMessage } from './MessageItem';
+import { isLongUserText } from '../lib/longText';
 import { t } from '../i18n';
 
 const SUBAGENT_DRAWER_WIDTH_KEY = 'grok-desktop-subagent-drawer-width';
-const SUBAGENT_DRAWER_DEFAULT_WIDTH = 420;
-const SUBAGENT_DRAWER_MIN_WIDTH = 320;
-const SUBAGENT_DRAWER_MAX_WIDTH = 720;
+const SUBAGENT_DRAWER_DEFAULT_WIDTH = 520;
+const SUBAGENT_DRAWER_MIN_WIDTH = 360;
+const SUBAGENT_DRAWER_MAX_WIDTH = 760;
 
 /**
- * Compact floating cards above the composer for every subagent on the current
- * session's latest assistant run. Each card opens the same right-side drawer
- * with that child session's own workflow transcript and responses.
+ * Compact capsules above the composer for every subagent on the current
+ * session's latest assistant run. A capsule opens the right-side inspector
+ * with that child session's workflow transcript.
  */
 export function SubagentFloat({ sessionRunIds = [] }: { sessionRunIds?: readonly string[] }) {
   const focusRunId = useLatestSessionRunId(sessionRunIds);
@@ -38,7 +39,10 @@ export function SubagentFloat({ sessionRunIds = [] }: { sessionRunIds?: readonly
   const [drawerWidth, setDrawerWidth] = useState(readSubagentDrawerWidth);
   const resizingCleanupRef = useRef<(() => void) | null>(null);
   const drawerRef = useRef<HTMLDivElement | null>(null);
+  const dockRef = useRef<HTMLDivElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
+  const anyLive = subagents.some((item) => item.status === 'running');
+  const now = useTickingNow(anyLive);
 
   useEffect(() => {
     window.localStorage.setItem(SUBAGENT_DRAWER_WIDTH_KEY, String(drawerWidth));
@@ -56,10 +60,30 @@ export function SubagentFloat({ sessionRunIds = [] }: { sessionRunIds?: readonly
   }, [openKey, subagents]);
 
   const selected = subagents.find((item) => item.key === openKey) ?? null;
-  useModalFocus(selected != null, drawerRef, {
-    initialFocus: closeRef,
-    onEscape: () => setOpenKey(null),
-  });
+  const selectedElapsed = selected ? elapsedMs(selected.startedAt, selected.endedAt, now) : null;
+
+  useEffect(() => {
+    if (!openKey) return;
+    drawerRef.current?.focus();
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (drawerRef.current?.contains(target) || dockRef.current?.contains(target)) return;
+      setOpenKey(null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.isComposing || event.keyCode === 229) return;
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setOpenKey(null);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [openKey]);
 
   function startDrawerResize(event: ReactPointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
@@ -94,7 +118,7 @@ export function SubagentFloat({ sessionRunIds = [] }: { sessionRunIds?: readonly
 
   return (
     <>
-      <div className="subagent-float-list">
+      <div className="subagent-float-list" ref={dockRef} aria-label={t('subagent.dockTitle')}>
         {subagents.map((subagent) => {
           const live = subagent.status === 'running';
           const drawerOpen = selected?.key === subagent.key;
@@ -106,10 +130,17 @@ export function SubagentFloat({ sessionRunIds = [] }: { sessionRunIds?: readonly
               <button
                 type="button"
                 className="subagent-float-card"
+                title={
+                  subagent.progress
+                    ? `${subagent.label} · ${statusLabelFor(subagent.status)} · ${subagent.progress}`
+                    : `${subagent.label} · ${statusLabelFor(subagent.status)}`
+                }
                 aria-label={t('subagent.floatOpen', { label: subagent.label })}
                 aria-expanded={drawerOpen}
-                aria-controls={`subagent-session-drawer-${subagent.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
-                onClick={() => setOpenKey(subagent.key)}
+                aria-controls={
+                  drawerOpen ? `subagent-session-drawer-${sanitizeKey(subagent.key)}` : undefined
+                }
+                onClick={() => setOpenKey(drawerOpen ? null : subagent.key)}
               >
                 <Bot size={14} aria-hidden />
                 <span className="subagent-float-label">{subagent.label}</span>
@@ -126,63 +157,80 @@ export function SubagentFloat({ sessionRunIds = [] }: { sessionRunIds?: readonly
       </div>
       {selected
         ? createPortal(
-            <div
-              className="subagent-drawer-overlay"
-              role="presentation"
-              onClick={() => setOpenKey(null)}
+            <aside
+              id={`subagent-session-drawer-${sanitizeKey(selected.key)}`}
+              className="subagent-drawer"
+              ref={drawerRef}
+              role="dialog"
+              aria-modal="false"
+              aria-label={t('subagent.drawerTitle', { label: selected.label })}
+              style={{ width: `${drawerWidth}px` }}
+              tabIndex={-1}
             >
-              <aside
-                id={`subagent-session-drawer-${selected.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
-                className="subagent-drawer"
-                ref={drawerRef}
-                role="dialog"
-                aria-modal="true"
-                aria-label={t('subagent.drawerTitle', { label: selected.label })}
-                style={{ width: `${drawerWidth}px` }}
-                tabIndex={-1}
-                onClick={(event) => event.stopPropagation()}
-              >
-                <div
-                  aria-label={t('subagent.resize')}
-                  aria-orientation="vertical"
-                  aria-valuemax={SUBAGENT_DRAWER_MAX_WIDTH}
-                  aria-valuemin={SUBAGENT_DRAWER_MIN_WIDTH}
-                  aria-valuenow={drawerWidth}
-                  className="subagent-drawer-resizer"
-                  onKeyDown={(event) => {
-                    if (event.key === 'ArrowLeft') {
-                      event.preventDefault();
-                      nudgeDrawerWidth(16);
-                    } else if (event.key === 'ArrowRight') {
-                      event.preventDefault();
-                      nudgeDrawerWidth(-16);
-                    }
-                  }}
-                  onPointerDown={startDrawerResize}
-                  role="separator"
-                  tabIndex={0}
-                />
-                <header className="subagent-drawer-head">
-                  <div className="subagent-drawer-title">
-                    <Bot size={15} aria-hidden />
+              <div
+                aria-label={t('subagent.resize')}
+                aria-orientation="vertical"
+                aria-valuemax={SUBAGENT_DRAWER_MAX_WIDTH}
+                aria-valuemin={SUBAGENT_DRAWER_MIN_WIDTH}
+                aria-valuenow={drawerWidth}
+                className="subagent-drawer-resizer"
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowLeft') {
+                    event.preventDefault();
+                    nudgeDrawerWidth(16);
+                  } else if (event.key === 'ArrowRight') {
+                    event.preventDefault();
+                    nudgeDrawerWidth(-16);
+                  }
+                }}
+                onPointerDown={startDrawerResize}
+                role="separator"
+                tabIndex={0}
+              />
+              <header className="subagent-drawer-head">
+                <div className="subagent-drawer-title">
+                  {subagents.length > 1 ? (
+                    <label className="subagent-drawer-switcher">
+                      <span className="subagent-drawer-switcher-label">{t('subagent.switch')}</span>
+                      <select
+                        value={selected.key}
+                        aria-label={t('subagent.switch')}
+                        onChange={(event) => setOpenKey(event.target.value)}
+                      >
+                        {subagents.map((item) => (
+                          <option key={item.key} value={item.key}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
                     <strong>{selected.label}</strong>
-                    <span className={`subagent-drawer-status status-${selected.status}`}>
-                      {statusLabelFor(selected.status)}
-                    </span>
-                  </div>
-                  <button
-                    ref={closeRef}
-                    type="button"
-                    className="subagent-drawer-close"
-                    aria-label={t('subagent.drawerClose')}
-                    onClick={() => setOpenKey(null)}
+                  )}
+                  <span
+                    className={`subagent-drawer-meta-inline status-${selected.status}`}
+                    aria-label={statusLabelFor(selected.status)}
                   >
-                    <X size={16} aria-hidden />
-                  </button>
-                </header>
-                <SubagentDrawerBody runId={focusRunId} subagent={selected} />
-              </aside>
-            </div>,
+                    <span className={`subagent-status-dot status-${selected.status}`} aria-hidden />
+                    <span className="subagent-drawer-meta-text">
+                      {selectedElapsed != null
+                        ? formatDuration(selectedElapsed)
+                        : statusLabelFor(selected.status)}
+                    </span>
+                  </span>
+                </div>
+                <button
+                  ref={closeRef}
+                  type="button"
+                  className="subagent-drawer-close"
+                  aria-label={t('subagent.drawerClose')}
+                  onClick={() => setOpenKey(null)}
+                >
+                  <X size={16} aria-hidden />
+                </button>
+              </header>
+              <SubagentDrawerBody key={selected.key} runId={focusRunId} subagent={selected} />
+            </aside>,
             document.body,
           )
         : null}
@@ -195,47 +243,29 @@ function SubagentDrawerBody({ runId, subagent }: { runId: string; subagent: Trac
   const elapsed = useElapsed(subagent.startedAt, subagent.endedAt);
   const children = useMemo(() => {
     const traces = snapshot?.traces ?? [];
-    return traces.filter(
-      (trace) =>
-        trace.parentKey === subagent.key ||
-        (trace.kind !== 'subagent' &&
-          trace.key !== subagent.key &&
-          Boolean(trace.parentKey) &&
-          trace.parentKey === subagent.key),
-    );
+    return traces.filter((trace) => trace.parentKey === subagent.key);
   }, [snapshot?.traces, subagent.key]);
   const transcript = subagent.transcript ?? [];
   const live = subagent.status === 'running';
   const transcriptRunId = `${runId}:subagent:${subagent.key}`;
   const planEntries = useMemo(() => resolvePlanEntriesFromTraces(children), [children]);
-  const planNode = planEntries?.length ? <PlanTodoList entries={planEntries} /> : null;
+  const hasTranscript = transcript.length > 0;
+  const prompt = resolveSubagentPrompt(subagent, snapshot?.traces ?? []);
+  const emptyLabel = live ? t('subagent.emptyLive') : t('subagent.emptyDone');
 
   return (
     <div className="subagent-drawer-body">
-      <dl className="subagent-drawer-meta">
-        <div>
-          <dt>{t('subagent.metaStatus')}</dt>
-          <dd>{statusLabelFor(subagent.status)}</dd>
+      {prompt ? (
+        <div className="message message-user subagent-drawer-prompt">
+          {isLongUserText(prompt) ? (
+            <LongTextMessage text={prompt} />
+          ) : (
+            <pre className="message-body">{prompt}</pre>
+          )}
         </div>
-        {elapsed != null ? (
-          <div>
-            <dt>{t('subagent.metaElapsed')}</dt>
-            <dd>{formatDuration(elapsed)}</dd>
-          </div>
-        ) : null}
-        {subagent.progress ? (
-          <div>
-            <dt>{t('subagent.metaProgress')}</dt>
-            <dd>{subagent.progress}</dd>
-          </div>
-        ) : null}
-      </dl>
-      {subagent.detail ? (
-        <pre className="subagent-drawer-detail">
-          <code>{subagent.detail}</code>
-        </pre>
       ) : null}
-      {transcript.length > 0 ? (
+      {planEntries?.length ? <PlanTodoList entries={planEntries} /> : null}
+      {hasTranscript ? (
         <div className="subagent-drawer-transcript">
           <TranscriptMessage
             runId={transcriptRunId}
@@ -253,28 +283,18 @@ function SubagentDrawerBody({ runId, subagent }: { runId: string; subagent: Trac
             canUndo={false}
             showUndo={false}
           />
-          {planNode}
         </div>
-      ) : (
-        planNode
-      )}
-      {children.length > 0 ? (
-        <section className="subagent-drawer-children" aria-label={t('subagent.childTraces')}>
-          <h3>{t('subagent.childTraces')}</h3>
-          <ul>
-            {children.map((child) => (
-              <li key={child.key}>
-                <span className={`subagent-child-status status-${child.status}`} aria-hidden>
-                  {child.status === 'done' ? '✓' : child.status === 'error' ? '×' : '·'}
-                </span>
-                <span>{child.label}</span>
-                {child.detail ? <small>{child.detail}</small> : null}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : (
-        <p className="subagent-drawer-empty">{t('subagent.noChildTraces')}</p>
+      ) : children.length > 0 ? (
+        <ul className="subagent-drawer-tools" aria-label={t('message.traceAriaLabel')}>
+          {children.map((child) => (
+            <li key={child.key}>
+              <span className={`subagent-status-dot status-${child.status}`} aria-hidden />
+              <span>{child.label}</span>
+            </li>
+          ))}
+        </ul>
+      ) : planEntries?.length || prompt ? null : (
+        <p className="subagent-drawer-empty">{emptyLabel}</p>
       )}
     </div>
   );
@@ -334,6 +354,29 @@ function formatDuration(ms: number): string {
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.round((ms % 60_000) / 1000);
   return `${minutes}m ${seconds}s`;
+}
+
+function elapsedMs(
+  startedAt: number | null | undefined,
+  endedAt: number | null | undefined,
+  now: number,
+): number | null {
+  if (!startedAt) return null;
+  return (endedAt ?? now) - startedAt;
+}
+
+function useTickingNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const handle = window.setInterval(() => setNow(Date.now()), 200);
+    return () => window.clearInterval(handle);
+  }, [active]);
+  return now;
+}
+
+function sanitizeKey(key: string): string {
+  return key.replace(/[^a-zA-Z0-9_-]/g, '-');
 }
 
 function readSubagentDrawerWidth(): number {
