@@ -66,6 +66,7 @@ export function MessageList({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
   const editInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const editCaretInitializedForRef = useRef<string | null>(null);
   // Whether the viewport is pinned to the bottom. We only auto-follow
   // streaming text while this is true, so a user who scrolls up to read
   // history is never yanked back down.
@@ -90,11 +91,13 @@ export function MessageList({
 
   const startEditing = useCallback((message: MessageRef) => {
     if (!message.id || !message.canEdit) return;
+    editCaretInitializedForRef.current = null;
     setEditingId(message.id);
     setEditingText(message.userText ?? '');
   }, []);
 
   const cancelEditing = useCallback(() => {
+    editCaretInitializedForRef.current = null;
     setEditingId(null);
     setEditingText('');
   }, []);
@@ -104,16 +107,16 @@ export function MessageList({
       editInputRef.current = input;
       if (!input || !editingId) return;
       input.focus();
+      // Virtuoso can re-attach this row after the first paint. Only the first
+      // attach of a given edit should place the caret at the end; later
+      // attaches must leave the user's click/drag selection alone.
+      if (editCaretInitializedForRef.current === editingId) return;
+      editCaretInitializedForRef.current = editingId;
       const end = input.value.length;
       input.setSelectionRange(end, end);
     },
     [editingId],
   );
-
-  const keepEditCaretAtEnd = useCallback((input: HTMLTextAreaElement) => {
-    const end = input.value.length;
-    input.setSelectionRange(end, end);
-  }, []);
 
   const submitEditing = useCallback(() => {
     const text = editingText.trim();
@@ -254,7 +257,6 @@ export function MessageList({
                     className="message-edit-input"
                     value={editingText}
                     onChange={(event) => setEditingText(event.target.value)}
-                    onClick={(event) => keepEditCaretAtEnd(event.currentTarget)}
                     onKeyDown={(event) => {
                       if (event.key === 'Escape') {
                         event.preventDefault();

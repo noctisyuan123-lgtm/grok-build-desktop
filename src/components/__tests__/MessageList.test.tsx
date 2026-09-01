@@ -99,13 +99,15 @@ describe('MessageList session isolation', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'Edit prompt' }));
-    const input = screen.getByRole('textbox', { name: 'Edit prompt text' });
+    const input = screen.getByRole('textbox', { name: 'Edit prompt text' }) as HTMLTextAreaElement;
     expect(input).toHaveFocus();
-    expect((input as HTMLTextAreaElement).selectionStart).toBe('Original prompt'.length);
-    expect((input as HTMLTextAreaElement).selectionEnd).toBe('Original prompt'.length);
-    await user.click(input);
-    expect((input as HTMLTextAreaElement).selectionStart).toBe('Original prompt'.length);
-    expect((input as HTMLTextAreaElement).selectionEnd).toBe('Original prompt'.length);
+    expect(input.selectionStart).toBe('Original prompt'.length);
+    expect(input.selectionEnd).toBe('Original prompt'.length);
+    // Clicks after the initial focus must not snap the caret back to the end.
+    input.setSelectionRange(0, 4);
+    fireEvent.click(input);
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(4);
     await user.clear(input);
     await user.type(input, 'first line');
     await user.keyboard('{Shift>}{Enter}{/Shift}');
