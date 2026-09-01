@@ -155,7 +155,7 @@ describe('composer submit → queued run → streamed reply', () => {
       await tauri.emitQueue(runId, []);
       await tauri.emitRunState(runId, 'Running', { startedAt: Date.now() });
     });
-    expect(await screen.findByText('Starting…')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Working for/ })).toBeInTheDocument();
 
     // Streamed text chunks…
     await act(async () => {

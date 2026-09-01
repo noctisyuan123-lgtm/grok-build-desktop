@@ -90,6 +90,13 @@ function MessageItemImpl({
       });
   }, [snap, runId, fallbackText, html]);
 
+  const liveWaiting =
+    runIsLive &&
+    !transcript?.length &&
+    snap != null &&
+    snap.traces.length === 0 &&
+    snap.lastEventType == null;
+
   if (!snap) {
     if (transcript?.length) {
       return (
@@ -162,11 +169,11 @@ function MessageItemImpl({
   // Before the first worker response, show the current raw text immediately.
   return (
     <>
-      {transcript?.length ? (
+      {transcript?.length || liveWaiting ? (
         <TranscriptMessage
           key={runId}
           runId={runId}
-          transcript={transcript}
+          transcript={transcript ?? []}
           traces={traces}
           workedLabel={workedLabel ? t('message.workedFor', { duration: workedLabel }) : undefined}
           fallbackText={fallbackText}
@@ -189,16 +196,7 @@ function MessageItemImpl({
           complete, the same rail moves below the answer as a quiet, durable
           "Finished" disclosure — matching the reading order of Cursor's
           agent transcript without hiding the real-time workflow. */}
-          {runIsLive ? (
-            snap.traces.length > 0 || snap.lastEventType != null ? (
-              <TraceTimeline runId={runId} />
-            ) : (
-              <div className="agent-starting" role="status" aria-live="polite">
-                <span className="agent-starting-dot" aria-hidden />
-                <span>Starting…</span>
-              </div>
-            )
-          ) : null}
+          {runIsLive ? <TraceTimeline runId={runId} /> : null}
           {safeHtml ? (
             <div
               className="message-body markdown-body markdown-streaming"
@@ -223,7 +221,7 @@ function MessageItemImpl({
       {snap.state === 'cancelled' ? (
         <div className="message-error message-cancelled">{t('message.stopped')}</div>
       ) : null}
-      {!transcript?.length ? (
+      {!transcript?.length && !liveWaiting ? (
         <>
           <MessageActions
             sourceText={snap.text || fallbackText || ''}
@@ -315,7 +313,12 @@ export function TranscriptMessage({
             onClick={() => setExpanded((value) => !value)}
             aria-expanded={expanded}
           >
-            <span className="message-worked-summary">{header}</span>
+            <span
+              className={`message-worked-summary${live ? ' is-shimmer' : ''}`}
+              data-label={header}
+            >
+              {header}
+            </span>
             <ChevronDown
               className="message-worked-chevron"
               size={17}

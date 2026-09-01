@@ -10568,12 +10568,56 @@ body,
   width: 5px;
 }
 
-/* Live labels: low-contrast breathe only (no white sweep / heading shimmer). */
+/* Live thought/tool labels: low-contrast breathe. Working-for uses a glyph shine. */
 .transcript-thought.is-running > button > span,
 .activity-list .activity-item.activity-status-running .activity-row-label,
 .agent-starting > span:last-child {
   animation: activity-label-breathe 1.8s ease-in-out infinite;
   color: color-mix(in srgb, var(--conversation-text) 72%, transparent);
+}
+
+/* Highlight sweep on the live Working-for letters. Base color stays put;
+   only a white specular band travels across the glyphs. */
+.message-worked-summary.is-shimmer {
+  display: inline-block;
+  position: relative;
+}
+
+.message-worked-summary.is-shimmer::after {
+  background-image: linear-gradient(
+    105deg,
+    transparent 0%,
+    transparent 40%,
+    rgb(255 255 255 / 0.55) 47%,
+    #fff 50%,
+    rgb(255 255 255 / 0.55) 53%,
+    transparent 60%,
+    transparent 100%
+  );
+  background-position: 120% 0;
+  background-repeat: no-repeat;
+  background-size: 220% 100%;
+  background-clip: text;
+  color: transparent;
+  content: attr(data-label);
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: work-text-shine 2.2s linear infinite;
+}
+
+@keyframes work-text-shine {
+  0% {
+    background-position: 120% 0;
+  }
+  45% {
+    background-position: -20% 0;
+  }
+  100% {
+    background-position: -20% 0;
+  }
 }
 
 @keyframes activity-label-breathe {
@@ -10605,6 +10649,11 @@ body,
     opacity: 1;
     transform: none;
     -webkit-text-fill-color: currentColor;
+  }
+
+  .message-worked-summary.is-shimmer::after {
+    animation: none;
+    content: none;
   }
 }
 

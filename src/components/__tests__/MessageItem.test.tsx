@@ -973,6 +973,7 @@ describe('MessageItem rendering states', () => {
     const liveWork = screen.getByRole('button', { name: /Working for/ });
     expect(liveWork).toHaveAttribute('aria-expanded', 'true');
     expect(container.querySelector('.transcript-work')).toHaveClass('is-live');
+    expect(container.querySelector('.message-worked-summary')).toHaveClass('is-shimmer');
     expect(container.querySelector('.transcript-thought')).toHaveClass('is-running');
 
     await act(async () => {
@@ -988,6 +989,7 @@ describe('MessageItem rendering states', () => {
       'false',
     );
     expect(container.querySelector('.transcript-work')).not.toHaveClass('is-live');
+    expect(container.querySelector('.message-worked-summary')).not.toHaveClass('is-shimmer');
     expect(container.querySelector('.transcript-thought')).toBeNull();
 
     rerender(
@@ -1069,11 +1071,12 @@ describe('MessageItem rendering states', () => {
     expect(screen.getByRole('button', { name: 'Copy response' })).toBeInTheDocument();
   });
 
-  it('uses a quiet starting state without a placeholder timer or blank text block', () => {
+  it('shows Working for immediately instead of a starting placeholder', () => {
     applyStateChange('r-waiting', { state: 'Running', startedAt: Date.now() });
     const { container } = render(<MessageItem runId="r-waiting" />);
-    expect(screen.getByText('Starting…')).toBeInTheDocument();
-    expect(screen.queryByText(/0(?:\.0)?s/)).toBeNull();
+    expect(screen.getByRole('button', { name: /Working for/ })).toBeInTheDocument();
+    expect(container.querySelector('.message-worked-summary')).toHaveClass('is-shimmer');
+    expect(screen.queryByText('Starting…')).toBeNull();
     expect(container.querySelector('pre.streaming-raw')).toBeNull();
     expect(container.querySelector('.stream-caret')).toBeNull();
   });
