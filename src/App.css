@@ -2962,18 +2962,31 @@ body[data-completion-popup='true'] {
   padding: 0;
 }
 
-/* VSCode-style tables: cleaner borders, alternating rows */
+/* VSCode-style tables: cleaner borders, alternating rows.
+   Wrap + max-content so mixed CJK/Latin columns keep their min-width
+   instead of collapsing to one character under overflow-wrap: anywhere. */
+.markdown-body .md-table-wrap {
+  box-sizing: border-box;
+  margin: 12px 0 16px;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
 .markdown-body table {
   border-collapse: collapse;
   font-size: 0.9rem;
-  margin: 12px 0 16px;
-  width: 100%;
+  margin: 0;
+  min-width: 100%;
+  table-layout: auto;
+  width: max-content;
 }
 .markdown-body th,
 .markdown-body td {
   border: 1px solid #2a2a2a;
+  overflow-wrap: break-word;
   padding: 7px 12px;
   text-align: left;
+  word-break: keep-all;
 }
 .markdown-body th {
   background: #161616;
@@ -4645,14 +4658,22 @@ body[data-completion-popup='true'] {
   border-bottom: 1px solid rgba(255, 255, 255, 0.18);
   margin: 16px 0;
 }
+.message.message-assistant .markdown-body .md-table-wrap {
+  margin: 0 0 0.7em;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
 .message.message-assistant .markdown-body table:not(.vlist-t) {
   border: 0;
   border-collapse: collapse;
   border-radius: 0;
   font-size: inherit;
-  margin: 0 0 0.7em;
+  margin: 0;
+  min-width: 100%;
   overflow: visible;
-  width: 100%;
+  table-layout: auto;
+  width: max-content;
 }
 .message.message-assistant .markdown-body table:not(.vlist-t) > thead > tr > th,
 .message.message-assistant .markdown-body table:not(.vlist-t) > tbody > tr > td {
@@ -4661,12 +4682,16 @@ body[data-completion-popup='true'] {
   border-bottom: 1px solid rgba(255, 255, 255, 0.035);
   color: inherit;
   line-height: 1.5;
+  max-width: 36em;
+  overflow-wrap: break-word;
   padding: 12px 12px;
   text-align: left;
+  word-break: keep-all;
 }
 .message.message-assistant .markdown-body table:not(.vlist-t) > thead > tr > th {
   border-bottom-color: rgba(255, 255, 255, 0.09);
   font-weight: 600;
+  white-space: nowrap;
 }
 .message.message-assistant .markdown-body table:not(.vlist-t) > thead > tr > th:first-child,
 .message.message-assistant .markdown-body table:not(.vlist-t) > tbody > tr > td:first-child {

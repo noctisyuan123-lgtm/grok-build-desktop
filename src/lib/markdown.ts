@@ -43,6 +43,13 @@ const defaultFence = markdown.renderer.rules.fence!;
 markdown.renderer.rules.fence = (...args) =>
   defaultFence(...args).replace('</pre>', `${vscodeCopyButtonHtml()}</pre>`);
 
+// Wrap tables so wide grids can scroll horizontally. `overflow-wrap: anywhere`
+// on `.message-body` otherwise collapses each column's min-content to 1ch.
+markdown.renderer.rules.table_open = (tokens, idx, options, _env, slf) =>
+  `<div class="md-table-wrap">${slf.renderToken(tokens, idx, options)}`;
+markdown.renderer.rules.table_close = (tokens, idx, options, _env, slf) =>
+  `${slf.renderToken(tokens, idx, options)}</div>`;
+
 const defaultValidateLink = markdown.validateLink.bind(markdown);
 markdown.validateLink = (url) =>
   url.trim().toLowerCase().startsWith('file:') || defaultValidateLink(url);
