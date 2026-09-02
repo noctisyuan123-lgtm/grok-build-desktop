@@ -199,4 +199,43 @@ describe('MessageList session isolation', () => {
     expect(setIntervalSpy.mock.calls.some(([, delay]) => delay === 180)).toBe(false);
     setIntervalSpy.mockRestore();
   });
+
+  it('shows the jump control after a history jump', () => {
+    render(
+      <VirtuosoMockContext.Provider value={{ viewportHeight: 800, itemHeight: 64 }}>
+        <MessageList
+          messages={[
+            { id: 'user-1', runId: '', role: 'user', userText: 'First' },
+            { id: 'user-2', runId: '', role: 'user', userText: 'Second' },
+          ]}
+          focusId="user-1"
+          focusNonce={1}
+        />
+      </VirtuosoMockContext.Provider>,
+    );
+    expect(screen.getByRole('button', { name: 'Scroll to bottom' })).toBeInTheDocument();
+  });
+
+  it('pins the conversation scroller immediately when the jump control is clicked', () => {
+    render(
+      <VirtuosoMockContext.Provider value={{ viewportHeight: 800, itemHeight: 64 }}>
+        <MessageList
+          messages={[
+            { id: 'user-1', runId: '', role: 'user', userText: 'First' },
+            { id: 'user-2', runId: '', role: 'user', userText: 'Second' },
+          ]}
+          focusId="user-1"
+          focusNonce={1}
+        />
+      </VirtuosoMockContext.Provider>,
+    );
+    const scroller = document.querySelector('[data-virtuoso-scroller]') as HTMLElement | null;
+    expect(scroller).toBeInstanceOf(HTMLElement);
+    Object.defineProperty(scroller!, 'scrollHeight', { configurable: true, value: 2400 });
+    Object.defineProperty(scroller!, 'clientHeight', { configurable: true, value: 400 });
+    scroller!.scrollTop = 120;
+    fireEvent.click(screen.getByRole('button', { name: 'Scroll to bottom' }));
+    expect(scroller!.scrollTop).toBe(2000);
+    expect(screen.queryByRole('button', { name: 'Scroll to bottom' })).not.toBeInTheDocument();
+  });
 });

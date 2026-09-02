@@ -168,6 +168,43 @@ describe('PlanFloat', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it('hides a completed live plan as soon as the next user turn starts', async () => {
+    await act(async () => {
+      applyStateChange('done-plan', { state: 'Running', startedAt: Date.now() });
+      applyRunEvent(
+        'done-plan',
+        { type: 'unknown' },
+        {
+          type: 'plan',
+          entries: [
+            { content: 'Done A', status: 'completed' },
+            { content: 'Done B', status: 'completed' },
+          ],
+        },
+      );
+    });
+
+    const { container } = render(
+      <PlanFloat
+        activeRunId="done-plan"
+        messages={[
+          {
+            role: 'assistant',
+            runId: 'done-plan',
+            meta: {
+              planEntries: [
+                { text: 'Done A', status: 'completed' },
+                { text: 'Done B', status: 'completed' },
+              ],
+            },
+          },
+          { role: 'user' },
+        ]}
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it('collapses a completed plan and expands on toggle', async () => {
     const user = userEvent.setup();
     render(
@@ -263,7 +300,7 @@ describe('plan lifecycle helpers', () => {
     expect(findVisiblePlan(messages)?.entries[0]?.text).toBe('A');
   });
 
-  it('hides a completed plan only after the following turn has begun (second user turn)', () => {
+  it('hides a completed plan once the next user turn begins', () => {
     const base = [
       { role: 'user' as const },
       {
@@ -278,33 +315,15 @@ describe('plan lifecycle helpers', () => {
     ];
     // Just finished — still visible.
     expect(shouldShowPlan(base, 1)).toBe(true);
-    // Next user/assistant turn — still visible.
+    // Next user turn has begun — hide.
+    expect(shouldShowPlan([...base, { role: 'user' as const }], 1)).toBe(false);
+    expect(findVisiblePlan([...base, { role: 'user' as const }])).toBeNull();
     expect(
       shouldShowPlan(
         [...base, { role: 'user' as const }, { role: 'assistant' as const, meta: {} }],
         1,
       ),
-    ).toBe(true);
-    // The turn after that has begun — hide.
-    expect(
-      shouldShowPlan(
-        [
-          ...base,
-          { role: 'user' as const },
-          { role: 'assistant' as const, meta: {} },
-          { role: 'user' as const },
-        ],
-        1,
-      ),
     ).toBe(false);
-    expect(
-      findVisiblePlan([
-        ...base,
-        { role: 'user' as const },
-        { role: 'assistant' as const, meta: {} },
-        { role: 'user' as const },
-      ]),
-    ).toBeNull();
   });
 
   it('lets a later assistant plan supersede an earlier one', () => {

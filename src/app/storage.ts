@@ -43,7 +43,7 @@ export function storedLastRun() {
 
 export function storedMessages() {
   return coerceStreamingMessagesStopped(
-    readJsonStorage<unknown[]>(storageKeys.messages, []).filter(isChatMessage).slice(-120),
+    readJsonStorage<unknown[]>(storageKeys.messages, []).filter(isChatMessage),
   );
 }
 
@@ -69,10 +69,46 @@ export function storedActiveTabMessages(): ChatMessage[] | null {
     const activeId = window.localStorage.getItem(tabsActiveKey);
     const active = parsed.find((t) => t && t.id === activeId) ?? parsed[0];
     if (!active || !Array.isArray(active.messages)) return null;
-    return coerceStreamingMessagesStopped(
-      (active.messages as unknown[]).filter(isChatMessage).slice(-120),
-    );
+    return coerceStreamingMessagesStopped((active.messages as unknown[]).filter(isChatMessage));
   } catch {
     return null;
   }
+}
+
+/** Write JSON to localStorage. On quota failure, retry with compacted traces
+ *  so a full conversation list is not silently dropped on the next launch. */
+export function writeLocalStorageJson(key: string, value: unknown): boolean {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch {
+    // quota
+  }
+  try {
+    window.localStorage.setItem(key, JSON.stringify(compactPersistedValue(value)));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function compactPersistedValue(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+    const tab = entry as { messages?: unknown };
+    if (!Array.isArray(tab.messages)) return entry;
+    return { ...tab, messages: tab.messages.map(compactPersistedMessage) };
+  });
+}
+
+function compactPersistedMessage(message: unknown): unknown {
+  if (!message || typeof message !== 'object' || Array.isArray(message)) return message;
+  const row = message as { meta?: Record<string, unknown> };
+  if (!row.meta || typeof row.meta !== 'object') return message;
+  const traces = Array.isArray(row.meta.traces) ? row.meta.traces.slice(-30) : row.meta.traces;
+  const transcript = Array.isArray(row.meta.transcript)
+    ? row.meta.transcript.slice(-30)
+    : row.meta.transcript;
+  return { ...row, meta: { ...row.meta, traces, transcript } };
 }

@@ -1,8 +1,10 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
   classifyEvent,
+  extractCompaction,
   extractRunError,
   extractUsage,
+  type RunCompaction,
   type RunUsage,
   type TraceEvent,
   type TraceStatus,
@@ -54,6 +56,8 @@ export interface RunSnapshot {
   error: string | null;
   /** Authoritative token totals emitted by Grok; null until the first usage line. */
   usage: RunUsage | null;
+  /** Auto-compaction status for the current turn, if any. */
+  compaction: RunCompaction | null;
   /** Tool / subagent / task trace cards, in order of first appearance. */
   traces: TraceEvent[];
   /** Ordered ACP transcript. This keeps Thought -> Respond -> Tool -> Respond intact. */
@@ -218,6 +222,7 @@ class StreamStore {
       rootSessionId: null,
       error: null,
       usage: null,
+      compaction: null,
       traces: [],
       transcript: [],
     };
@@ -377,6 +382,17 @@ export function applyRunEvent(
       return;
     }
 
+    const compaction = extractCompaction(raw);
+    if (compaction) {
+      streamStore.patchRun(runId, {
+        compaction: mergeCompaction(cur?.compaction, compaction),
+        sessionId: cur?.sessionId ?? sessionId ?? null,
+        rootSessionId: cur?.rootSessionId ?? sessionId ?? null,
+        state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
+      });
+      return;
+    }
+
     if (usage) {
       streamStore.patchRun(runId, { usage });
     }
@@ -491,6 +507,18 @@ function closeThought(segments: TranscriptSegment[], endedAt: number): Transcrip
   const last = segments.at(-1);
   if (!last || last.kind !== 'thought' || last.endedAt != null) return segments;
   return [...segments.slice(0, -1), { ...last, endedAt }];
+}
+
+function mergeCompaction(
+  prev: RunCompaction | null | undefined,
+  next: RunCompaction,
+): RunCompaction {
+  return {
+    status: next.status,
+    percentage: next.percentage ?? prev?.percentage ?? null,
+    tokensBefore: next.tokensBefore ?? prev?.tokensBefore ?? null,
+    tokensAfter: next.tokensAfter ?? prev?.tokensAfter ?? null,
+  };
 }
 
 function readSessionId(raw: unknown): string | undefined {

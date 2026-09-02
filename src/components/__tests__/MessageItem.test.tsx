@@ -9,9 +9,11 @@ import {
   streamStore,
 } from '../../lib/streamStore';
 import { renderMarkdown } from '../../lib/markdown';
+import { __resetTableScrollForTests } from '../../lib/tableScroll';
 
 beforeEach(() => {
   streamStore.__reset();
+  __resetTableScrollForTests();
   delete (window as unknown as Record<string, unknown>).__pwned;
 });
 
@@ -46,6 +48,32 @@ describe('MessageItem sanitization', () => {
     expect(screen.getByText('legacy')).toBeInTheDocument();
     expect(container.querySelector('script')).toBeNull();
     expect((window as unknown as Record<string, unknown>).__pwned).toBeUndefined();
+  });
+
+  it('restores markdown table horizontal scroll and steers the wheel sideways', () => {
+    const html =
+      '<div class="md-table-wrap"><table><thead><tr><th>Name</th></tr></thead><tbody><tr><td>wide</td></tr></tbody></table></div>';
+    streamStore.setHtml('msg:table', html);
+    const first = render(<MessageItem runId="msg:table" fallbackText="wide" />);
+    const wrap = first.container.querySelector('.md-table-wrap') as HTMLDivElement;
+    expect(wrap).toBeTruthy();
+    Object.defineProperty(wrap, 'scrollWidth', { configurable: true, value: 800 });
+    Object.defineProperty(wrap, 'clientWidth', { configurable: true, value: 200 });
+    wrap.scrollLeft = 120;
+    wrap.dispatchEvent(new WheelEvent('wheel', { deltaY: 0, bubbles: true, cancelable: true }));
+    first.unmount();
+
+    const again = render(<MessageItem runId="msg:table" fallbackText="wide" />);
+    const restored = again.container.querySelector('.md-table-wrap') as HTMLDivElement;
+    Object.defineProperty(restored, 'scrollWidth', { configurable: true, value: 800 });
+    Object.defineProperty(restored, 'clientWidth', { configurable: true, value: 200 });
+    expect(restored.scrollLeft).toBe(120);
+
+    restored.scrollLeft = 0;
+    const wheel = new WheelEvent('wheel', { deltaY: 40, bubbles: true, cancelable: true });
+    restored.dispatchEvent(wheel);
+    expect(wheel.defaultPrevented).toBe(true);
+    expect(restored.scrollLeft).toBe(40);
   });
 
   it('re-parses restored HTML when live-imported fallback text grows', async () => {
@@ -1046,6 +1074,13 @@ describe('MessageItem rendering states', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it('shows an interrupted marker for a restored empty stopped turn', () => {
+    render(<MessageItem runId="msg:killed" fallbackText="" status="stopped" />);
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Turn interrupted before a reply was saved.',
+    );
+  });
+
   it('renders raw text only until the first streaming markdown result arrives', () => {
     applyRunEvent('r2', { type: 'text', data: 'streaming toke' });
     const { container } = render(<MessageItem runId="r2" />);
@@ -1069,6 +1104,35 @@ describe('MessageItem rendering states', () => {
     });
 
     expect(screen.getByRole('button', { name: 'Copy response' })).toBeInTheDocument();
+  });
+
+  it('shows a shimmering compaction line while auto-compact is running', async () => {
+    applyStateChange('compact-hint', { state: 'Running', startedAt: Date.now() });
+    applyRunEvent('compact-hint', { type: 'thought', data: 'checking' });
+    applyRunEvent(
+      'compact-hint',
+      { type: 'unknown' },
+      { type: 'auto_compact_started', percentage: 85 },
+    );
+    const { container } = render(<MessageItem runId="compact-hint" autoExpandWork />);
+    const hint = container.querySelector('.message-compaction .message-worked-summary');
+    expect(hint).toHaveTextContent('Auto-compacting conversation (85% full)…');
+    expect(hint).toHaveClass('is-shimmer');
+    expect(hint).toHaveAttribute('data-label', 'Auto-compacting conversation (85% full)…');
+
+    await act(async () => {
+      applyRunEvent(
+        'compact-hint',
+        { type: 'unknown' },
+        { type: 'auto_compact_completed', tokens_after: 120_000 },
+      );
+    });
+    expect(
+      container.querySelector('.message-compaction .message-worked-summary'),
+    ).toHaveTextContent('Conversation compacted');
+    expect(container.querySelector('.message-compaction .message-worked-summary')).not.toHaveClass(
+      'is-shimmer',
+    );
   });
 
   it('shows Working for immediately instead of a starting placeholder', () => {

@@ -1,4 +1,13 @@
-import { memo, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useRunHtml, useRunSnapshot } from '../hooks/useRunSnapshot';
 import { sanitizeHtml } from '../lib/sanitizeHtml';
@@ -7,8 +16,10 @@ import { MessageActions } from './MessageActions';
 import { t } from '../i18n';
 import { useElapsed } from '../hooks/useElapsed';
 import { sumEditStats, type EditStats } from '../lib/editStats';
-import type { TraceEvent } from '../lib/traceParser';
+import type { RunCompaction, TraceEvent } from '../lib/traceParser';
 import { exteriorMarkdownKey, type TranscriptSegment } from '../lib/streamStore';
+import type { ChatMessageStatus } from '../app/types';
+import { attachTableScroll } from '../lib/tableScroll';
 
 interface Props {
   runId: string;
@@ -23,6 +34,7 @@ interface Props {
   canFork?: boolean;
   showFork?: boolean;
   onFork?: () => void;
+  status?: ChatMessageStatus;
 }
 
 function MessageItemImpl({
@@ -38,6 +50,7 @@ function MessageItemImpl({
   canFork = false,
   showFork = false,
   onFork,
+  status,
 }: Props) {
   const snap = useRunSnapshot(runId);
   const html = useRunHtml(runId);
@@ -108,6 +121,7 @@ function MessageItemImpl({
           workedLabel={workedLabel ? t('message.workedFor', { duration: workedLabel }) : undefined}
           fallbackText={fallbackText}
           live={false}
+          compaction={null}
           responseTerminalReady
           startedAt={null}
           autoExpandWork={autoExpandWork}
@@ -124,11 +138,7 @@ function MessageItemImpl({
       return (
         <>
           {workedRow}
-          <div
-            className="message-body markdown-body"
-            dangerouslySetInnerHTML={{ __html: safeHtml }}
-            onClick={handleMarkdownClick}
-          />
+          <MarkdownHtml html={safeHtml} owner={runId} className="message-body markdown-body" />
           <MessageActions
             sourceText={fallbackText || ''}
             canUndo={canUndo}
@@ -160,6 +170,17 @@ function MessageItemImpl({
         </>
       );
     }
+    // Restart / install can coerce an in-flight turn to `stopped` before any
+    // text or transcript was checkpointed. Render a marker instead of an
+    // invisible assistant row so the follow-up does not look deleted.
+    if (workedRow) return workedRow;
+    if (status === 'stopped' || status === 'error') {
+      return (
+        <div className="message-error message-cancelled" role="status">
+          {status === 'error' ? t('message.runFailed') : t('message.interrupted')}
+        </div>
+      );
+    }
     return null;
   }
 
@@ -178,6 +199,7 @@ function MessageItemImpl({
           workedLabel={workedLabel ? t('message.workedFor', { duration: workedLabel }) : undefined}
           fallbackText={fallbackText}
           live={runIsLive}
+          compaction={snap.compaction}
           responseTerminalReady={responseTerminalReady}
           startedAt={snap.startedAt}
           autoExpandWork={autoExpandWork}
@@ -196,12 +218,17 @@ function MessageItemImpl({
           complete, the same rail moves below the answer as a quiet, durable
           "Finished" disclosure — matching the reading order of Cursor's
           agent transcript without hiding the real-time workflow. */}
-          {runIsLive ? <TraceTimeline runId={runId} /> : null}
+          {runIsLive ? (
+            <>
+              <CompactionHint compaction={snap.compaction} />
+              <TraceTimeline runId={runId} />
+            </>
+          ) : null}
           {safeHtml ? (
-            <div
+            <MarkdownHtml
+              html={safeHtml}
+              owner={runId}
               className="message-body markdown-body markdown-streaming"
-              dangerouslySetInnerHTML={{ __html: safeHtml }}
-              onClick={handleMarkdownClick}
             />
           ) : snap.text || fallbackText ? (
             <pre className="message-body streaming-raw">{snap.text || fallbackText || ''}</pre>
@@ -248,6 +275,7 @@ export function TranscriptMessage({
   workedLabel,
   fallbackText,
   live,
+  compaction,
   responseTerminalReady,
   startedAt,
   autoExpandWork,
@@ -264,6 +292,7 @@ export function TranscriptMessage({
   workedLabel?: string;
   fallbackText?: string;
   live: boolean;
+  compaction?: RunCompaction | null;
   responseTerminalReady: boolean;
   startedAt: number | null;
   autoExpandWork: boolean;
@@ -303,30 +332,33 @@ export function TranscriptMessage({
 
   return (
     <>
-      {header ? (
+      {header || compaction ? (
         <section
           className={`message-worked-rail transcript-work${expanded ? ' is-expanded' : ''}${live ? ' is-live' : ''}`}
         >
-          <button
-            type="button"
-            className="message-worked"
-            onClick={() => setExpanded((value) => !value)}
-            aria-expanded={expanded}
-          >
-            <span
-              className={`message-worked-summary${live ? ' is-shimmer' : ''}`}
-              data-label={header}
+          {header ? (
+            <button
+              type="button"
+              className="message-worked"
+              onClick={() => setExpanded((value) => !value)}
+              aria-expanded={expanded}
             >
-              {header}
-            </span>
-            <ChevronDown
-              className="message-worked-chevron"
-              size={17}
-              strokeWidth={1.8}
-              aria-hidden
-            />
-          </button>
-          {expanded ? (
+              <span
+                className={`message-worked-summary${live ? ' is-shimmer' : ''}`}
+                data-label={header}
+              >
+                {header}
+              </span>
+              <ChevronDown
+                className="message-worked-chevron"
+                size={17}
+                strokeWidth={1.8}
+                aria-hidden
+              />
+            </button>
+          ) : null}
+          <CompactionHint compaction={compaction} />
+          {header && expanded ? (
             <div className="transcript-segments">
               {phases.map((phase, phaseIndex) => {
                 const hasClosedResponse = phase.response?.kind === 'response';
@@ -726,13 +758,64 @@ function MarkdownSegment({
       .catch(() => {});
   }, [cacheKey, text]);
   return safeHtml ? (
-    <div
+    <MarkdownHtml
+      html={safeHtml}
+      owner={cacheKey}
       className={`message-body markdown-body ${className}`}
-      dangerouslySetInnerHTML={{ __html: safeHtml }}
-      onClick={handleMarkdownClick}
     />
   ) : (
     <pre className={`message-body streaming-raw ${className}`}>{text}</pre>
+  );
+}
+
+function MarkdownHtml({
+  html,
+  owner,
+  className,
+}: {
+  html: string;
+  owner: string;
+  className?: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    return attachTableScroll(owner, root);
+  }, [html, owner]);
+
+  return (
+    <div
+      ref={ref}
+      className={className}
+      dangerouslySetInnerHTML={{ __html: html }}
+      onClick={handleMarkdownClick}
+    />
+  );
+}
+
+function compactionLabel(compaction: RunCompaction): string | null {
+  if (compaction.status === 'cancelled') return null;
+  if (compaction.status === 'failed') return t('message.compactFailed');
+  if (compaction.status === 'done') return t('message.compacted');
+  if (compaction.percentage != null) {
+    return t('message.compactingPercent', { percent: Math.round(compaction.percentage) });
+  }
+  return t('message.compacting');
+}
+
+function CompactionHint({ compaction }: { compaction?: RunCompaction | null }) {
+  if (!compaction) return null;
+  const label = compactionLabel(compaction);
+  if (!label) return null;
+  const live = compaction.status === 'running';
+  return (
+    <div className="message-compaction" role="status">
+      <span className={`message-worked-summary${live ? ' is-shimmer' : ''}`} data-label={label}>
+        {label}
+      </span>
+    </div>
   );
 }
 

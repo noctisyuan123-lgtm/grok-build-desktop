@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { storageKeys, tabsActiveKey, tabsStorageKey } from '../constants';
 import {
   loadIdMap,
@@ -8,6 +8,7 @@ import {
   storedLastRun,
   storedMessages,
   storedRunHistory,
+  writeLocalStorageJson,
 } from '../storage';
 import type { ChatMessage } from '../types';
 import type { ToolRun } from '../../lib/grok';
@@ -81,15 +82,15 @@ describe('storedRunHistory / storedLastRun', () => {
 });
 
 describe('storedMessages', () => {
-  it('filters invalid entries and keeps only the newest 120', () => {
+  it('filters invalid entries without dropping a long transcript', () => {
     const valid = Array.from({ length: 130 }, (_, i) => message(`m${i}`));
     window.localStorage.setItem(
       storageKeys.messages,
       JSON.stringify([{ id: 1, role: 'user' }, ...valid]),
     );
     const messages = storedMessages();
-    expect(messages).toHaveLength(120);
-    expect(messages[0].id).toBe('m10');
+    expect(messages).toHaveLength(130);
+    expect(messages[0].id).toBe('m0');
     expect(messages[messages.length - 1]?.id).toBe('m129');
   });
 
@@ -148,5 +149,27 @@ describe('storedActiveTabMessages', () => {
     window.localStorage.setItem(tabsStorageKey, JSON.stringify(tabs));
     window.localStorage.setItem(tabsActiveKey, 't1');
     expect(storedActiveTabMessages()?.map((m) => m.id)).toEqual(['good']);
+  });
+});
+
+describe('writeLocalStorageJson', () => {
+  it('writes JSON and retries a compacted payload when quota is exceeded', () => {
+    expect(writeLocalStorageJson('k', { a: 1 })).toBe(true);
+    expect(JSON.parse(window.localStorage.getItem('k')!)).toEqual({ a: 1 });
+
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    setItem.mockImplementationOnce(() => {
+      throw new DOMException('quota', 'QuotaExceededError');
+    });
+    const tabs = [
+      {
+        id: 't1',
+        messages: [{ id: 'm1', meta: { traces: Array.from({ length: 80 }, (_, i) => i) } }],
+      },
+    ];
+    expect(writeLocalStorageJson('tabs', tabs)).toBe(true);
+    const stored = JSON.parse(window.localStorage.getItem('tabs')!) as typeof tabs;
+    expect(stored[0]?.messages[0]?.meta.traces).toHaveLength(30);
+    setItem.mockRestore();
   });
 });

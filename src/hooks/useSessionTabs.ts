@@ -9,7 +9,7 @@ import type { ToolRun } from '../lib/grok';
 import { defaultTabName, makeTab, type Tab, type TabMessage } from '../lib/tabs';
 import type { ChatMessage, Mode } from '../app/types';
 import { storageKeys, tabsActiveKey, tabsStorageKey } from '../app/constants';
-import { storedMessages } from '../app/storage';
+import { storedMessages, writeLocalStorageJson } from '../app/storage';
 
 export interface SessionTabsDeps {
   messages: ChatMessage[];
@@ -202,11 +202,7 @@ export function useSessionTabs(deps: SessionTabsDeps) {
   // Persist tabs (and the active id) whenever the array changes. This is the
   // single source of truth across reloads; localStorage hydrates on next boot.
   useEffect(() => {
-    try {
-      window.localStorage.setItem(tabsStorageKey, JSON.stringify(tabs));
-    } catch {
-      // quota or serialization error — non-fatal; in-memory state survives.
-    }
+    writeLocalStorageJson(tabsStorageKey, tabs);
   }, [tabs]);
   useEffect(() => {
     if (activeTabId) window.localStorage.setItem(tabsActiveKey, activeTabId);

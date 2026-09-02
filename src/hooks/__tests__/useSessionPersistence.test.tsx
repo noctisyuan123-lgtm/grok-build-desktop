@@ -60,13 +60,14 @@ describe('useSessionPersistence in the browser (no Tauri runtime)', () => {
     expect(window.localStorage.getItem('grok-desktop-run-count-total')).toBe('8');
   });
 
-  it('appendMessage keeps only the newest 120 messages', () => {
+  it('appendMessage keeps the full transcript', () => {
     const { result } = render();
     act(() => {
       for (let i = 0; i < 125; i += 1) result.current.appendMessage(message(`m${i}`));
     });
-    expect(result.current.messages).toHaveLength(120);
-    expect(result.current.messages[0].id).toBe('m5');
+    expect(result.current.messages).toHaveLength(125);
+    expect(result.current.messages[0].id).toBe('m0');
+    expect(result.current.messages[124].id).toBe('m124');
   });
 
   it('mirrors mode and theme changes to localStorage and the DOM theme attribute', () => {
@@ -129,6 +130,29 @@ describe('useSessionPersistence desktop restore guards', () => {
     expect(result.current.actionPolicy).toBe('review');
     expect(result.current.history).toHaveLength(1);
     expect(result.current.lastRun?.command).toBe('grok');
+  });
+
+  it('does not replace a longer local history with a shorter session_state snapshot', async () => {
+    window.localStorage.setItem(
+      storageKeys.runHistory,
+      JSON.stringify([
+        toolRun({ command: 'local-1' }),
+        toolRun({ command: 'local-2' }),
+        toolRun({ command: 'local-3' }),
+      ]),
+    );
+    mockIPC((cmd) =>
+      cmd === 'load_session_state'
+        ? { history: [toolRun({ command: 'stale-only' })], messages: [] }
+        : undefined,
+    );
+    const { result } = render();
+    await waitFor(() => expect(result.current.sessionLoaded).toBe(true));
+    expect(result.current.history.map((run) => run.command)).toEqual([
+      'local-1',
+      'local-2',
+      'local-3',
+    ]);
   });
 
   it('filters malformed restored history/messages through the type guards', async () => {

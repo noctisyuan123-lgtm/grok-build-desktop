@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { classifyEvent, extractPlanEntries, extractRunError, extractUsage } from '../traceParser';
+import {
+  classifyEvent,
+  extractCompaction,
+  extractPlanEntries,
+  extractRunError,
+  extractUsage,
+} from '../traceParser';
 
 function eventOf(raw: unknown) {
   const result = classifyEvent(raw, 1_000);
@@ -256,5 +262,34 @@ describe('run metadata extraction', () => {
   it('extracts run-level error lines without turning them into tools', () => {
     expect(extractRunError({ type: 'error', message: 'quota exhausted' })).toBe('quota exhausted');
     expect(extractRunError({ type: 'text', data: 'error' })).toBeUndefined();
+  });
+
+  it('reads streaming-json and ACP auto-compaction notifications', () => {
+    expect(extractCompaction({ type: 'auto_compact_started', percentage: 85 })).toMatchObject({
+      status: 'running',
+      percentage: 85,
+    });
+    expect(
+      extractCompaction({
+        sessionUpdate: 'auto_compact_started',
+        tokens_used: 400_000,
+        context_window: 500_000,
+      }),
+    ).toMatchObject({ status: 'running', percentage: 80 });
+    expect(
+      extractCompaction({
+        type: 'session_notification',
+        sessionUpdate: 'auto_compact_completed',
+        tokens_before: 420_000,
+        tokens_after: 180_000,
+      }),
+    ).toMatchObject({ status: 'done', tokensBefore: 420_000, tokensAfter: 180_000 });
+    expect(extractCompaction({ type: 'system', subtype: 'compact_boundary' })).toMatchObject({
+      status: 'done',
+    });
+    expect(extractCompaction({ type: 'auto_compact_failed' })?.status).toBe('failed');
+    expect(extractCompaction({ type: 'auto_compact_cancelled' })?.status).toBe('cancelled');
+    expect(extractCompaction({ type: 'tool_call' })).toBeUndefined();
+    expect(classifyEvent({ type: 'auto_compact_started', percentage: 85 }).kind).toBe('ignore');
   });
 });

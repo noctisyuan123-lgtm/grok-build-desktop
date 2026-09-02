@@ -1137,8 +1137,8 @@ pre {
   border: 0;
   border-radius: 0;
   box-shadow: none;
-  min-height: 104px;
-  padding: 12px 16px;
+  min-height: 38px;
+  padding: 8px 16px;
   resize: none;
   width: 100%;
 }
@@ -2786,8 +2786,8 @@ body[data-completion-popup='true'] {
 .composer textarea {
   line-height: 1.45;
   max-height: 90px;
-  min-height: 44px;
-  padding: 11px 14px 6px;
+  min-height: 38px;
+  padding: 8px 14px 6px;
 }
 
 .composer-footer {
@@ -2971,6 +2971,8 @@ body[data-completion-popup='true'] {
   max-width: 100%;
   min-width: 0;
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
 }
 .markdown-body table {
   border-collapse: collapse;
@@ -4663,6 +4665,8 @@ body[data-completion-popup='true'] {
   max-width: 100%;
   min-width: 0;
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
 }
 .message.message-assistant .markdown-body table:not(.vlist-t) {
   border: 0;
@@ -5028,9 +5032,9 @@ body[data-completion-popup='true'] {
 .composer textarea {
   flex: 1;
   resize: none;
-  min-height: 44px;
+  min-height: 38px;
   max-height: 240px;
-  padding: 11px 14px;
+  padding: 8px 14px;
   border-radius: 12px;
   border: 1px solid var(--grok-border-2);
   background: var(--grok-bg-2);
@@ -5310,7 +5314,56 @@ body[data-theme='light'] .hljs-comment {
 
 /* Cursor-style live context ring below the input's lower-right edge. */
 .composer-row {
+  overflow: visible;
   position: relative;
+}
+
+.message-list-shell {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+}
+
+.jump-to-bottom {
+  align-items: center;
+  background: #2c2c2c;
+  border: 1px solid #3d3d3d;
+  border-radius: 50%;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  height: 32px;
+  justify-content: center;
+  left: 50%;
+  padding: 0;
+  pointer-events: auto;
+  position: absolute;
+  bottom: 16px;
+  transform: translateX(-50%);
+  width: 32px;
+  z-index: 6;
+}
+
+.jump-to-bottom:hover,
+.jump-to-bottom:focus-visible {
+  background: #3a3a3a;
+  border-color: #4a4a4a;
+}
+
+.jump-to-bottom:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.35);
+  outline-offset: 2px;
+}
+
+.theme-light .jump-to-bottom {
+  background: #3a3a3a;
+  border-color: #4a4a4a;
+  color: #fff;
 }
 
 /* Plan chip sits in the composer stack (not over the transcript). Same
@@ -8372,10 +8425,10 @@ button.activity-row:hover .activity-row-label {
 @keyframes activity-breathe {
   0%,
   100% {
-    opacity: 0.3;
+    opacity: 0.42;
   }
   50% {
-    opacity: 0.85;
+    opacity: 1;
   }
 }
 
@@ -9544,9 +9597,12 @@ body,
 /* Virtuoso renders the real viewport as a child scroller. Keep the wrapper
    from becoming a competing scrollport so the one visible scrollbar stays
    flush with the conversation panel's outer edge. */
+.conversation-panel > .conversation-scroll > .message-list-shell > [data-virtuoso-scroller],
 .conversation-panel > .conversation-scroll > [data-virtuoso-scroller] {
   box-sizing: border-box;
+  flex: 1 1 auto;
   height: 100%;
+  min-height: 0;
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
@@ -9697,7 +9753,7 @@ body,
 }
 .conversation-panel:not(.is-empty) .composer-input-shell > textarea,
 .theme-dark .conversation-panel:not(.is-empty) .composer-input-shell > textarea {
-  min-height: 58px;
+  min-height: 38px;
 }
 .theme-dark .composer-input-shell:focus-within {
   border-color: #555;
@@ -9711,9 +9767,9 @@ body,
   box-shadow: none;
   display: block;
   max-height: 240px;
-  min-height: 66px;
+  min-height: 38px;
   overflow-y: hidden;
-  padding: 12px 14px 6px;
+  padding: 8px 14px 4px;
   resize: none;
   width: 100%;
 }
@@ -10334,30 +10390,56 @@ body,
 }
 
 .activity-list .activity-row {
+  align-items: center;
   background: transparent;
   border: 0;
   border-radius: 0;
   font-size: 13px;
   justify-content: flex-start;
+  line-height: 20px;
   min-height: 20px;
   padding: 0;
 }
 
+.activity-list .activity-row-mark {
+  flex: 0 0 10px;
+  height: 10px;
+  margin: 0;
+  width: 10px;
+}
+
+.activity-list .activity-row-mark.status-running {
+  background: transparent;
+  flex-basis: 10px;
+  font-size: 0;
+  height: 10px;
+  line-height: 0;
+  margin: 0;
+  width: 10px;
+}
+
+.activity-list .activity-row-mark.status-running::after {
+  background: currentColor;
+  border-radius: 50%;
+  content: '';
+  display: block;
+  height: 5px;
+  width: 5px;
+}
+
 .activity-list .activity-row-label {
   color: color-mix(in srgb, var(--conversation-text) 72%, transparent);
+  display: flex;
+  align-items: center;
   flex: 1 1 auto;
   font-size: 13px;
   font-weight: 450;
+  line-height: 20px;
   max-width: none;
 }
 
 .activity-list .activity-item.activity-status-done .activity-row {
   opacity: 1;
-}
-
-.activity-list .activity-item.activity-status-running .activity-row-label {
-  color: var(--conversation-text);
-  font-weight: 520;
 }
 
 .activity-list .activity-row-mark.status-done {
@@ -10415,6 +10497,14 @@ body,
 
 .transcript-work > .message-worked {
   margin-bottom: 5px;
+}
+
+.message-compaction {
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  margin: 0 0 8px;
+  width: fit-content;
 }
 
 .transcript-segments {
@@ -10613,12 +10703,22 @@ body,
   width: 5px;
 }
 
-/* Live thought/tool labels: low-contrast breathe. Working-for uses a glyph shine. */
+/* Live thought labels: low-contrast breathe. Working-for uses a glyph shine. */
 .transcript-thought.is-running > button > span,
-.activity-list .activity-item.activity-status-running .activity-row-label,
 .agent-starting > span:last-child {
   animation: activity-label-breathe 1.8s ease-in-out infinite;
   color: color-mix(in srgb, var(--conversation-text) 72%, transparent);
+}
+
+/* Dot + label share color and the same breathe so they pulse as one. */
+.activity-list .activity-item.activity-status-running .activity-row-mark.status-running,
+.activity-list .activity-item.activity-status-running .activity-row-label {
+  animation: activity-breathe 1.8s ease-in-out infinite;
+  color: var(--conversation-text);
+}
+
+.activity-list .activity-item.activity-status-running .activity-row-label {
+  font-weight: 560;
 }
 
 /* Highlight sweep on the live Working-for letters. Base color stays put;
@@ -10691,6 +10791,15 @@ body,
     animation: none;
     background: none;
     color: color-mix(in srgb, var(--conversation-text) 72%, transparent);
+    opacity: 1;
+    transform: none;
+    -webkit-text-fill-color: currentColor;
+  }
+
+  .activity-list .activity-item.activity-status-running .activity-row-mark.status-running,
+  .activity-list .activity-item.activity-status-running .activity-row-label {
+    animation: none;
+    color: var(--conversation-text);
     opacity: 1;
     transform: none;
     -webkit-text-fill-color: currentColor;
@@ -10777,31 +10886,60 @@ body,
   font: inherit;
 }
 
+/* Table rows share one content-sized width, so add/del paint the full
+   scrollable line — including the part only visible after a horizontal drag. */
+.activity-diff-inner {
+  border-collapse: collapse;
+  display: table;
+  min-width: 100%;
+}
+
 .activity-diff-line {
-  display: flex;
-  min-height: 18px;
+  display: table-row;
 }
 
-.activity-diff-line.is-add {
-  background: rgba(48, 155, 92, 0.2);
-}
-
-.activity-diff-line.is-del {
-  background: rgba(199, 55, 80, 0.22);
+.activity-diff-number,
+.activity-diff-sign,
+.activity-diff-line code {
+  display: table-cell;
+  vertical-align: top;
 }
 
 .activity-diff-number {
+  box-sizing: border-box;
   color: var(--text-soft);
-  flex: 0 0 42px;
   padding-right: 9px;
   text-align: right;
   user-select: none;
+  width: 42px;
 }
 
 .activity-diff-sign {
-  flex: 0 0 20px;
   text-align: center;
   user-select: none;
+  width: 20px;
+}
+
+.activity-diff-line code {
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding-right: 12px;
+  white-space: pre;
+  width: 100%;
+}
+
+.activity-diff-line.is-add > *,
+.activity-diff-line.is-del > * {
+  background-clip: padding-box;
+}
+
+.activity-diff-line.is-add > * {
+  background-color: rgba(48, 155, 92, 0.2);
+}
+
+.activity-diff-line.is-del > * {
+  background-color: rgba(199, 55, 80, 0.22);
 }
 
 .activity-diff-line.is-add .activity-diff-sign {
@@ -10810,14 +10948,6 @@ body,
 
 .activity-diff-line.is-del .activity-diff-sign {
   color: #ff6b86;
-}
-
-.activity-diff-line code {
-  background: transparent;
-  color: inherit;
-  flex: 1;
-  font: inherit;
-  padding-right: 12px;
 }
 
 .theme-light .activity-detail,

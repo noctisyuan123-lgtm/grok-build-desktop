@@ -293,8 +293,13 @@ export const en = {
   'message.runFailed': 'Run failed',
   'message.runFailedWithError': 'Run failed: {error}',
   'message.stopped': 'Stopped by you.',
+  'message.interrupted': 'Turn interrupted before a reply was saved.',
   'message.traceAriaLabel': 'Tool and subagent activity',
   'message.workedFor': 'Worked for {duration}',
+  'message.compacting': 'Compacting conversation',
+  'message.compactingPercent': 'Auto-compacting conversation ({percent}% full)…',
+  'message.compacted': 'Conversation compacted',
+  'message.compactFailed': 'Auto-compact failed',
   'message.actions': 'Response actions',
   'message.promptActions': 'Prompt actions',
   'message.copy': 'Copy response',
@@ -340,6 +345,7 @@ export const en = {
   'plan.aria': 'Plan',
   'plan.progress': '{done}/{total}',
   'plan.toggle': 'Plan {done} of {total}',
+  'conversation.jumpToBottom': 'Scroll to bottom',
 
   // ── Title bar ─────────────────────────────────────────────────────────────
   'titleBar.toLight': 'Switch to light theme',

@@ -58,6 +58,7 @@ import {
   type ChatMessage,
 } from './app/types';
 import { defaultDrafts, storageKeys, tabsActiveKey, tabsStorageKey } from './app/constants';
+import { writeLocalStorageJson } from './app/storage';
 import { t } from './i18n';
 import { makeId } from './app/format';
 import { buildConversationReplayBlock, buildGrokArgs } from './app/grokArgs';
@@ -543,7 +544,7 @@ function App() {
             const updated = tabs.map((tab) =>
               tab && tab.id === activeId ? { ...tab, messages: snapshot } : tab,
             );
-            window.localStorage.setItem(tabsStorageKey, JSON.stringify(updated));
+            writeLocalStorageJson(tabsStorageKey, updated);
           }
         }
       } catch {
@@ -1715,6 +1716,7 @@ function App() {
             traces: m.meta?.traces,
             transcript: m.meta?.transcript,
             autoExpandWork: m.status === 'streaming',
+            status: m.status,
             id: m.id,
             canUndo: index === latestIndex && latestTurnCanUndo,
             showUndo: index === latestIndex && latestTurnCanUndo,
@@ -1834,6 +1836,7 @@ function App() {
                   />
                 ) : (
                   <MessageList
+                    key={activeTabId}
                     messages={messageRefs}
                     onAttachmentClick={setAttachmentPreview}
                     onUndoAssistant={undoLatestTurn}

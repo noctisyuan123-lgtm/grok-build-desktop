@@ -103,7 +103,7 @@ export function useSessionPersistence({
   }
 
   function appendMessage(message: ChatMessage) {
-    setMessages((current) => [...current, message].slice(-120));
+    setMessages((current) => [...current, message]);
   }
 
   useEffect(() => {
@@ -160,13 +160,16 @@ export function useSessionPersistence({
           if (isThemeMode(restored.themeMode)) {
             setThemeMode(restored.themeMode);
           }
-          setHistory(restoredHistory);
-          setLastRun(restoredLastRun);
+          // session_state.json is often a stale 300ms snapshot and does not
+          // store the tab list. Never replace a longer local history with a
+          // shorter file — that is how conversations "vanish" after an update.
+          setHistory((current) =>
+            current.length >= restoredHistory.length ? current : restoredHistory,
+          );
+          setLastRun((current) => current ?? restoredLastRun);
 
           const restoredMessages = Array.isArray(restored.messages)
-            ? coerceStreamingMessagesStopped(
-                restored.messages.filter(isChatMessage).slice(-120),
-              )
+            ? coerceStreamingMessagesStopped(restored.messages.filter(isChatMessage))
             : [];
           if (restoredMessages.length > 0) {
             // Same staleness rule as codingCwd above: only adopt the file's

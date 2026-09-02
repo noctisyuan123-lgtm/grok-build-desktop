@@ -459,6 +459,85 @@ export function extractUsage(raw: unknown): RunUsage | undefined {
   };
 }
 
+export type CompactionStatus = 'running' | 'done' | 'failed' | 'cancelled';
+
+/** Live / completed auto-compaction hint for the transcript. */
+export interface RunCompaction {
+  status: CompactionStatus;
+  percentage: number | null;
+  tokensBefore: number | null;
+  tokensAfter: number | null;
+}
+
+function compactionKind(obj: Record<string, unknown>): string {
+  const candidates = [
+    readField(obj, 'sessionUpdate', 'session_update'),
+    readField(obj, 'type'),
+    readField(obj, 'event', 'kind', 'subtype'),
+  ];
+  for (const candidate of candidates) {
+    const value = (candidate ?? '').toLowerCase();
+    if (
+      value.includes('auto_compact') ||
+      value === 'compact_boundary' ||
+      value.includes('compact_boundary')
+    ) {
+      return value;
+    }
+  }
+  const nested = readObj(obj, 'update');
+  return nested ? compactionKind(nested) : '';
+}
+
+function compactionPercent(obj: Record<string, unknown>): number | null {
+  const direct = readNumber(obj, 'percentage');
+  if (direct != null) {
+    const pct = direct > 0 && direct <= 1 ? direct * 100 : direct;
+    return Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : null;
+  }
+  const used = readNumber(obj, 'tokens_used', 'tokensUsed');
+  const window = readNumber(obj, 'context_window', 'contextWindow');
+  if (used != null && window != null && window > 0) {
+    return Math.max(0, Math.min(100, (used / window) * 100));
+  }
+  return null;
+}
+
+function compactionSource(raw: unknown): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const obj = raw as Record<string, unknown>;
+  const nested = readObj(obj, 'update');
+  const kind = compactionKind(obj);
+  if (kind) return nested && compactionKind(nested) ? nested : obj;
+  return nested && compactionKind(nested) ? nested : undefined;
+}
+
+/**
+ * Parse streaming-json `auto_compact_*` and ACP `sessionUpdate` compaction
+ * notifications. Returns undefined for unrelated payloads.
+ */
+export function extractCompaction(raw: unknown): RunCompaction | undefined {
+  const obj = compactionSource(raw);
+  if (!obj) return undefined;
+  const kind = compactionKind(obj);
+  if (!kind) return undefined;
+
+  const percentage = compactionPercent(obj);
+  const tokensBefore = readNumber(obj, 'tokens_before', 'tokensBefore') ?? null;
+  const tokensAfter = readNumber(obj, 'tokens_after', 'tokensAfter') ?? null;
+  const fields = { percentage, tokensBefore, tokensAfter };
+
+  if (kind.includes('auto_compact_started')) return { status: 'running', ...fields };
+  if (kind.includes('auto_compact_completed') || kind.includes('compact_boundary')) {
+    return { status: 'done', ...fields };
+  }
+  if (kind.includes('auto_compact_failed')) return { status: 'failed', ...fields };
+  if (kind.includes('auto_compact_cancelled') || kind.includes('auto_compact_canceled')) {
+    return { status: 'cancelled', ...fields };
+  }
+  return undefined;
+}
+
 export function extractRunError(raw: unknown): string | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
   const obj = raw as Record<string, unknown>;

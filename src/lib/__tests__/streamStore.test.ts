@@ -53,6 +53,30 @@ describe('streamStore', () => {
     expect(tools).toMatchObject({ kind: 'tools', traceKeys: ['tool:read-1'] });
   });
 
+  it('records auto-compaction without turning it into a tool row', () => {
+    applyRunEvent(
+      'compact-run',
+      { type: 'unknown' },
+      { type: 'auto_compact_started', percentage: 86 },
+    );
+    expect(streamStore.getRunSnapshot('compact-run')?.compaction).toMatchObject({
+      status: 'running',
+      percentage: 86,
+    });
+    expect(streamStore.getRunSnapshot('compact-run')?.traces).toEqual([]);
+    applyRunEvent(
+      'compact-run',
+      { type: 'unknown' },
+      { sessionUpdate: 'auto_compact_completed', tokens_before: 400_000, tokens_after: 120_000 },
+    );
+    expect(streamStore.getRunSnapshot('compact-run')?.compaction).toMatchObject({
+      status: 'done',
+      percentage: 86,
+      tokensBefore: 400_000,
+      tokensAfter: 120_000,
+    });
+  });
+
   it('end event marks done and records stopReason', () => {
     applyRunEvent('r1', { type: 'text', data: 'hi' });
     applyRunEvent('r1', { type: 'end', stopReason: 'EndTurn', sessionId: 's', requestId: 'r' });

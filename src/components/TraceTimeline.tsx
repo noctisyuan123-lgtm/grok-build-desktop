@@ -106,8 +106,7 @@ export function ActivityGroup({
   const settleTimer = useRef<number | null>(null);
   const previousActiveKeyRef = useRef<string | null>(null);
   // Newest running call only — collapsed groups stage that one row.
-  const activeTrace =
-    [...visible].reverse().find((trace) => trace.status === 'running') ?? null;
+  const activeTrace = [...visible].reverse().find((trace) => trace.status === 'running') ?? null;
   const activeKey = activeTrace?.key ?? null;
   // Stable content signature so settle logic does not re-fire on new array identity.
   const tracesFingerprint = visible.map((trace) => `${trace.key}:${trace.status}`).join('\0');
@@ -216,16 +215,17 @@ export function ActivityGroup({
 
   // Collapsed: one staged row (enter while running, settle on completion).
   // Expanded: every row once, static aside from the running-label shimmer in CSS.
-  const stagedRows = !expanded && (settlingTrace || activeTrace) ? (
-    <>
-      {settlingTrace && (!hideEditDetails || !isEditTrace(settlingTrace)) ? (
-        <ActivityRow key={`settle:${settlingTrace.key}`} trace={settlingTrace} motion="settle" />
-      ) : null}
-      {activeTrace && (!hideEditDetails || !isEditTrace(activeTrace)) ? (
-        <ActivityRow key={`enter:${activeTrace.key}`} trace={activeTrace} motion="enter" />
-      ) : null}
-    </>
-  ) : null;
+  const stagedRows =
+    !expanded && (settlingTrace || activeTrace) ? (
+      <>
+        {settlingTrace && (!hideEditDetails || !isEditTrace(settlingTrace)) ? (
+          <ActivityRow key={`settle:${settlingTrace.key}`} trace={settlingTrace} motion="settle" />
+        ) : null}
+        {activeTrace && (!hideEditDetails || !isEditTrace(activeTrace)) ? (
+          <ActivityRow key={`enter:${activeTrace.key}`} trace={activeTrace} motion="enter" />
+        ) : null}
+      </>
+    ) : null;
 
   return (
     <section className={`transcript-tool-group${expanded ? ' is-expanded' : ''}`}>
@@ -252,7 +252,9 @@ export function ActivityGroup({
             ) : (
               detailTraces.map((trace) => <ActivityRow key={trace.key} trace={trace} />)
             )
-          ) : stagedRows}
+          ) : (
+            stagedRows
+          )}
         </div>
       ) : null}
     </section>
@@ -264,19 +266,7 @@ function EditDetail({ trace }: { trace: TraceEvent }) {
   if (!edit.diff) return null;
   return (
     <div className="activity-detail-surface">
-      <pre className="activity-diff" aria-label={`Changes to ${trace.path || trace.label}`}>
-        {parseDiff(edit.diff).map((line, index) => (
-          <span key={`${index}:${line.text}`} className={`activity-diff-line is-${line.kind}`}>
-            <span className="activity-diff-number" aria-hidden>
-              {index + 1}
-            </span>
-            <span className="activity-diff-sign" aria-hidden>
-              {line.kind === 'add' ? '+' : line.kind === 'del' ? '−' : ' '}
-            </span>
-            <code>{line.text}</code>
-          </span>
-        ))}
-      </pre>
+      <DiffBlock path={trace.path} label={trace.label} diff={edit.diff} />
     </div>
   );
 }
@@ -353,13 +343,7 @@ function ActivitySummary({
   );
 }
 
-export function ActivityRow({
-  trace,
-  motion,
-}: {
-  trace: TraceEvent;
-  motion?: 'enter' | 'settle';
-}) {
+export function ActivityRow({ trace, motion }: { trace: TraceEvent; motion?: 'enter' | 'settle' }) {
   // Subagent (and tool) detail bodies stay collapsed until the user opens the
   // summary row — never auto-open nested activity inside Work for / TraceTimeline.
   const [expanded, setExpanded] = useState(false);
@@ -375,7 +359,6 @@ export function ActivityRow({
         ? `Edited ${trace.path}`
         : trace.label;
   const hasBody = Boolean(edit.diff || trace.detail);
-  const diffLines = edit.diff ? parseDiff(edit.diff) : [];
   const rowContent = (
     <>
       <span className={`activity-row-mark status-${trace.status}`} aria-hidden>
@@ -419,22 +402,7 @@ export function ActivityRow({
       {expanded && hasBody ? (
         <div className="activity-detail-surface">
           {edit.diff ? (
-            <pre className="activity-diff" aria-label={`Changes to ${trace.path || trace.label}`}>
-              {diffLines.map((line, index) => (
-                <span
-                  key={`${index}:${line.text}`}
-                  className={`activity-diff-line is-${line.kind}`}
-                >
-                  <span className="activity-diff-number" aria-hidden>
-                    {index + 1}
-                  </span>
-                  <span className="activity-diff-sign" aria-hidden>
-                    {line.kind === 'add' ? '+' : line.kind === 'del' ? '−' : ' '}
-                  </span>
-                  <code>{line.text}</code>
-                </span>
-              ))}
-            </pre>
+            <DiffBlock path={trace.path} label={trace.label} diff={edit.diff} />
           ) : (
             <pre className="activity-detail">
               <code>{trace.detail}</code>
@@ -449,6 +417,26 @@ export function ActivityRow({
 function shortPath(path: string | undefined): string | undefined {
   if (!path) return undefined;
   return path.split('/').filter(Boolean).at(-1) ?? path;
+}
+
+function DiffBlock({ path, label, diff }: { path?: string; label: string; diff: string }) {
+  return (
+    <pre className="activity-diff" aria-label={`Changes to ${path || label}`}>
+      <span className="activity-diff-inner">
+        {parseDiff(diff).map((line, index) => (
+          <span key={`${index}:${line.text}`} className={`activity-diff-line is-${line.kind}`}>
+            <span className="activity-diff-number" aria-hidden>
+              {index + 1}
+            </span>
+            <span className="activity-diff-sign" aria-hidden>
+              {line.kind === 'add' ? '+' : line.kind === 'del' ? '−' : ' '}
+            </span>
+            <code>{line.text}</code>
+          </span>
+        ))}
+      </span>
+    </pre>
+  );
 }
 
 function parseDiff(diff: string): Array<{ kind: 'add' | 'del' | 'context'; text: string }> {

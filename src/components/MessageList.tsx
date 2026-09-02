@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown } from 'lucide-react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { MessageItem } from './MessageItem';
 import { LongTextMessage } from './LongTextMessage';
@@ -9,6 +10,9 @@ import { t } from '../i18n';
 import type { TraceEvent } from '../lib/traceParser';
 import type { TranscriptSegment } from '../lib/streamStore';
 import type { ComposerAttachment } from '../lib/attachments';
+import type { ChatMessageStatus } from '../app/types';
+
+const AT_BOTTOM_PX = 24;
 
 export interface MessageRef {
   runId: string;
@@ -35,6 +39,7 @@ export interface MessageRef {
   canEdit?: boolean;
   showEdit?: boolean;
   attachments?: ComposerAttachment[];
+  status?: ChatMessageStatus;
 }
 
 interface Props {
@@ -50,6 +55,10 @@ interface Props {
   onAttachmentClick?: (attachment: ComposerAttachment) => void;
 }
 
+function scrollerAtBottom(el: HTMLElement): boolean {
+  return el.scrollHeight - el.clientHeight - el.scrollTop <= AT_BOTTOM_PX;
+}
+
 export function MessageList({
   messages,
   focusId,
@@ -61,6 +70,9 @@ export function MessageList({
   onAttachmentClick,
 }: Props) {
   const ref = useRef<VirtuosoHandle>(null);
+  const scrollerElRef = useRef<HTMLElement | null>(null);
+  const [scrollParent, setScrollParent] = useState<HTMLElement | null>(null);
+  const [showJump, setShowJump] = useState(false);
   // The message currently flashing after a history-click jump.
   const [flashId, setFlashId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -125,31 +137,56 @@ export function MessageList({
     cancelEditing();
   }, [cancelEditing, editingId, editingText, onEditUser]);
 
-  const scrollToLast = useCallback(
-    (smooth = false) => {
-      const lastIndex = messages.length - 1;
-      if (lastIndex < 0) return;
-      ref.current?.scrollToIndex({
-        index: lastIndex,
-        align: 'end',
-        behavior: smooth ? 'smooth' : 'auto',
-      });
-    },
-    [messages.length],
-  );
+  const bindScroller = useCallback((node: HTMLElement | Window | null) => {
+    const el = node instanceof HTMLElement ? node : null;
+    scrollerElRef.current = el;
+    setScrollParent((current) => (current === el ? current : el));
+  }, []);
 
-  // Coalesce streaming resize notifications to one scroll per animation
-  // frame. This avoids the old fixed interval, which kept fighting wheel
-  // input and caused visible scroll jank.
+  const pinToBottom = useCallback(() => {
+    const el = scrollerElRef.current;
+    if (!el) return;
+    const top = Math.max(0, el.scrollHeight - el.clientHeight);
+    el.scrollTop = top;
+    try {
+      ref.current?.scrollTo({ top, behavior: 'auto' });
+    } catch {
+      /* virtuoso mock */
+    }
+  }, []);
+
+  const syncJumpFromScroller = useCallback(() => {
+    const el = scrollerElRef.current;
+    if (!el) return;
+    const atBottom = scrollerAtBottom(el);
+    atBottomRef.current = atBottom;
+    setShowJump(!atBottom);
+  }, []);
+
+  const jumpToBottom = useCallback(() => {
+    atBottomRef.current = true;
+    pinToBottom();
+    const el = scrollerElRef.current;
+    setShowJump(el ? !scrollerAtBottom(el) : false);
+  }, [pinToBottom]);
+
+  useEffect(() => {
+    const el = scrollParent;
+    if (!el) return;
+    const onScroll = () => syncJumpFromScroller();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [scrollParent, syncJumpFromScroller]);
+
   const scheduleScrollToLast = useCallback(
     (force = false) => {
       if (scrollFrameRef.current != null) return;
       scrollFrameRef.current = window.requestAnimationFrame(() => {
         scrollFrameRef.current = null;
-        if (force || atBottomRef.current) scrollToLast(false);
+        if (force || atBottomRef.current) pinToBottom();
       });
     },
-    [scrollToLast],
+    [pinToBottom],
   );
 
   useEffect(
@@ -187,7 +224,8 @@ export function MessageList({
     if (!focusId) return;
     const idx = messages.findIndex((m) => m.id === focusId);
     if (idx < 0) return;
-    atBottomRef.current = false; // don't fight the jump with bottom-follow
+    atBottomRef.current = false;
+    setShowJump(true);
     ref.current?.scrollToIndex({ index: idx, align: 'center', behavior: 'smooth' });
     setFlashId(focusId);
     const t = window.setTimeout(() => setFlashId(null), 1300);
@@ -196,159 +234,175 @@ export function MessageList({
   }, [focusId, focusNonce]);
 
   return (
-    <Virtuoso
-      ref={ref}
-      data={messages}
-      // Keep Virtuoso rows keyed by the message identity, not their array
-      // index. Switching sessions replaces the whole data array; index reuse
-      // can otherwise leave a previous session's streaming MessageItem alive
-      // for one render and show the wrong run's response.
-      computeItemKey={(_, msg) => msg.id || msg.runId}
-      followOutput={(isAtBottom) => (isAtBottom ? 'auto' : false)}
-      // A 140px threshold treats a visible upward wheel gesture as "still at
-      // the bottom" and lets streaming updates pull the viewport back down.
-      // Keep this close to the actual edge so manual reading wins immediately.
-      atBottomThreshold={24}
-      atBottomStateChange={(bottom) => {
-        atBottomRef.current = bottom;
-      }}
-      // No inline style prop for height: Virtuoso's scroller defaults already
-      // include height 100% (applied via the CSSOM, so it works under the
-      // strict no-'unsafe-inline' style-src), and the codebase stays free of
-      // inline-style props (guarded in scripts/smoke_test.mjs).
-      increaseViewportBy={{ top: 200, bottom: 600 }}
-      itemContent={(_, msg) => {
-        const flash = msg.id && msg.id === flashId ? ' message-flash' : '';
-        if (msg.role === 'user') {
-          const isEditing = msg.id === editingId;
-          return (
-            <div className={`message message-user${flash}`} data-message-id={msg.id}>
-              {msg.attachments?.length ? (
-                <div className="message-attachments" aria-label="Attachments">
-                  {msg.attachments.map((attachment) => (
-                    <button
-                      aria-label={`Preview ${attachment.name}`}
-                      className={`message-attachment-trigger${
-                        attachment.mimeType.startsWith('image/') ? ' is-image' : ' is-file'
-                      }`}
-                      key={attachment.id}
-                      title={`Preview ${attachment.name}`}
-                      type="button"
-                      onClick={() => onAttachmentClick?.(attachment)}
-                    >
-                      {attachment.mimeType.startsWith('image/') ? (
-                        <img
-                          className="message-attachment-image"
-                          src={attachment.dataUrl}
-                          alt={attachment.name}
-                        />
-                      ) : (
-                        <span className="message-attachment-file">{attachment.name}</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-              {isEditing ? (
-                <div className="message-edit-box">
-                  <textarea
-                    ref={focusEditInput}
-                    aria-label={t('message.editPromptInput')}
-                    className="message-edit-input"
-                    value={editingText}
-                    onChange={(event) => setEditingText(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Escape') {
-                        event.preventDefault();
-                        cancelEditing();
-                        return;
-                      }
-                      // Edit follows the Composer convention: Enter commits,
-                      // Shift+Enter inserts a newline. Keep IME composition
-                      // untouched so Enter does not submit half-composed text.
-                      const native = event.nativeEvent as KeyboardEvent;
-                      if (
-                        event.key === 'Enter' &&
-                        !event.shiftKey &&
-                        !event.metaKey &&
-                        !event.ctrlKey &&
-                        !native.isComposing &&
-                        native.keyCode !== 229
-                      ) {
-                        event.preventDefault();
-                        submitEditing();
-                      }
-                    }}
-                    rows={Math.min(8, Math.max(3, editingText.split('\n').length))}
-                  />
-                  <div className="message-edit-controls">
-                    <button className="message-edit-cancel" type="button" onClick={cancelEditing}>
-                      {t('message.editCancel')}
-                    </button>
-                    <button
-                      className="message-edit-send"
-                      type="button"
-                      onClick={submitEditing}
-                      disabled={!editingText.trim()}
-                    >
-                      {t('message.editSend')}
-                    </button>
+    <div className="message-list-shell">
+      <Virtuoso
+        ref={ref}
+        scrollerRef={bindScroller}
+        data={messages}
+        // Keep Virtuoso rows keyed by the message identity, not their array
+        // index. Switching sessions replaces the whole data array; index reuse
+        // can otherwise leave a previous session's streaming MessageItem alive
+        // for one render and show the wrong run's response.
+        computeItemKey={(_, msg) => msg.id || msg.runId}
+        followOutput={(isAtBottom) => (isAtBottom ? 'auto' : false)}
+        atBottomThreshold={AT_BOTTOM_PX}
+        atBottomStateChange={(bottom) => {
+          atBottomRef.current = bottom;
+          setShowJump(!bottom);
+        }}
+        totalListHeightChanged={() => {
+          if (atBottomRef.current) pinToBottom();
+        }}
+        // No inline style prop for height: Virtuoso's scroller defaults already
+        // include height 100% (applied via the CSSOM, so it works under the
+        // strict no-'unsafe-inline' style-src), and the codebase stays free of
+        // inline-style props (guarded in scripts/smoke_test.mjs).
+        increaseViewportBy={{ top: 200, bottom: 160 }}
+        itemContent={(_, msg) => {
+          const flash = msg.id && msg.id === flashId ? ' message-flash' : '';
+          if (msg.role === 'user') {
+            const isEditing = msg.id === editingId;
+            return (
+              <div className={`message message-user${flash}`} data-message-id={msg.id}>
+                {msg.attachments?.length ? (
+                  <div className="message-attachments" aria-label="Attachments">
+                    {msg.attachments.map((attachment) => (
+                      <button
+                        aria-label={`Preview ${attachment.name}`}
+                        className={`message-attachment-trigger${
+                          attachment.mimeType.startsWith('image/') ? ' is-image' : ' is-file'
+                        }`}
+                        key={attachment.id}
+                        title={`Preview ${attachment.name}`}
+                        type="button"
+                        onClick={() => onAttachmentClick?.(attachment)}
+                      >
+                        {attachment.mimeType.startsWith('image/') ? (
+                          <img
+                            className="message-attachment-image"
+                            src={attachment.dataUrl}
+                            alt={attachment.name}
+                          />
+                        ) : (
+                          <span className="message-attachment-file">{attachment.name}</span>
+                        )}
+                      </button>
+                    ))}
                   </div>
-                </div>
-              ) : msg.userText ? (
-                isLongUserText(msg.userText) ? (
-                  <LongTextMessage text={msg.userText} />
-                ) : (
-                  <pre className="message-body">{msg.userText}</pre>
-                )
-              ) : null}
-              {!isEditing ? (
-                <MessageActions
-                  sourceText={msg.userText ?? ''}
-                  canUndo={Boolean(msg.canUndo)}
-                  showUndo={Boolean(msg.showUndo)}
-                  onUndo={msg.id && onUndoUser ? () => onUndoUser(msg.id!) : undefined}
-                  canEdit={Boolean(msg.canEdit)}
-                  showEdit={Boolean(msg.showEdit)}
-                  onEdit={msg.id ? () => startEditing(msg) : undefined}
-                  toolbarLabel={t('message.promptActions')}
-                  copyLabel={t('message.copyPrompt')}
-                  editLabel={t('message.editPrompt')}
-                  editDisabledLabel={t('message.editPromptLatestOnly')}
-                  undoLabel={t('message.undoPrompt')}
-                  undoDisabledLabel={t('message.undoPromptLatestOnly')}
-                />
-              ) : null}
+                ) : null}
+                {isEditing ? (
+                  <div className="message-edit-box">
+                    <textarea
+                      ref={focusEditInput}
+                      aria-label={t('message.editPromptInput')}
+                      className="message-edit-input"
+                      value={editingText}
+                      onChange={(event) => setEditingText(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Escape') {
+                          event.preventDefault();
+                          cancelEditing();
+                          return;
+                        }
+                        // Edit follows the Composer convention: Enter commits,
+                        // Shift+Enter inserts a newline. Keep IME composition
+                        // untouched so Enter does not submit half-composed text.
+                        const native = event.nativeEvent as KeyboardEvent;
+                        if (
+                          event.key === 'Enter' &&
+                          !event.shiftKey &&
+                          !event.metaKey &&
+                          !event.ctrlKey &&
+                          !native.isComposing &&
+                          native.keyCode !== 229
+                        ) {
+                          event.preventDefault();
+                          submitEditing();
+                        }
+                      }}
+                      rows={Math.min(8, Math.max(3, editingText.split('\n').length))}
+                    />
+                    <div className="message-edit-controls">
+                      <button className="message-edit-cancel" type="button" onClick={cancelEditing}>
+                        {t('message.editCancel')}
+                      </button>
+                      <button
+                        className="message-edit-send"
+                        type="button"
+                        onClick={submitEditing}
+                        disabled={!editingText.trim()}
+                      >
+                        {t('message.editSend')}
+                      </button>
+                    </div>
+                  </div>
+                ) : msg.userText ? (
+                  isLongUserText(msg.userText) ? (
+                    <LongTextMessage text={msg.userText} />
+                  ) : (
+                    <pre className="message-body">{msg.userText}</pre>
+                  )
+                ) : null}
+                {!isEditing ? (
+                  <MessageActions
+                    sourceText={msg.userText ?? ''}
+                    canUndo={Boolean(msg.canUndo)}
+                    showUndo={Boolean(msg.showUndo)}
+                    onUndo={msg.id && onUndoUser ? () => onUndoUser(msg.id!) : undefined}
+                    canEdit={Boolean(msg.canEdit)}
+                    showEdit={Boolean(msg.showEdit)}
+                    onEdit={msg.id ? () => startEditing(msg) : undefined}
+                    toolbarLabel={t('message.promptActions')}
+                    copyLabel={t('message.copyPrompt')}
+                    editLabel={t('message.editPrompt')}
+                    editDisabledLabel={t('message.editPromptLatestOnly')}
+                    undoLabel={t('message.undoPrompt')}
+                    undoDisabledLabel={t('message.undoPromptLatestOnly')}
+                  />
+                ) : null}
+              </div>
+            );
+          }
+          // Capture the row's current stable id explicitly. Virtuoso reuses row
+          // DOM while scrolling; this keeps the callback bound to the message
+          // represented by this render rather than an index or mutable lookup.
+          const assistantId = msg.id;
+          return (
+            <div className={`message message-assistant${flash}`} data-message-id={msg.id}>
+              <MessageItem
+                runId={msg.runId}
+                fallbackText={msg.fallbackText}
+                durationMs={msg.durationMs}
+                fallbackTraces={msg.traces}
+                fallbackTranscript={msg.transcript}
+                status={msg.status}
+                autoExpandWork={msg.autoExpandWork}
+                canUndo={Boolean(msg.canUndo)}
+                showUndo={Boolean(msg.showUndo)}
+                canFork={Boolean(msg.canFork)}
+                showFork={Boolean(msg.showFork)}
+                onUndo={
+                  assistantId && onUndoAssistant ? () => onUndoAssistant(assistantId) : undefined
+                }
+                onFork={
+                  assistantId && onForkAssistant ? () => onForkAssistant(assistantId) : undefined
+                }
+              />
             </div>
           );
-        }
-        // Capture the row's current stable id explicitly. Virtuoso reuses row
-        // DOM while scrolling; this keeps the callback bound to the message
-        // represented by this render rather than an index or mutable lookup.
-        const assistantId = msg.id;
-        return (
-          <div className={`message message-assistant${flash}`} data-message-id={msg.id}>
-            <MessageItem
-              runId={msg.runId}
-              fallbackText={msg.fallbackText}
-              durationMs={msg.durationMs}
-              fallbackTraces={msg.traces}
-              fallbackTranscript={msg.transcript}
-              autoExpandWork={msg.autoExpandWork}
-              canUndo={Boolean(msg.canUndo)}
-              showUndo={Boolean(msg.showUndo)}
-              canFork={Boolean(msg.canFork)}
-              showFork={Boolean(msg.showFork)}
-              onUndo={
-                assistantId && onUndoAssistant ? () => onUndoAssistant(assistantId) : undefined
-              }
-              onFork={
-                assistantId && onForkAssistant ? () => onForkAssistant(assistantId) : undefined
-              }
-            />
-          </div>
-        );
-      }}
-    />
+        }}
+      />
+      {showJump ? (
+        <button
+          type="button"
+          className="jump-to-bottom"
+          aria-label={t('conversation.jumpToBottom')}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={jumpToBottom}
+        >
+          <ArrowDown size={16} strokeWidth={2.4} aria-hidden />
+        </button>
+      ) : null}
+    </div>
   );
 }

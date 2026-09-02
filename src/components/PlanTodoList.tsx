@@ -59,7 +59,15 @@ export function PlanFloat({
   const runId = activeRunId || persisted?.runId || '';
   const snap = useRunSnapshot(runId);
   const liveEntries = useMemo(() => resolvePlanEntriesFromTraces(snap?.traces), [snap?.traces]);
-  const entries = liveEntries ?? persisted?.entries ?? null;
+  // Incomplete live plans always win. A completed live plan still has to pass
+  // the next-turn hide gate — otherwise the old run's traces keep the HUD up
+  // after the user has already started the following prompt.
+  const liveIncomplete = Boolean(liveEntries && !isPlanAllCompleted(liveEntries));
+  const entries = liveIncomplete
+    ? liveEntries
+    : persisted
+      ? (liveEntries ?? persisted.entries)
+      : null;
   const allDone = entries ? isPlanAllCompleted(entries) : false;
   const signature = entries?.map((entry) => `${entry.status}:${entry.text}`).join('\n') ?? '';
   const [collapsed, setCollapsed] = useState(allDone);
@@ -141,9 +149,8 @@ export type PlanMessageLike = {
  * Lifecycle for a plan attached to `messageIndex`:
  * - Incomplete plans stay visible across later turns until a later plan
  *   supersedes them or an update marks every step complete.
- * - Fully completed plans stay through the *next* user/assistant turn and are
- *   removed only once a second following user turn has begun
- *   (下下轮对话开始时再消失).
+ * - Fully completed plans stay until the *next* user turn begins
+ *   (全部划掉后下一轮对话开始时消失).
  * - A later assistant message with its own plan supersedes earlier plans.
  * Callers must only pass messages from the visible UI session/tab.
  */
@@ -168,9 +175,8 @@ export function shouldShowPlan(
   for (let index = messageIndex + 1; index < messages.length; index += 1) {
     if (messages[index]?.role === 'user') userTurnsAfter += 1;
   }
-  // 0: plan's turn just finished — keep. 1: one follow-up turn in flight/done
-  // — keep. 2+: the turn after that has begun — hide.
-  return userTurnsAfter < 2;
+  // 0: plan's turn just finished — keep. 1+: the next user turn has begun — hide.
+  return userTurnsAfter < 1;
 }
 
 /** The single plan the HUD should show, or null when none is in lifecycle. */

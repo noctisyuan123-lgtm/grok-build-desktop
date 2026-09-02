@@ -53,7 +53,9 @@ describe('ActivityGroup staged tool motion', () => {
     expect(screen.queryByText('Read a.ts')).toBeNull();
     expect(container.querySelectorAll('.activity-row')).toHaveLength(1);
     expect(container.querySelector('.activity-motion-enter')).toBeInTheDocument();
-    expect(container.querySelector('.activity-status-running .activity-row-label')).toBeInTheDocument();
+    expect(
+      container.querySelector('.activity-status-running .activity-row-label'),
+    ).toBeInTheDocument();
   });
 
   it('does not duplicate the active tool when the group is expanded', async () => {
@@ -154,7 +156,9 @@ describe('ActivityGroup staged tool motion', () => {
     const summary = screen.getByRole('button', { name: /Edited hello_world\.txt/ });
     expect(screen.queryByText('/Users/untitled/Desktop/hello_world.txt')).toBeNull();
     await user.click(summary);
-    expect(screen.getByLabelText('Changes to /Users/untitled/Desktop/hello_world.txt')).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Changes to /Users/untitled/Desktop/hello_world.txt'),
+    ).toBeInTheDocument();
     expect(screen.queryByText('Edited /Users/untitled/Desktop/hello_world.txt')).toBeNull();
   });
 
@@ -208,7 +212,9 @@ describe('ActivityGroup staged tool motion', () => {
     const summary = screen.getByRole('button', { name: /Edited hello_world\.txt/ });
     expect(screen.queryByText('Edited /Users/untitled/Desktop/hello_world.txt')).toBeNull();
     await user.click(summary);
-    expect(screen.getByLabelText('Changes to /Users/untitled/Desktop/hello_world.txt')).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Changes to /Users/untitled/Desktop/hello_world.txt'),
+    ).toBeInTheDocument();
     expect(screen.queryByText('Edited /Users/untitled/Desktop/hello_world.txt')).toBeNull();
   });
 });
@@ -397,6 +403,7 @@ describe('TraceTimeline activity rail', () => {
     expect(edit.closest('.activity-item')).toHaveClass('activity-is-edit');
     await user.click(edit);
     expect(screen.getByLabelText('Changes to .zshrc')).toBeInTheDocument();
+    expect(container.querySelector('.activity-diff-inner')).toBeTruthy();
     expect(container.querySelector('.activity-diff-line.is-add')).toHaveTextContent(
       'MODEL=k3-256k',
     );

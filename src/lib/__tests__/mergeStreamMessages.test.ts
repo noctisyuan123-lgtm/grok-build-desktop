@@ -29,6 +29,7 @@ function snap(partial: Partial<RunSnapshot> & Pick<RunSnapshot, 'id'>): RunSnaps
     sessionId: null,
     error: null,
     usage: null,
+    compaction: null,
     traces: [],
     transcript: [],
     ...partial,
