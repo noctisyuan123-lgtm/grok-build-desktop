@@ -91,6 +91,26 @@ struct CompletionPopupState {
     restore_on_focus: Mutex<Option<String>>,
 }
 
+/// Close-to-hide on macOS must wait until the window has left fullscreen /
+/// zoom. `hide()` during that transition leaves a black Space (transparent
+/// overlay titlebar + sidebar vibrancy + WKWebView).
+#[derive(Default)]
+struct PendingWindowHide(Mutex<bool>);
+
+impl PendingWindowHide {
+    fn request(&self) {
+        *self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
+    }
+
+    fn is_pending(&self) -> bool {
+        *self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn clear(&self) {
+        *self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
+    }
+}
+
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedWindowState {
@@ -4357,6 +4377,7 @@ fn open_completion_session(
     )
     .map_err(|error| error.to_string())?;
 
+    app.state::<PendingWindowHide>().clear();
     app.run_on_main_thread(move || {
         if let Some(popup) = popup {
             let _ = popup.hide();
@@ -4384,6 +4405,129 @@ fn is_allowed_app_navigation(url: &Url) -> bool {
         },
         _ => false,
     }
+}
+
+/// Hide the document window without quitting.
+///
+/// On macOS, two things fight a close-to-hide from native fullscreen:
+/// 1. `NSWindow.styleMask` still has FullScreen until the Space animation
+///    finishes. Tao's `is_fullscreen()` is a cache that drops earlier, so
+///    hiding on that flag leaves a black Space.
+/// 2. Tao's `windowDidExitFullscreen` then calls `restore_state_from_fullscreen`
+///    → `set_maximized` on the main queue, which orders the window back in.
+/// Wait for the native bit to clear, then keep ordering the window out until
+/// that restore loses.
+fn schedule_hide_document_window(window: &tauri::WebviewWindow, app: &tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        let native_fullscreen = macos_style_is_fullscreen(window);
+        let tao_fullscreen = window.is_fullscreen().unwrap_or(false);
+        app.state::<PendingWindowHide>().request();
+        if native_fullscreen || tao_fullscreen {
+            let _ = window.set_fullscreen(false);
+        }
+        defer_hide_after_close(window, app, native_fullscreen || tao_fullscreen);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        let _ = window.hide();
+    }
+}
+
+#[cfg(target_os = "macos")]
+const NS_WINDOW_FULLSCREEN: usize = 1 << 14;
+
+#[cfg(target_os = "macos")]
+fn macos_style_is_fullscreen(window: &tauri::WebviewWindow) -> bool {
+    let Ok(ptr) = window.ns_window() else {
+        return false;
+    };
+    if ptr.is_null() {
+        return false;
+    }
+    unsafe {
+        let ns_window = ptr as *mut AnyObject;
+        let style: usize = msg_send![ns_window, styleMask];
+        (style & NS_WINDOW_FULLSCREEN) != 0
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_order_out(window: &tauri::WebviewWindow) {
+    if let Ok(ptr) = window.ns_window() {
+        if !ptr.is_null() {
+            unsafe {
+                let ns_window = ptr as *mut AnyObject;
+                let none: Option<&AnyObject> = None;
+                let _: () = msg_send![ns_window, orderOut: none];
+            }
+        }
+    }
+    let _ = window.hide();
+}
+
+#[cfg(target_os = "macos")]
+async fn macos_native_fullscreen_async(
+    window: &tauri::WebviewWindow,
+    app: &tauri::AppHandle,
+) -> bool {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let window = window.clone();
+    if app
+        .run_on_main_thread(move || {
+            let _ = tx.send(macos_style_is_fullscreen(&window));
+        })
+        .is_err()
+    {
+        return true;
+    }
+    rx.await.unwrap_or(true)
+}
+
+#[cfg(target_os = "macos")]
+fn defer_hide_after_close(
+    window: &tauri::WebviewWindow,
+    app: &tauri::AppHandle,
+    wait_for_fullscreen_exit: bool,
+) {
+    let window = window.clone();
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if wait_for_fullscreen_exit {
+            for _ in 0..40 {
+                if !app.state::<PendingWindowHide>().is_pending() {
+                    return;
+                }
+                if !macos_native_fullscreen_async(&window, &app).await {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            // Tao restores maximized state asynchronously after the Space
+            // animation; hiding before that just gets ordered back in.
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        for _ in 0..16 {
+            if !app.state::<PendingWindowHide>().is_pending() {
+                return;
+            }
+            hide_window_on_main_thread(&window, &app);
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        if app.state::<PendingWindowHide>().is_pending() {
+            hide_window_on_main_thread(&window, &app);
+        }
+        app.state::<PendingWindowHide>().clear();
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn hide_window_on_main_thread(window: &tauri::WebviewWindow, app: &tauri::AppHandle) {
+    let window = window.clone();
+    let _ = app.run_on_main_thread(move || {
+        macos_order_out(&window);
+    });
 }
 
 fn navigation_guard_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
@@ -4422,6 +4566,7 @@ pub fn run() {
         .manage(PreviewState::default())
         .manage(TerminalState::default())
         .manage(CompletionPopupState::default())
+        .manage(PendingWindowHide::default())
         // The static-site preview iframe loads from this scheme instead of
         // srcdoc: the served document carries its own (permissive) CSP, so
         // the app CSP can stay strict (script-src 'self') without breaking
@@ -4496,10 +4641,14 @@ pub fn run() {
                             // desktop agent alive in the background. Cmd-Q
                             // remains the explicit app-level quit path.
                             api.prevent_close();
-                            if let Ok(size) = window_for_close.outer_size() {
-                                save_window_state(&state_path_for_close, size);
+                            let fullscreen = window_for_close.is_fullscreen().unwrap_or(false);
+                            let maximized = window_for_close.is_maximized().unwrap_or(false);
+                            if !fullscreen && !maximized {
+                                if let Ok(size) = window_for_close.outer_size() {
+                                    save_window_state(&state_path_for_close, size);
+                                }
                             }
-                            let _ = window_for_close.hide();
+                            schedule_hide_document_window(&window_for_close, &app_for_focus);
                         }
                         _ => {}
                     }
@@ -4710,8 +4859,10 @@ pub fn run() {
             // the existing process and its session back to the foreground.
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = &event {
+                app_handle.state::<PendingWindowHide>().clear();
                 if let Some(window) = app_handle.get_webview_window("main") {
                     let _ = window.show();
+                    let _ = window.unminimize();
                     let _ = window.set_focus();
                 }
             }
