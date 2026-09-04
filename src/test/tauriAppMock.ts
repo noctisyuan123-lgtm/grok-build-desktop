@@ -44,6 +44,10 @@ export interface TauriAppMock {
   ) => Promise<void>;
   /** Emit grok-desktop://queue-changed. */
   emitQueue: (active: string | null | string[], queue?: unknown[]) => Promise<void>;
+  /** Emit grok-desktop://wakeup-run for idle monitor follow-up turns. */
+  emitWakeup: (runId: string, laneId: string, sessionId?: string) => Promise<void>;
+  /** Emit grok-desktop://run-watching for a completed turn with live monitors. */
+  emitWatching: (runId: string, active: boolean, startedAt?: number, label?: string) => Promise<void>;
   /** Play a full streamed run: Running → text chunks → end → Done → empty queue. */
   streamReply: (runId: string, chunks: string[]) => Promise<void>;
 }
@@ -224,6 +228,10 @@ export function installTauriAppMock(overrides: Record<string, CommandHandler> = 
       queue,
     });
   };
+  const emitWakeup: TauriAppMock['emitWakeup'] = (runId, laneId, sessionId) =>
+    emit('grok-desktop://wakeup-run', { runId, laneId, sessionId: sessionId ?? null });
+  const emitWatching: TauriAppMock['emitWatching'] = (runId, active, startedAt, label) =>
+    emit('grok-desktop://run-watching', { runId, active, startedAt, label });
 
   return {
     calls,
@@ -233,6 +241,8 @@ export function installTauriAppMock(overrides: Record<string, CommandHandler> = 
     emitRunState,
     emitRunEvent,
     emitQueue,
+    emitWakeup,
+    emitWatching,
     streamReply: async (runId, chunks) => {
       await emitQueue(runId, []);
       await emitRunState(runId, 'Running', { startedAt: Date.now() });

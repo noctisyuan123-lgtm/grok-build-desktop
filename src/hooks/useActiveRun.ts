@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { streamStore, type RunSnapshot } from '../lib/streamStore';
+import { isRunInFlight, streamStore, type RunSnapshot } from '../lib/streamStore';
 
 export function useActiveRun(): RunSnapshot | undefined {
   return useSyncExternalStore(
@@ -38,7 +38,7 @@ export function useSessionActiveRun(runIds: readonly string[]): RunSnapshot | un
         const id = runIds[i];
         if (!id) continue;
         const snap = streamStore.getRunSnapshot(id);
-        if (snap && (snap.state === 'running' || snap.state === 'queued')) {
+        if (isRunInFlight(snap)) {
           return snap;
         }
       }
@@ -61,7 +61,7 @@ export function useSessionActiveRunProgress(runIds: readonly string[]): string {
         const id = runIds[i];
         if (!id) continue;
         const snap = streamStore.getRunSnapshot(id);
-        if (snap && (snap.state === 'running' || snap.state === 'queued')) {
+        if (snap && isRunInFlight(snap)) {
           return [snap.id, snap.state, snap.textChars, snap.thoughtChars, snap.htmlVersion].join(
             '\0',
           );
@@ -95,8 +95,7 @@ export function useHasInflight(opts?: {
     () => {
       if (sessionRunIds) {
         for (const id of sessionRunIds) {
-          const state = streamStore.getRunSnapshot(id)?.state;
-          if (state === 'running' || state === 'queued') return true;
+          if (isRunInFlight(streamStore.getRunSnapshot(id))) return true;
         }
         const q = streamStore.getQueueSnapshot();
         if (laneId != null && laneId !== '') {
@@ -106,10 +105,10 @@ export function useHasInflight(opts?: {
         return false;
       }
       const activeIds = streamStore.getQueueSnapshot().activeIds;
-      if (activeIds.some((id) => streamStore.getRunSnapshot(id)?.state === 'running')) {
+      if (activeIds.some((id) => isRunInFlight(streamStore.getRunSnapshot(id)))) {
         return true;
       }
-      if (streamStore.getActiveRunSnapshot()?.state === 'running') return true;
+      if (isRunInFlight(streamStore.getActiveRunSnapshot())) return true;
       return streamStore.getQueueSnapshot().items.length > 0;
     },
     () => false,

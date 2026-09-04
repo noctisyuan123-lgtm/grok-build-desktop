@@ -17,7 +17,7 @@ import { t } from '../i18n';
 import { useElapsed } from '../hooks/useElapsed';
 import { sumEditStats, type EditStats } from '../lib/editStats';
 import type { RunCompaction, TraceEvent } from '../lib/traceParser';
-import { exteriorMarkdownKey, type TranscriptSegment } from '../lib/streamStore';
+import { exteriorMarkdownKey, isRunInFlight, type TranscriptSegment } from '../lib/streamStore';
 import type { ChatMessageStatus } from '../app/types';
 import { attachTableScroll } from '../lib/tableScroll';
 
@@ -59,7 +59,7 @@ function MessageItemImpl({
       ? Math.max(0, snap.endedAt - snap.startedAt)
       : durationMs;
   const workedLabel = workedMs != null ? formatWorkedDuration(workedMs) : null;
-  const runIsLive = snap?.state === 'queued' || snap?.state === 'running';
+  const runIsLive = isRunInFlight(snap);
   const transcript = snap?.transcript.length ? snap.transcript : fallbackTranscript;
   const traces = snap?.traces.length ? snap.traces : fallbackTraces || [];
   // The queue can publish a terminal state before the stream's `end` event.
@@ -252,7 +252,7 @@ function MessageItemImpl({
         <>
           <MessageActions
             sourceText={snap.text || fallbackText || ''}
-            canUndo={canUndo && snap.state !== 'queued' && snap.state !== 'running'}
+            canUndo={canUndo && !runIsLive}
             showCopy={!runIsLive && responseTerminalReady}
             showUndo={showUndo}
             onUndo={onUndo}
@@ -261,6 +261,9 @@ function MessageItemImpl({
             onFork={onFork}
           />
         </>
+      ) : null}
+      {snap.watching ? (
+        <WatchingRail startedAt={snap.watchingStartedAt ?? snap.endedAt ?? Date.now()} />
       ) : null}
     </>
   );
@@ -803,6 +806,22 @@ function compactionLabel(compaction: RunCompaction): string | null {
     return t('message.compactingPercent', { percent: Math.round(compaction.percentage) });
   }
   return t('message.compacting');
+}
+
+function WatchingRail({ startedAt }: { startedAt: number }) {
+  const elapsed = useElapsed(startedAt, null);
+  const label = t('message.watchingFor', {
+    duration: formatWorkedDuration(elapsed ?? 0),
+  });
+  return (
+    <section className="message-worked-rail transcript-work is-live" role="status">
+      <div className="message-worked">
+        <span className="message-worked-summary is-shimmer" data-label={label}>
+          {label}
+        </span>
+      </div>
+    </section>
+  );
 }
 
 function CompactionHint({ compaction }: { compaction?: RunCompaction | null }) {

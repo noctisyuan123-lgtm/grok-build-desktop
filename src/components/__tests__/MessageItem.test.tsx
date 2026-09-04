@@ -5,6 +5,7 @@ import { MessageItem } from '../MessageItem';
 import {
   applyRunEvent,
   applyStateChange,
+  applyWatching,
   exteriorMarkdownKey,
   streamStore,
 } from '../../lib/streamStore';
@@ -1133,6 +1134,32 @@ describe('MessageItem rendering states', () => {
     expect(container.querySelector('.message-compaction .message-worked-summary')).not.toHaveClass(
       'is-shimmer',
     );
+  });
+
+  it('shows a shimmering Watching for hint after the turn while monitors remain', () => {
+    applyRunEvent('r-watch', { type: 'text', data: '盯着了。' });
+    applyStateChange('r-watch', {
+      state: 'Done',
+      startedAt: Date.now() - 1000,
+      endedAt: Date.now(),
+    });
+    applyWatching('r-watch', { active: true, startedAt: Date.now() });
+    const { container } = render(
+      <MessageItem
+        runId="r-watch"
+        fallbackText="盯着了。"
+        canUndo
+        onUndo={() => {}}
+      />,
+    );
+    const watching = screen.getByRole('status');
+    expect(watching).toHaveTextContent(/Watching for/);
+    expect(container.querySelector('.message-worked-summary.is-shimmer')).toBeTruthy();
+    expect(watching.querySelector('.message-worked-summary')).toHaveAttribute(
+      'data-label',
+      expect.stringMatching(/Watching for/),
+    );
+    expect(screen.getByRole('button', { name: 'Undo response' })).not.toBeDisabled();
   });
 
   it('shows Working for immediately instead of a starting placeholder', () => {

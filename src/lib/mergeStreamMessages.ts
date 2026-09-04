@@ -6,7 +6,12 @@
 // reply vanishes after restart (streamStore is in-memory only).
 import type { ChatMessage, ChatMessageStatus } from '../app/types';
 import { resolvePlanEntriesFromTraces } from '../components/PlanTodoList';
-import { streamStore, type RunSnapshot, type TranscriptSegment } from './streamStore';
+import {
+  isRunInFlight,
+  streamStore,
+  type RunSnapshot,
+  type TranscriptSegment,
+} from './streamStore';
 import type { TraceEvent } from './traceParser';
 
 export type MergeStreamMode = 'terminal' | 'checkpoint' | 'all';
@@ -27,8 +32,8 @@ function terminalStatus(state: RunSnapshot['state']): ChatMessageStatus {
   return 'error';
 }
 
-function isLiveState(state: RunSnapshot['state']): boolean {
-  return state === 'queued' || state === 'running';
+function isLiveState(snapshot: RunSnapshot): boolean {
+  return isRunInFlight(snapshot);
 }
 
 /** Cheap change detector so debounced checkpoints do not thrash React state. */
@@ -116,7 +121,7 @@ export function mergeStreamIntoMessages(
     const planEntries = resolvePlanEntriesFromTraces(snap.traces) ?? message.meta?.planEntries;
     const content = snap.text || message.content;
 
-    if (isLiveState(snap.state)) {
+    if (isLiveState(snap)) {
       if (!allowCheckpoint) return message;
       if (sameCheckpoint(message, content, traces, transcript, snap.sessionId)) {
         return message;

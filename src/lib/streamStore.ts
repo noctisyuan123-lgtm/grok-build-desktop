@@ -62,6 +62,17 @@ export interface RunSnapshot {
   traces: TraceEvent[];
   /** Ordered ACP transcript. This keeps Thought -> Respond -> Tool -> Respond intact. */
   transcript: TranscriptSegment[];
+  /** Background monitors still running after this turn ended. */
+  watching?: boolean;
+  watchingStartedAt?: number | null;
+  watchingLabel?: string | null;
+}
+
+/** A watcher is attached after the visible turn has finished. It must not
+ * keep the composer, history marker, or Undo controls in the ordinary live
+ * state even if the terminal state event is still crossing the IPC boundary. */
+export function isRunInFlight(run: Pick<RunSnapshot, 'state' | 'watching'> | undefined): boolean {
+  return Boolean(run && (run.state === 'queued' || run.state === 'running') && !run.watching);
 }
 
 export interface QueuedRunMeta {
@@ -155,12 +166,15 @@ class StreamStore {
    */
   getInflightRunIdsSnapshot = (): string => {
     const ids = new Set<string>();
-    for (const id of this.queue.activeIds) ids.add(id);
+    for (const id of this.queue.activeIds) {
+      const run = this.runs.get(id);
+      if (!run || isRunInFlight(run)) ids.add(id);
+    }
     for (const item of this.queue.items) {
       if (item.state === 'Queued' || item.state === 'Running') ids.add(item.id);
     }
     for (const [id, run] of this.runs) {
-      if (run.state === 'queued' || run.state === 'running') ids.add(id);
+      if (isRunInFlight(run)) ids.add(id);
     }
     return Array.from(ids).sort().join('\0');
   };
@@ -172,9 +186,10 @@ class StreamStore {
   getActiveRunSnapshot = (): RunSnapshot | undefined => {
     for (const id of this.queue.activeIds) {
       const snap = this.runs.get(id);
-      if (snap) return snap;
+      if (snap && isRunInFlight(snap)) return snap;
     }
-    return this.queue.active ? this.runs.get(this.queue.active) : undefined;
+    const active = this.queue.active ? this.runs.get(this.queue.active) : undefined;
+    return active && isRunInFlight(active) ? active : undefined;
   };
 
   patchRun = (id: string, patch: Partial<RunSnapshot>, options?: { notify?: boolean }): void => {
@@ -225,6 +240,9 @@ class StreamStore {
       compaction: null,
       traces: [],
       transcript: [],
+      watching: false,
+      watchingStartedAt: null,
+      watchingLabel: null,
     };
   }
 
@@ -496,6 +514,24 @@ export function applyStateChange(
   }
 }
 
+export function applyWatching(
+  runId: string,
+  payload: {
+    active: boolean;
+    startedAt?: number | null;
+    label?: string | null;
+  },
+): void {
+  const current = streamStore.getRunSnapshot(runId);
+  streamStore.patchRun(runId, {
+    watching: payload.active,
+    watchingStartedAt: payload.active
+      ? (payload.startedAt ?? current?.watchingStartedAt ?? Date.now())
+      : null,
+    watchingLabel: payload.active ? (payload.label ?? current?.watchingLabel ?? null) : null,
+  });
+}
+
 /** Markdown cache key for the exterior final body (last respond segment only). */
 export function exteriorMarkdownKey(runId: string, responseIndex: number): string {
   return `${runId}:exterior:${responseIndex}`;
@@ -714,6 +750,20 @@ export async function attachTauriListeners(): Promise<void> {
           endedAt?: number;
           error?: string;
         }>('grok-desktop://run-state-changed', (e) => applyStateChange(e.payload.runId, e.payload)),
+      );
+      attached.push(
+        await listen<{
+          runId: string;
+          active: boolean;
+          startedAt?: number | null;
+          label?: string | null;
+        }>('grok-desktop://run-watching', (e) =>
+          applyWatching(e.payload.runId, {
+            active: e.payload.active,
+            startedAt: e.payload.startedAt,
+            label: e.payload.label,
+          }),
+        ),
       );
       attached.push(
         await listen<{

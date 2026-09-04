@@ -9,8 +9,9 @@
 use super::event::GrokEvent;
 use super::process;
 use super::queue::{QueueMessage, QueueMessageKind};
+use chrono::Utc;
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -20,8 +21,9 @@ use std::sync::{
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, watch, Mutex};
 use tokio::time::{timeout, Duration};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoreConfig {
@@ -155,7 +157,7 @@ impl CoreConfig {
         self.share_session && self.resume_session_id.is_some() && !self.fork_session
     }
 
-    fn launch_key(&self, binary: &Path) -> String {
+    pub(crate) fn launch_key(&self, binary: &Path) -> String {
         format!("{}\0{}", binary.display(), self.launch_args().join("\0"))
     }
 }
@@ -466,6 +468,14 @@ pub struct AcpHost {
     launch_key: String,
     loaded_sessions: HashSet<String>,
     cancel_handle: Arc<AcpCancelHandle>,
+    /// Background task id -> the run that started it. A host can be reused by
+    /// a later turn while an earlier turn's monitor is still pending, so this
+    /// ownership must not be represented by one host-global boolean/set.
+    pending_background: HashMap<String, String>,
+    watch_labels: HashMap<String, String>,
+    watching_run_id: Option<String>,
+    watching_emitted: bool,
+    watch_started_at: Option<i64>,
 }
 
 pub struct TurnResult {
@@ -541,6 +551,11 @@ impl AcpHost {
             launch_key: config.launch_key(binary),
             loaded_sessions: HashSet::new(),
             cancel_handle,
+            pending_background: HashMap::new(),
+            watch_labels: HashMap::new(),
+            watching_run_id: None,
+            watching_emitted: false,
+            watch_started_at: None,
         };
         host.request(
             "initialize",
@@ -859,6 +874,7 @@ impl AcpHost {
                 self.answer_client_request(&message, live.map(|(_, _, config)| config))
                     .await?;
             } else if let Some((run_id, tx, _)) = live {
+                self.track_background(&message, Some(run_id), Some(tx));
                 emit_notification(run_id, tx, &message);
             }
         }
@@ -902,6 +918,273 @@ impl AcpHost {
             .map_err(|e| format!("Grok Core ACP write failed: {e}"))?;
         stdin.flush().await.map_err(|e| e.to_string())
     }
+
+    pub fn begin_idle_watch(&mut self, run_id: &str, tx: &broadcast::Sender<QueueMessage>) {
+        self.watching_run_id = Some(run_id.to_string());
+        self.watching_emitted = false;
+        self.watch_started_at = None;
+        self.sync_watching(tx, false);
+    }
+
+    pub fn end_idle_watch(&mut self, tx: &broadcast::Sender<QueueMessage>) {
+        self.emit_watch_state(tx, false);
+        self.watching_run_id = None;
+        self.watch_started_at = None;
+    }
+
+    fn track_background(
+        &mut self,
+        message: &Value,
+        owner_run_id: Option<&str>,
+        tx: Option<&broadcast::Sender<QueueMessage>>,
+    ) {
+        match background_task_delta(message) {
+            Some(BackgroundDelta::Started { id, label }) => {
+                let Some(owner_run_id) = owner_run_id else {
+                    return;
+                };
+                self.pending_background
+                    .insert(id, owner_run_id.to_string());
+                if let Some(label) = label.filter(|value| !value.is_empty()) {
+                    self.watch_labels
+                        .insert(owner_run_id.to_string(), label);
+                }
+            }
+            Some(BackgroundDelta::Finished { id }) => {
+                let Some(owner_run_id) = self.pending_background.remove(&id) else {
+                    return;
+                };
+                if !self.has_pending_background(&owner_run_id) {
+                    self.watch_labels.remove(&owner_run_id);
+                    if self.watching_run_id.as_deref() == Some(owner_run_id.as_str()) {
+                        if let Some(tx) = tx {
+                            self.emit_watch_state(tx, false);
+                        }
+                    }
+                }
+            }
+            None => {}
+        }
+    }
+
+    fn has_pending_background(&self, run_id: &str) -> bool {
+        has_pending_background_for(&self.pending_background, run_id)
+    }
+
+    fn emit_watch_state(&mut self, tx: &broadcast::Sender<QueueMessage>, active: bool) {
+        let Some(run_id) = self.watching_run_id.clone() else {
+            return;
+        };
+        if self.watching_emitted == active {
+            return;
+        }
+        self.watching_emitted = active;
+        if active {
+            if self.watch_started_at.is_none() {
+                self.watch_started_at = Some(Utc::now().timestamp_millis());
+            }
+        } else {
+            self.watch_started_at = None;
+        }
+        let label = self.watch_labels.get(&run_id).cloned();
+        let _ = tx.send(QueueMessage {
+            run_id,
+            kind: QueueMessageKind::Watching {
+                active,
+                started_at: self.watch_started_at,
+                label,
+            },
+        });
+    }
+
+    fn sync_watching(&mut self, tx: &broadcast::Sender<QueueMessage>, wakeup_active: bool) {
+        let active = self
+            .watching_run_id
+            .as_deref()
+            .is_some_and(|run_id| !wakeup_active && self.has_pending_background(run_id));
+        self.emit_watch_state(tx, active);
+    }
+
+    /// Keep draining ACP stdout after `session/prompt` returns so monitor /
+    /// background-task wakeups become their own run instead of sitting in the
+    /// pipe until the next user prompt steals them.
+    pub async fn watch_idle(
+        &mut self,
+        tx: &broadcast::Sender<QueueMessage>,
+        mut stop: watch::Receiver<bool>,
+        config: &CoreConfig,
+        lane_id: &str,
+    ) -> Result<(), String> {
+        let mut wakeup_run: Option<String> = None;
+        let mut wakeup_session: Option<String> = None;
+        loop {
+            let stop_requested = *stop.borrow();
+            if stop_requested && wakeup_run.is_none() {
+                self.drain_idle_buffered(tx, config, lane_id, &mut wakeup_run, &mut wakeup_session)
+                    .await?;
+                if wakeup_run.is_none() {
+                    return Ok(());
+                }
+            }
+            tokio::select! {
+                biased;
+                changed = stop.changed() => {
+                    if changed.is_err() {
+                        return Ok(());
+                    }
+                }
+                line = self.lines.next_line() => {
+                    let line = line
+                        .map_err(|e| format!("Grok Core ACP read failed: {e}"))?
+                        .ok_or_else(|| "Grok Core ACP stream closed".to_string())?;
+                    self.dispatch_idle_line(
+                        &line,
+                        tx,
+                        config,
+                        lane_id,
+                        &mut wakeup_run,
+                        &mut wakeup_session,
+                    )
+                    .await?;
+                    if *stop.borrow() && wakeup_run.is_none() {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+
+    async fn drain_idle_buffered(
+        &mut self,
+        tx: &broadcast::Sender<QueueMessage>,
+        config: &CoreConfig,
+        lane_id: &str,
+        wakeup_run: &mut Option<String>,
+        wakeup_session: &mut Option<String>,
+    ) -> Result<(), String> {
+        loop {
+            match timeout(Duration::from_millis(50), self.lines.next_line()).await {
+                Ok(Ok(Some(line))) => {
+                    self.dispatch_idle_line(
+                        &line,
+                        tx,
+                        config,
+                        lane_id,
+                        wakeup_run,
+                        wakeup_session,
+                    )
+                    .await?;
+                }
+                _ => return Ok(()),
+            }
+        }
+    }
+
+    async fn dispatch_idle_line(
+        &mut self,
+        line: &str,
+        tx: &broadcast::Sender<QueueMessage>,
+        config: &CoreConfig,
+        lane_id: &str,
+        wakeup_run: &mut Option<String>,
+        wakeup_session: &mut Option<String>,
+    ) -> Result<(), String> {
+        let message: Value = match serde_json::from_str(line) {
+            Ok(message) => message,
+            Err(_) => return Ok(()),
+        };
+        if message.get("id").is_some() && message.get("method").is_some() {
+            return self.answer_client_request(&message, Some(config)).await;
+        }
+        if message.get("id").is_some() && message.get("method").is_none() {
+            return Ok(());
+        }
+        let owner_run_id = wakeup_run
+            .as_deref()
+            .map(str::to_string)
+            .or_else(|| self.watching_run_id.clone());
+        self.track_background(&message, owner_run_id.as_deref(), Some(tx));
+        let action = idle_notification_action(&message);
+        match action {
+            IdleNotificationAction::Ignore => {
+                if let Some(run_id) = wakeup_run.as_deref() {
+                    emit_notification(run_id, tx, &message);
+                }
+            }
+            action @ (IdleNotificationAction::HideAndEnsureRun
+            | IdleNotificationAction::EnsureRun) => {
+                let hide = action == IdleNotificationAction::HideAndEnsureRun;
+                let session_id = notification_session_id(&message);
+                if let Some(session_id) = session_id.clone() {
+                    *wakeup_session = Some(session_id);
+                }
+                let run_id = match wakeup_run.as_ref() {
+                    Some(id) => id.clone(),
+                    None => {
+                        let id = Uuid::now_v7().to_string();
+                        let now = Utc::now().timestamp_millis();
+                        let _ = tx.send(QueueMessage {
+                            run_id: id.clone(),
+                            kind: QueueMessageKind::WakeupRun {
+                                session_id: wakeup_session.clone(),
+                                lane_id: lane_id.to_string(),
+                            },
+                        });
+                        let _ = tx.send(QueueMessage {
+                            run_id: id.clone(),
+                            kind: QueueMessageKind::StateChanged {
+                                state: super::db::RunState::Running,
+                                started_at: Some(now),
+                                ended_at: None,
+                                error: None,
+                            },
+                        });
+                        *wakeup_run = Some(id.clone());
+                        id
+                    }
+                };
+                if !hide {
+                    emit_notification(&run_id, tx, &message);
+                }
+            }
+            IdleNotificationAction::EndRun => {
+                if let Some(run_id) = wakeup_run.take() {
+                    let session_id = notification_session_id(&message)
+                        .or_else(|| wakeup_session.clone())
+                        .unwrap_or_default();
+                    let event = GrokEvent::End {
+                        stop_reason: "EndTurn".into(),
+                        session_id: session_id.clone(),
+                        request_id: "wakeup".into(),
+                    };
+                    let raw = serde_json::to_value(&event).unwrap_or(Value::Null);
+                    let _ = tx.send(QueueMessage {
+                        run_id: run_id.clone(),
+                        kind: QueueMessageKind::Event {
+                            event,
+                            raw,
+                            session_id: Some(session_id),
+                        },
+                    });
+                    let _ = tx.send(QueueMessage {
+                        run_id,
+                        kind: QueueMessageKind::StateChanged {
+                            state: super::db::RunState::Done,
+                            started_at: None,
+                            ended_at: Some(Utc::now().timestamp_millis()),
+                            error: None,
+                        },
+                    });
+                }
+            }
+        }
+        self.sync_watching(tx, wakeup_run.is_some());
+        Ok(())
+    }
+}
+
+fn has_pending_background_for(pending: &HashMap<String, String>, run_id: &str) -> bool {
+    pending.values().any(|owner| owner == run_id)
 }
 
 fn uses_idle_timeout(method: &str) -> bool {
@@ -1046,6 +1329,158 @@ fn emit_notification(run_id: &str, tx: &broadcast::Sender<QueueMessage>, message
     });
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdleNotificationAction {
+    Ignore,
+    HideAndEnsureRun,
+    EnsureRun,
+    EndRun,
+}
+
+fn notification_update(message: &Value) -> &Value {
+    message
+        .pointer("/params/update")
+        .or_else(|| message.get("params"))
+        .unwrap_or(message)
+}
+
+fn notification_method(message: &Value) -> &str {
+    message.get("method").and_then(Value::as_str).unwrap_or("")
+}
+
+fn is_session_notification_method(method: &str) -> bool {
+    matches!(
+        method,
+        "session/update"
+            | "_x.ai/session/update"
+            | "x.ai/session_notification"
+            | "_x.ai/session_notification"
+            | "x.ai/task_backgrounded"
+            | "_x.ai/task_backgrounded"
+            | "x.ai/task_completed"
+            | "_x.ai/task_completed"
+    )
+}
+
+fn notification_kind<'a>(message: &'a Value, update: &'a Value) -> &'a str {
+    match notification_method(message) {
+        "x.ai/task_backgrounded" | "_x.ai/task_backgrounded" => "task_backgrounded",
+        "x.ai/task_completed" | "_x.ai/task_completed" => "task_completed",
+        _ => update
+            .get("sessionUpdate")
+            .or_else(|| update.get("type"))
+            .and_then(Value::as_str)
+            .unwrap_or(""),
+    }
+}
+
+fn notification_session_id(message: &Value) -> Option<String> {
+    let update = notification_update(message);
+    message
+        .pointer("/params/sessionId")
+        .or_else(|| message.pointer("/params/session_id"))
+        .or_else(|| update.get("sessionId"))
+        .or_else(|| update.get("session_id"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn hidden_synthetic_user(update: &Value) -> bool {
+    let hide = update
+        .pointer("/content/_meta/hideFromScrollback")
+        .or_else(|| update.pointer("/_meta/hideFromScrollback"))
+        .and_then(Value::as_bool)
+        == Some(true);
+    if hide {
+        return true;
+    }
+    let text = update
+        .pointer("/content/text")
+        .or_else(|| update.get("text"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    text.contains("<system-reminder>") && !text.contains("<user_query")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BackgroundDelta {
+    Started { id: String, label: Option<String> },
+    Finished { id: String },
+}
+
+fn background_task_id(update: &Value) -> Option<String> {
+    let value = update
+        .get("task_id")
+        .or_else(|| update.get("taskId"))
+        .or_else(|| update.pointer("/task_snapshot/task_id"))
+        .or_else(|| update.pointer("/task_snapshot/taskId"));
+    match value {
+        Some(Value::String(value)) if !value.trim().is_empty() => Some(value.clone()),
+        Some(Value::Number(value)) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn background_task_label(update: &Value) -> Option<String> {
+    update
+        .get("monitor_description")
+        .or_else(|| update.get("monitorDescription"))
+        .or_else(|| update.get("description"))
+        .or_else(|| update.pointer("/task_snapshot/description"))
+        .or_else(|| update.pointer("/task_snapshot/monitor_description"))
+        .or_else(|| update.pointer("/task_snapshot/monitorDescription"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+pub fn background_task_delta(message: &Value) -> Option<BackgroundDelta> {
+    if !is_session_notification_method(notification_method(message)) {
+        return None;
+    }
+    let update = notification_update(message);
+    let kind = notification_kind(message, update);
+    match kind {
+        "task_backgrounded" => Some(BackgroundDelta::Started {
+            id: background_task_id(update)?,
+            label: background_task_label(update),
+        }),
+        "task_completed" => Some(BackgroundDelta::Finished {
+            id: background_task_id(update)?,
+        }),
+        _ => None,
+    }
+}
+
+/// Classify an ACP notification that arrived while no session/prompt is open.
+pub fn idle_notification_action(message: &Value) -> IdleNotificationAction {
+    if !is_session_notification_method(notification_method(message)) {
+        return IdleNotificationAction::Ignore;
+    }
+    let update = notification_update(message);
+    let kind = notification_kind(message, update);
+    match kind {
+        "turn_completed" => IdleNotificationAction::EndRun,
+        "task_completed"
+            if update
+                .get("will_wake")
+                .or_else(|| update.get("willWake"))
+                .and_then(Value::as_bool)
+                == Some(true) =>
+        {
+            IdleNotificationAction::EnsureRun
+        }
+        "user_message_chunk" if hidden_synthetic_user(update) => {
+            IdleNotificationAction::HideAndEnsureRun
+        }
+        "agent_thought_chunk" | "agent_message_chunk" | "tool_call" | "tool_call_update" => {
+            IdleNotificationAction::EnsureRun
+        }
+        _ => IdleNotificationAction::Ignore,
+    }
+}
+
 pub async fn stop_process_group(pgid: i32) {
     process::kill_group(pgid).await;
 }
@@ -1061,6 +1496,17 @@ mod tests {
         assert!(!uses_idle_timeout("session/prompt"));
         assert!(uses_idle_timeout("initialize"));
         assert!(uses_idle_timeout("session/load"));
+    }
+
+    #[test]
+    fn background_tasks_stay_owned_by_their_original_run() {
+        let pending = HashMap::from([
+            ("task-a".to_string(), "run-a".to_string()),
+            ("task-b".to_string(), "run-b".to_string()),
+        ]);
+        assert!(has_pending_background_for(&pending, "run-a"));
+        assert!(has_pending_background_for(&pending, "run-b"));
+        assert!(!has_pending_background_for(&pending, "run-c"));
     }
 
     #[test]
@@ -1353,5 +1799,139 @@ mod tests {
             QueueMessageKind::Event { event: GrokEvent::Unknown, ref raw, .. }
                 if raw.get("toolCallId").and_then(Value::as_str) == Some("tool-1")
         ));
+    }
+
+    #[test]
+    fn idle_wakeup_hides_synthetic_user_and_ends_on_turn_completed() {
+        let hidden = json!({
+            "method": "session/update",
+            "params": {
+                "sessionId": "sess",
+                "update": {
+                    "sessionUpdate": "user_message_chunk",
+                    "content": {
+                        "type": "text",
+                        "text": "<system-reminder>\nBackground task completed.\n</system-reminder>",
+                        "_meta": { "hideFromScrollback": true, "promptIndex": 7 }
+                    }
+                }
+            }
+        });
+        assert_eq!(
+            idle_notification_action(&hidden),
+            IdleNotificationAction::HideAndEnsureRun
+        );
+
+        let will_wake = json!({
+            "method": "_x.ai/session/update",
+            "params": {
+                "update": {
+                    "sessionUpdate": "task_completed",
+                    "will_wake": true
+                }
+            }
+        });
+        assert_eq!(
+            idle_notification_action(&will_wake),
+            IdleNotificationAction::EnsureRun
+        );
+
+        let assistant = json!({
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": { "type": "text", "text": "齐了" }
+                }
+            }
+        });
+        assert_eq!(
+            idle_notification_action(&assistant),
+            IdleNotificationAction::EnsureRun
+        );
+
+        let done = json!({
+            "method": "_x.ai/session/update",
+            "params": {
+                "update": { "sessionUpdate": "turn_completed", "stop_reason": "end_turn" }
+            }
+        });
+        assert_eq!(idle_notification_action(&done), IdleNotificationAction::EndRun);
+
+        let visible_user = json!({
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "sessionUpdate": "user_message_chunk",
+                    "content": { "type": "text", "text": "如何了" }
+                }
+            }
+        });
+        assert_eq!(
+            idle_notification_action(&visible_user),
+            IdleNotificationAction::Ignore
+        );
+
+        let backgrounded = json!({
+            "method": "_x.ai/session/update",
+            "params": {
+                "update": {
+                    "sessionUpdate": "task_backgrounded",
+                    "task_id": "mon-1",
+                    "monitor_description": "Watch sleep 15"
+                }
+            }
+        });
+        assert_eq!(
+            background_task_delta(&backgrounded),
+            Some(BackgroundDelta::Started {
+                id: "mon-1".into(),
+                label: Some("Watch sleep 15".into()),
+            })
+        );
+        let finished = json!({
+            "method": "_x.ai/session/update",
+            "params": {
+                "update": {
+                    "sessionUpdate": "task_completed",
+                    "task_snapshot": { "task_id": "mon-1" }
+                }
+            }
+        });
+        assert_eq!(
+            background_task_delta(&finished),
+            Some(BackgroundDelta::Finished { id: "mon-1".into() })
+        );
+
+        // Grok 1.0 emits the background lifecycle on dedicated x.ai methods,
+        // rather than as a sessionUpdate tag. Accept the camelCase payload
+        // used by that wire shape as well.
+        let dedicated_backgrounded = json!({
+            "method": "x.ai/task_backgrounded",
+            "params": {
+                "sessionId": "sess",
+                "taskId": 42,
+                "monitorDescription": "Watch build"
+            }
+        });
+        assert_eq!(
+            background_task_delta(&dedicated_backgrounded),
+            Some(BackgroundDelta::Started {
+                id: "42".into(),
+                label: Some("Watch build".into()),
+            })
+        );
+        let dedicated_completed = json!({
+            "method": "x.ai/task_completed",
+            "params": { "sessionId": "sess", "taskId": 42, "willWake": true }
+        });
+        assert_eq!(
+            background_task_delta(&dedicated_completed),
+            Some(BackgroundDelta::Finished { id: "42".into() })
+        );
+        assert_eq!(
+            idle_notification_action(&dedicated_completed),
+            IdleNotificationAction::EnsureRun
+        );
     }
 }

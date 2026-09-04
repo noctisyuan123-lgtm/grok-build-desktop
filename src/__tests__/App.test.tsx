@@ -221,6 +221,53 @@ describe('composer submit → queued run → streamed reply', () => {
     expect(tauri.unknownCommands).toEqual([]);
   });
 
+  it('renders idle monitor wakeups as a new assistant bubble without a user prompt', async () => {
+    const ctx = await bootApp();
+    const { tauri } = ctx;
+    const parentRunId = await submitPrompt(ctx, 'Keep watching the download');
+    await act(async () => {
+      await tauri.streamReply(parentRunId, ['盯着了。']);
+    });
+    expect(await convo().findByText('盯着了。')).toBeInTheDocument();
+
+    const wakeupId = 'wakeup-run-1';
+    await act(async () => {
+      await tauri.emitWakeup(wakeupId, '', 'sess-1');
+      await tauri.emitRunState(wakeupId, 'Running', { startedAt: Date.now() });
+      await tauri.emitRunEvent(wakeupId, { type: 'text', data: '齐了，没断。' });
+      await tauri.emitRunEvent(wakeupId, {
+        type: 'end',
+        stopReason: 'EndTurn',
+        sessionId: 'sess-1',
+        requestId: 'wakeup',
+      });
+      await tauri.emitRunState(wakeupId, 'Done', { endedAt: Date.now() });
+    });
+
+    expect(await convo().findByText('齐了，没断。')).toBeInTheDocument();
+    expect(convo().queryByText('Keep watching the download')).toBeInTheDocument();
+    const assistantBubbles = document.querySelectorAll('.message-assistant');
+    expect(assistantBubbles.length).toBeGreaterThanOrEqual(2);
+    expect(tauri.unknownCommands).toEqual([]);
+  });
+
+  it('keeps the latest response undoable while its monitor is watching', async () => {
+    const ctx = await bootApp();
+    const { tauri } = ctx;
+    const runId = await submitPrompt(ctx, 'Watch this until it finishes');
+    await act(async () => {
+      await tauri.streamReply(runId, ['已开始监听。']);
+    });
+
+    await act(async () => {
+      await tauri.emitWatching(runId, true, Date.now() - 1000, 'Watch this');
+    });
+
+    expect(await convo().findByText(/Watching for/)).toBeInTheDocument();
+    const undo = await convo().findByRole('button', { name: t('message.undoResponse') });
+    expect(undo).not.toBeDisabled();
+  });
+
   it('checkpoints partial assistant text into storage while the run is still live', async () => {
     const ctx = await bootApp();
     const { tauri } = ctx;

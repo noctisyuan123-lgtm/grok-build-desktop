@@ -378,6 +378,28 @@ export function useSessionTabs(deps: SessionTabsDeps) {
     };
   }
 
+  function appendTabMessage(tabId: string, message: ChatMessage) {
+    const current = sessionStateRef.current;
+    const alreadyOnActive = current.messages.some((row) => row.runId && row.runId === message.runId);
+    const alreadyOnTab = current.tabs.some((tab) =>
+      tab.messages.some((row) => row.runId === message.runId),
+    );
+    if (alreadyOnActive || alreadyOnTab) return;
+    if (!tabId || tabId === current.activeTabId) {
+      setMessages((msgs) =>
+        msgs.some((row) => row.runId && row.runId === message.runId) ? msgs : [...msgs, message],
+      );
+      return;
+    }
+    setTabs((existing) =>
+      existing.map((tab) => {
+        if (tab.id !== tabId) return tab;
+        if (tab.messages.some((row) => row.runId === message.runId)) return tab;
+        return { ...tab, messages: [...tab.messages, message as unknown as TabMessage] };
+      }),
+    );
+  }
+
   return {
     tabs,
     activeTabId,
@@ -387,5 +409,6 @@ export function useSessionTabs(deps: SessionTabsDeps) {
     openGrokSessionTab,
     deleteSession,
     sessionFirstPrompt,
+    appendTabMessage,
   };
 }

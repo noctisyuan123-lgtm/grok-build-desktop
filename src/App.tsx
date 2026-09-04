@@ -15,7 +15,7 @@ import './App.css';
 import { cancelRun, ensureStreamListenersAttached, prewarmRun } from './lib/grok';
 import { onDocumentLinkClick } from './lib/externalLinks';
 import { hasTauriRuntime } from './lib/runtime';
-import { streamStore } from './lib/streamStore';
+import { isRunInFlight, streamStore } from './lib/streamStore';
 import { playCompletionSound, primeCompletionSound } from './lib/completionSound';
 import { showCompletionPopup } from './lib/completionPopup';
 import { isBackgroundSessionRun } from './lib/completionNotification';
@@ -221,6 +221,7 @@ function App() {
     openGrokSessionTab,
     deleteSession,
     sessionFirstPrompt,
+    appendTabMessage,
   } = useSessionTabs({
     messages,
     setMessages,
@@ -389,6 +390,39 @@ function App() {
       const tabId = event.payload?.tabId;
       if (tabId) completionNavigationRef.current(tabId);
     }).then((cleanup) => {
+      unlisten = cleanup;
+    });
+    return () => unlisten?.();
+  }, []);
+
+  const appendTabMessageRef = useRef(appendTabMessage);
+  appendTabMessageRef.current = appendTabMessage;
+  useEffect(() => {
+    if (!hasTauriRuntime()) return;
+    let unlisten: (() => void) | undefined;
+    void listen<{ runId?: string; laneId?: string; sessionId?: string | null }>(
+      'grok-desktop://wakeup-run',
+      (event) => {
+        const runId = event.payload?.runId;
+        if (!runId) return;
+        const { activeTabId } = completionSessionRef.current;
+        const laneId = event.payload?.laneId || activeTabId;
+        completionRunOwnerRef.current.set(runId, laneId);
+        const pending = {
+          id: makeId('a'),
+          role: 'assistant' as const,
+          content: '',
+          ts: Date.now(),
+          runId,
+          status: 'streaming' as const,
+          meta: {
+            sessionId: event.payload?.sessionId ?? undefined,
+          },
+        };
+        const seeded = mergeStreamIntoMessages([pending], 'all').next[0] ?? pending;
+        appendTabMessageRef.current(laneId, seeded);
+      },
+    ).then((cleanup) => {
       unlisten = cleanup;
     });
     return () => unlisten?.();
@@ -645,8 +679,7 @@ function App() {
   function sessionHasInflightDesktopRun(list: typeof messages = messagesRef.current): boolean {
     return list.some((message) => {
       if (message.role !== 'assistant' || !message.runId) return false;
-      const state = streamStore.getRunSnapshot(message.runId)?.state;
-      return state === 'queued' || state === 'running';
+      return isRunInFlight(streamStore.getRunSnapshot(message.runId));
     });
   }
 
@@ -1367,8 +1400,7 @@ function App() {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index];
       if (message?.role !== 'assistant' || !message.runId) continue;
-      const state = streamStore.getRunSnapshot(message.runId)?.state;
-      if (state === 'queued' || state === 'running') return message.runId;
+      if (isRunInFlight(streamStore.getRunSnapshot(message.runId))) return message.runId;
     }
     return null;
     // activeRunKey intentionally invalidates this store-backed lookup when the
@@ -1408,7 +1440,14 @@ function App() {
       selectedUser && assistant == null && selectedIndex === messages.length - 1,
     );
     if (assistantIndex !== messages.length - 1 && !isUserOnlyTail) return;
-    if ((assistant != null && assistant.status === 'streaming') || !user || user.role !== 'user') {
+    const assistantSnapshot = assistant?.runId
+      ? streamStore.getRunSnapshot(assistant.runId)
+      : undefined;
+    const assistantIsLive =
+      assistant != null &&
+      assistant.status === 'streaming' &&
+      (!assistantSnapshot || isRunInFlight(assistantSnapshot));
+    if (assistantIsLive || !user || user.role !== 'user') {
       return;
     }
 
@@ -1669,10 +1708,16 @@ function App() {
   const messageRefs: MessageRef[] = useMemo(() => {
     const latestIndex = messages.length - 1;
     const latestMessage = messages[latestIndex];
+    const latestSnapshot =
+      latestMessage?.role === 'assistant' && latestMessage.runId
+        ? streamStore.getRunSnapshot(latestMessage.runId)
+        : undefined;
+    const latestMessageIsLive =
+      latestMessage?.role === 'assistant' &&
+      latestMessage.status === 'streaming' &&
+      (!latestSnapshot || isRunInFlight(latestSnapshot));
     const latestTurnCanUndo = Boolean(
-      latestMessage &&
-      !activeSessionIsRunning &&
-      (latestMessage?.role === 'user' || latestMessage?.status !== 'streaming'),
+      latestMessage && !activeSessionIsRunning && !latestMessageIsLive,
     );
     const latestUserIndex =
       latestMessage?.role === 'assistant' && latestMessage.status !== 'streaming'

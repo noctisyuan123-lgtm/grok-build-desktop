@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useElapsed } from '../hooks/useElapsed';
 import { useRunSnapshot } from '../hooks/useRunSnapshot';
-import type { RunSnapshot } from '../lib/streamStore';
+import { isRunInFlight, type RunSnapshot } from '../lib/streamStore';
 import { displayEdit, isEditTrace, sumEditStats } from '../lib/editStats';
 import type { TraceEvent, TraceStatus } from '../lib/traceParser';
 import { t } from '../i18n';
@@ -452,7 +452,7 @@ function parseDiff(diff: string): Array<{ kind: 'add' | 'del' | 'context'; text:
 }
 
 function isLive(snapshot: RunSnapshot): boolean {
-  return snapshot.state === 'queued' || snapshot.state === 'running';
+  return isRunInFlight(snapshot);
 }
 
 function liveLabel(snapshot: RunSnapshot): string {

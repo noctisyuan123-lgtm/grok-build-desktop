@@ -4083,6 +4083,34 @@ fn forward_queue_message(app: &tauri::AppHandle, msg: &QueueMessage) {
                 });
             }
         }
+        QueueMessageKind::WakeupRun {
+            session_id,
+            lane_id,
+        } => {
+            let _ = app.emit(
+                "grok-desktop://wakeup-run",
+                serde_json::json!({
+                    "runId": msg.run_id,
+                    "sessionId": session_id,
+                    "laneId": lane_id,
+                }),
+            );
+        }
+        QueueMessageKind::Watching {
+            active,
+            started_at,
+            label,
+        } => {
+            let _ = app.emit(
+                "grok-desktop://run-watching",
+                serde_json::json!({
+                    "runId": msg.run_id,
+                    "active": active,
+                    "startedAt": started_at,
+                    "label": label,
+                }),
+            );
+        }
         QueueMessageKind::QueueChanged => {
             let q = app.state::<std::sync::Arc<RunQueue>>().inner().clone();
             let app_cloned = app.clone();

@@ -26,7 +26,12 @@ fallback.
      event shape while their complete payload is retained for tool, task and
      subagent rendering; `lib.rs`
      forwards it as Tauri events (`grok-desktop://run-event`,
-     `grok-desktop://run-state-changed`, `grok-desktop://queue-changed`).
+     `grok-desktop://run-state-changed`, `grok-desktop://run-watching`,
+     `grok-desktop://queue-changed`, `grok-desktop://wakeup-run`). After
+     `session/prompt` returns the host keeps reading stdout so monitor /
+     background-task wakes become their own assistant bubble instead of
+     attaching to the next user prompt; a completed parent run remains marked
+     as watching while those tasks are pending.
   4. `src/lib/streamStore.ts` accumulates a `RunSnapshot` consumed via
      `useSyncExternalStore` hooks; markdown is rendered off-thread by a Web
      Worker (`markdown-it` + `highlight.js`) and sanitized with DOMPurify before

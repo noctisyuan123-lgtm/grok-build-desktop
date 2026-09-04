@@ -8,7 +8,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::AsyncBufReadExt;
-use tokio::sync::{broadcast, Mutex, Notify};
+use tokio::sync::{broadcast, watch, Mutex, Notify};
+use tokio::task::JoinHandle;
 
 /// Capacity of the broadcast channel that fans queue messages out to consumers
 /// (the Tauri event forwarder and any future subscribers). Large enough to
@@ -65,6 +66,19 @@ pub enum QueueMessageKind {
         ended_at: Option<i64>,
         error: Option<String>,
     },
+    /// Background monitor / task_completed wake while no session/prompt is in
+    /// flight. The UI opens an assistant-only bubble on `lane_id`.
+    WakeupRun {
+        session_id: Option<String>,
+        lane_id: String,
+    },
+    /// The completed turn still has background monitors. UI shows a live
+    /// "Watching for …" shimmer on that run until they finish or wake.
+    Watching {
+        active: bool,
+        started_at: Option<i64>,
+        label: Option<String>,
+    },
     QueueChanged,
 }
 
@@ -79,6 +93,11 @@ struct PrewarmedSession {
     id: String,
 }
 
+struct IdleWatchHandle {
+    stop: watch::Sender<bool>,
+    join: JoinHandle<core::AcpHost>,
+}
+
 pub struct RunQueue {
     pub db: Db,
     inner: Arc<Mutex<Inner>>,
@@ -87,7 +106,15 @@ pub struct RunQueue {
     /// Per-lane ACP hosts. A host is *taken* out of the map for the duration
     /// of a turn so concurrent lanes never share a mutex across a turn.
     acp_hosts: Arc<Mutex<HashMap<String, AcpHost>>>,
+    /// Hosts parked after a prompt that keep reading ACP stdout until the
+    /// next turn takes them back.
+    idle_watches: Arc<Mutex<HashMap<String, IdleWatchHandle>>>,
     prewarmed_sessions: Arc<Mutex<HashMap<String, PrewarmedSession>>>,
+    /// Serializes prewarm setup with taking a host/session pair for a lane.
+    /// The host map and prewarmed-session map are separate because both host
+    /// setup and host parking are async; this per-lane gate keeps a session ID
+    /// from being consumed by a different ACP process during that handoff.
+    lane_guards: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
 }
 
 struct Inner {
@@ -138,7 +165,9 @@ impl RunQueue {
             notify: Arc::new(Notify::new()),
             tx,
             acp_hosts: Arc::new(Mutex::new(HashMap::new())),
+            idle_watches: Arc::new(Mutex::new(HashMap::new())),
             prewarmed_sessions: Arc::new(Mutex::new(HashMap::new())),
+            lane_guards: Arc::new(Mutex::new(HashMap::new())),
         };
         (queue, rx)
     }
@@ -151,54 +180,128 @@ impl RunQueue {
         self.tx.subscribe()
     }
 
+    async fn lane_guard(&self, lane_id: &str) -> Arc<Mutex<()>> {
+        let mut guards = self.lane_guards.lock().await;
+        guards
+            .entry(lane_id.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+
     /// Stop and reap ACP children so `/cli` or rewind can load the same
     /// session only after the previous client has released and flushed it.
     pub async fn evict_acp_hosts(&self) {
-        let hosts = {
-            let mut hosts = self.acp_hosts.lock().await;
-            hosts.drain().map(|(_, host)| host).collect::<Vec<_>>()
+        let watches = {
+            let mut watches = self.idle_watches.lock().await;
+            watches.drain().map(|(_, handle)| handle).collect::<Vec<_>>()
         };
+        let mut hosts = Vec::new();
+        for watch in watches {
+            let _ = watch.stop.send(true);
+            if let Ok(host) = watch.join.await {
+                hosts.push(host);
+            }
+        }
+        hosts.extend({
+            let mut parked = self.acp_hosts.lock().await;
+            parked.drain().map(|(_, host)| host).collect::<Vec<_>>()
+        });
         for mut host in hosts {
             host.shutdown().await;
         }
     }
 
+    async fn take_lane_host(&self, lane_id: &str) -> Option<AcpHost> {
+        let watch = self.idle_watches.lock().await.remove(lane_id);
+        if let Some(watch) = watch {
+            let _ = watch.stop.send(true);
+            return watch.join.await.ok();
+        }
+        self.acp_hosts.lock().await.remove(lane_id)
+    }
+
+    async fn park_lane_host(
+        &self,
+        lane_id: String,
+        mut host: AcpHost,
+        config: core::CoreConfig,
+        parent_run_id: String,
+    ) {
+        let (stop, stop_rx) = watch::channel(false);
+        let tx = self.tx.clone();
+        let lane_for_task = lane_id.clone();
+        let join = tokio::spawn(async move {
+            host.begin_idle_watch(&parent_run_id, &tx);
+            let result = host
+                .watch_idle(&tx, stop_rx, &config, &lane_for_task)
+                .await;
+            host.end_idle_watch(&tx);
+            if let Err(error) = result {
+                eprintln!("[grok core] idle ACP watch ended: {error}");
+            }
+            host
+        });
+        if let Some(previous) = self
+            .idle_watches
+            .lock()
+            .await
+            .insert(lane_id, IdleWatchHandle { stop, join })
+        {
+            let _ = previous.stop.send(true);
+            if let Ok(mut leftover) = previous.join.await {
+                leftover.shutdown().await;
+            }
+        }
+    }
+
     /// Start and initialize the lane's persistent ACP host ahead of the first
-    /// prompt. The map lock deliberately stays held while connecting so a
-    /// send racing with the prewarm cannot start a second host for the lane.
+    /// prompt. The per-lane guard stays held while connecting and pairing the
+    /// host with its session so a send racing with the prewarm cannot start a
+    /// second host or consume the wrong session ID.
     pub async fn prewarm(
         &self,
         lane_id: String,
         cwd: String,
         args: Vec<String>,
     ) -> Result<bool, String> {
+        let lane_guard = self.lane_guard(&lane_id).await;
+        let _lane_guard = lane_guard.lock().await;
+
+        // A prewarm request can be left in flight while the user submits a
+        // prompt. If the run already owns this lane, do not create a second
+        // ACP host that could later overwrite the parked host.
+        if self.inner.lock().await.active_lanes.contains_key(&lane_id) {
+            return Ok(false);
+        }
         let grok_path = self.inner.lock().await.grok_path.clone();
         if !core::should_use_acp(&grok_path) {
             return Ok(false);
         }
         let config = CoreConfig::from_legacy_args(&args);
         let resolved_cwd = std::path::PathBuf::from(cwd);
-        let mut hosts = self.acp_hosts.lock().await;
-        if hosts
-            .get_mut(&lane_id)
-            .is_some_and(|host| host.matches(&grok_path, &config))
-        {
-            return Ok(true);
+        if let Some(mut existing) = self.take_lane_host(&lane_id).await {
+            if existing.matches(&grok_path, &config) {
+                // The existing host is authoritative. A session cached from a
+                // prior prewarm belongs to the host that created it and must
+                // not survive a host handoff.
+                self.prewarmed_sessions.lock().await.remove(&lane_id);
+                self.acp_hosts.lock().await.insert(lane_id, existing);
+                return Ok(true);
+            }
+            existing.shutdown().await;
         }
-        // Drop a stale host before replacing it with the requested config.
-        let _ = hosts.remove(&lane_id);
         let mut host = AcpHost::connect(&grok_path, &resolved_cwd, &config).await?;
         if config.resume_session_id.is_none() {
             let id = host.prewarm_session(&resolved_cwd, &config).await?;
             self.prewarmed_sessions.lock().await.insert(
                 lane_id.clone(),
                 PrewarmedSession {
-                    key: prewarm_session_key(&resolved_cwd, &config),
+                    key: prewarm_session_key(&grok_path, &resolved_cwd, &config),
                     id,
                 },
             );
         }
-        hosts.insert(lane_id, host);
+        self.acp_hosts.lock().await.insert(lane_id, host);
         Ok(true)
     }
 
@@ -760,35 +863,35 @@ impl RunQueue {
         cwd: &std::path::Path,
     ) {
         let config = CoreConfig::from_legacy_args(args);
+        let lane_guard = self.lane_guard(&rec.lane_id).await;
+        let _lane_guard = lane_guard.lock().await;
         // Take any existing host for this lane out of the pool so other lanes
         // never wait on a shared turn mutex. Concurrent lanes each own a host.
-        let mut host = {
-            let mut hosts = self.acp_hosts.lock().await;
-            let reuse = hosts
-                .get_mut(&rec.lane_id)
-                .is_some_and(|h| h.matches(grok_path, &config));
-            if reuse {
-                hosts.remove(&rec.lane_id)
+        let mut host = if let Some(mut existing) = self.take_lane_host(&rec.lane_id).await {
+            if existing.matches(grok_path, &config) {
+                existing
             } else {
-                // Drop a stale host for this lane (if any) so its child is
-                // cleaned up via AcpHost::Drop before we connect a new one.
-                let _ = hosts.remove(&rec.lane_id);
-                None
+                existing.shutdown().await;
+                match AcpHost::connect(grok_path, cwd, &config).await {
+                    Ok(h) => h,
+                    Err(error) => {
+                        self.finalize(&rec.id, RunState::Failed, Some(error)).await;
+                        return;
+                    }
+                }
             }
-        };
-        if host.is_none() {
+        } else {
             match AcpHost::connect(grok_path, cwd, &config).await {
-                Ok(h) => host = Some(h),
+                Ok(h) => h,
                 Err(error) => {
                     self.finalize(&rec.id, RunState::Failed, Some(error)).await;
                     return;
                 }
             }
-        }
-        let mut host = host.expect("ACP host initialized");
+        };
         host.cancel_handle().prepare_for_turn().await;
         let prewarmed_session_id = if config.resume_session_id.is_none() {
-            let key = prewarm_session_key(cwd, &config);
+            let key = prewarm_session_key(grok_path, cwd, &config);
             self.prewarmed_sessions
                 .lock()
                 .await
@@ -848,11 +951,10 @@ impl RunQueue {
                         session_id: None,
                     },
                 });
-                // Return host to the lane pool for the next serial turn.
-                self.acp_hosts
-                    .lock()
-                    .await
-                    .insert(rec.lane_id.clone(), host);
+                // Keep reading ACP stdout so monitor wakeups are not attributed
+                // to the next user prompt.
+                self.park_lane_host(rec.lane_id.clone(), host, config.clone(), rec.id.clone())
+                    .await;
                 self.finalize(&rec.id, RunState::Done, None).await;
             }
             Ok(turn) => {
@@ -878,10 +980,8 @@ impl RunQueue {
                         session_id: None,
                     },
                 });
-                self.acp_hosts
-                    .lock()
-                    .await
-                    .insert(rec.lane_id.clone(), host);
+                self.park_lane_host(rec.lane_id.clone(), host, config.clone(), rec.id.clone())
+                    .await;
                 self.finalize(&rec.id, RunState::Cancelled, None).await;
             }
             Err(error) => {
@@ -906,10 +1006,13 @@ impl RunQueue {
                                 session_id: None,
                             },
                         });
-                        self.acp_hosts
-                            .lock()
-                            .await
-                            .insert(rec.lane_id.clone(), host);
+                        self.park_lane_host(
+                            rec.lane_id.clone(),
+                            host,
+                            config.clone(),
+                            rec.id.clone(),
+                        )
+                        .await;
                     } else {
                         drop(host);
                     }
@@ -962,10 +1065,43 @@ impl RunQueue {
     }
 }
 
-fn prewarm_session_key(cwd: &std::path::Path, config: &CoreConfig) -> String {
+fn prewarm_session_key(
+    binary: &std::path::Path,
+    cwd: &std::path::Path,
+    config: &CoreConfig,
+) -> String {
     format!(
-        "{}\0{}",
+        "{}\0{}\0{}",
         cwd.to_string_lossy(),
+        config.launch_key(binary),
         config.rules.as_deref().unwrap_or_default()
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn prewarm_key_changes_when_host_configuration_changes() {
+        let binary = Path::new("/usr/local/bin/grok");
+        let cwd = Path::new("/tmp/project");
+        let base = CoreConfig::from_legacy_args(&[]);
+        let model = CoreConfig::from_legacy_args(&["--model".into(), "grok-4".into()]);
+        let rules = CoreConfig::from_legacy_args(&["--rules".into(), "Stay read-only".into()]);
+
+        assert_ne!(
+            prewarm_session_key(binary, cwd, &base),
+            prewarm_session_key(binary, cwd, &model)
+        );
+        assert_ne!(
+            prewarm_session_key(binary, cwd, &base),
+            prewarm_session_key(binary, cwd, &rules)
+        );
+        assert_eq!(
+            prewarm_session_key(binary, cwd, &base),
+            prewarm_session_key(binary, cwd, &base)
+        );
+    }
 }

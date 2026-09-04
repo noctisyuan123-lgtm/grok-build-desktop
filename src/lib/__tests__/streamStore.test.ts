@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { streamStore, applyRunEvent, applyStateChange, replaceQueue } from '../streamStore';
+import {
+  streamStore,
+  applyRunEvent,
+  applyStateChange,
+  applyWatching,
+  replaceQueue,
+} from '../streamStore';
 
 beforeEach(() => streamStore.__reset());
 
@@ -75,6 +81,29 @@ describe('streamStore', () => {
       tokensBefore: 400_000,
       tokensAfter: 120_000,
     });
+  });
+
+  it('keeps a completed run watching until monitors finish', () => {
+    applyRunEvent('watch', { type: 'text', data: '盯着了' });
+    applyStateChange('watch', { state: 'Done', startedAt: 1, endedAt: 2 });
+    applyWatching('watch', { active: true, startedAt: 3, label: 'Watch sleep' });
+    expect(streamStore.getRunSnapshot('watch')).toMatchObject({
+      state: 'done',
+      watching: true,
+      watchingStartedAt: 3,
+      watchingLabel: 'Watch sleep',
+    });
+    applyWatching('watch', { active: false });
+    expect(streamStore.getRunSnapshot('watch')?.watching).toBe(false);
+    expect(streamStore.getRunSnapshot('watch')?.watchingStartedAt).toBeNull();
+  });
+
+  it('does not count a watching run as an in-flight run', () => {
+    applyStateChange('watching-live', { state: 'Running', startedAt: 1 });
+    applyWatching('watching-live', { active: true, startedAt: 2 });
+    replaceQueue({ active: 'watching-live', items: [] });
+    expect(streamStore.getInflightRunIdsSnapshot()).toBe('');
+    expect(streamStore.getActiveRunSnapshot()).toBeUndefined();
   });
 
   it('end event marks done and records stopReason', () => {

@@ -296,6 +296,7 @@ export const en = {
   'message.interrupted': 'Turn interrupted before a reply was saved.',
   'message.traceAriaLabel': 'Tool and subagent activity',
   'message.workedFor': 'Worked for {duration}',
+  'message.watchingFor': 'Watching for {duration}',
   'message.compacting': 'Compacting conversation',
   'message.compactingPercent': 'Auto-compacting conversation ({percent}% full)…',
   'message.compacted': 'Conversation compacted',
