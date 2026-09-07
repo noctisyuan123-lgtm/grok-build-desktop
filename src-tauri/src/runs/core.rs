@@ -1018,19 +1018,22 @@ impl AcpHost {
         let mut wakeup_run: Option<String> = None;
         let mut wakeup_session: Option<String> = None;
         loop {
-            let stop_requested = *stop.borrow();
-            if stop_requested && wakeup_run.is_none() {
-                self.drain_idle_buffered(tx, config, lane_id, &mut wakeup_run, &mut wakeup_session)
-                    .await?;
-                if wakeup_run.is_none() {
-                    return Ok(());
-                }
+            // Stop must yield the host even while a wakeup is in flight.
+            // Waiting for `turn_completed` deadlocks `take_lane_host` when the
+            // user Sends during EnsureRun; leftover chunks would then be read
+            // by the next `session/prompt` under the new runId.
+            if idle_watch_yields_on_stop(*stop.borrow()) {
+                return self
+                    .release_idle_watch(tx, config, &mut wakeup_run, &mut wakeup_session)
+                    .await;
             }
             tokio::select! {
                 biased;
                 changed = stop.changed() => {
                     if changed.is_err() {
-                        return Ok(());
+                        return self
+                            .release_idle_watch(tx, config, &mut wakeup_run, &mut wakeup_session)
+                            .await;
                     }
                 }
                 line = self.lines.next_line() => {
@@ -1046,36 +1049,54 @@ impl AcpHost {
                         &mut wakeup_session,
                     )
                     .await?;
-                    if *stop.borrow() && wakeup_run.is_none() {
-                        return Ok(());
-                    }
                 }
             }
         }
     }
 
-    async fn drain_idle_buffered(
+    /// Hand the host back for a new prompt: close any in-progress wakeup and
+    /// drop buffered notifications so they cannot be attributed to the next
+    /// runId. Does not wait for ACP `turn_completed`.
+    async fn release_idle_watch(
         &mut self,
         tx: &broadcast::Sender<QueueMessage>,
         config: &CoreConfig,
-        lane_id: &str,
         wakeup_run: &mut Option<String>,
         wakeup_session: &mut Option<String>,
     ) -> Result<(), String> {
+        if let Some(run_id) = wakeup_run.take() {
+            emit_interrupted_wakeup(tx, &run_id, wakeup_session.as_deref());
+            *wakeup_session = None;
+        }
+        self.discard_idle_buffered(config).await?;
+        self.sync_watching(tx, false);
+        Ok(())
+    }
+
+    /// Consume leftover idle-watch stdout without dispatching EnsureRun /
+    /// message chunks. Still answers client requests so ACP is not left hanging.
+    async fn discard_idle_buffered(&mut self, config: &CoreConfig) -> Result<(), String> {
         loop {
             match timeout(Duration::from_millis(50), self.lines.next_line()).await {
                 Ok(Ok(Some(line))) => {
-                    self.dispatch_idle_line(
-                        &line,
-                        tx,
-                        config,
-                        lane_id,
-                        wakeup_run,
-                        wakeup_session,
-                    )
-                    .await?;
+                    let message: Value = match serde_json::from_str(&line) {
+                        Ok(message) => message,
+                        Err(_) => continue,
+                    };
+                    match classify_stale_idle_line(&message) {
+                        StaleIdleLine::ClientRequest => {
+                            self.answer_client_request(&message, Some(config)).await?;
+                        }
+                        StaleIdleLine::Discard => {}
+                    }
                 }
-                _ => return Ok(()),
+                Ok(Ok(None)) => {
+                    return Err("Grok Core ACP stream closed".to_string());
+                }
+                Ok(Err(e)) => {
+                    return Err(format!("Grok Core ACP read failed: {e}"));
+                }
+                Err(_) => return Ok(()),
             }
         }
     }
@@ -1150,31 +1171,8 @@ impl AcpHost {
             IdleNotificationAction::EndRun => {
                 if let Some(run_id) = wakeup_run.take() {
                     let session_id = notification_session_id(&message)
-                        .or_else(|| wakeup_session.clone())
-                        .unwrap_or_default();
-                    let event = GrokEvent::End {
-                        stop_reason: "EndTurn".into(),
-                        session_id: session_id.clone(),
-                        request_id: "wakeup".into(),
-                    };
-                    let raw = serde_json::to_value(&event).unwrap_or(Value::Null);
-                    let _ = tx.send(QueueMessage {
-                        run_id: run_id.clone(),
-                        kind: QueueMessageKind::Event {
-                            event,
-                            raw,
-                            session_id: Some(session_id),
-                        },
-                    });
-                    let _ = tx.send(QueueMessage {
-                        run_id,
-                        kind: QueueMessageKind::StateChanged {
-                            state: super::db::RunState::Done,
-                            started_at: None,
-                            ended_at: Some(Utc::now().timestamp_millis()),
-                            error: None,
-                        },
-                    });
+                        .or_else(|| wakeup_session.clone());
+                    emit_interrupted_wakeup(tx, &run_id, session_id.as_deref());
                 }
             }
         }
@@ -1185,6 +1183,60 @@ impl AcpHost {
 
 fn has_pending_background_for(pending: &HashMap<String, String>, run_id: &str) -> bool {
     pending.values().any(|owner| owner == run_id)
+}
+
+/// Stop yields the host regardless of an in-flight wakeup. The previous
+/// `wakeup_run.is_none()` gate let `take_lane_host` wait forever for ACP.
+fn idle_watch_yields_on_stop(stop_requested: bool) -> bool {
+    stop_requested
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StaleIdleLine {
+    ClientRequest,
+    Discard,
+}
+
+/// Lines left in the pipe when the idle watch is stopped belong to the old
+/// monitor/wakeup. Dispatching them can start a wakeup (hang) or, if left for
+/// the next live `session/prompt`, bleed into the new runId.
+fn classify_stale_idle_line(message: &Value) -> StaleIdleLine {
+    if message.get("id").is_some() && message.get("method").is_some() {
+        StaleIdleLine::ClientRequest
+    } else {
+        StaleIdleLine::Discard
+    }
+}
+
+fn emit_interrupted_wakeup(
+    tx: &broadcast::Sender<QueueMessage>,
+    run_id: &str,
+    session_id: Option<&str>,
+) {
+    let session_id = session_id.unwrap_or_default().to_string();
+    let event = GrokEvent::End {
+        stop_reason: "EndTurn".into(),
+        session_id: session_id.clone(),
+        request_id: "wakeup".into(),
+    };
+    let raw = serde_json::to_value(&event).unwrap_or(Value::Null);
+    let _ = tx.send(QueueMessage {
+        run_id: run_id.to_string(),
+        kind: QueueMessageKind::Event {
+            event,
+            raw,
+            session_id: Some(session_id),
+        },
+    });
+    let _ = tx.send(QueueMessage {
+        run_id: run_id.to_string(),
+        kind: QueueMessageKind::StateChanged {
+            state: super::db::RunState::Done,
+            started_at: None,
+            ended_at: Some(Utc::now().timestamp_millis()),
+            error: None,
+        },
+    });
 }
 
 fn uses_idle_timeout(method: &str) -> bool {
@@ -1933,5 +1985,75 @@ mod tests {
             idle_notification_action(&dedicated_completed),
             IdleNotificationAction::EnsureRun
         );
+    }
+
+    #[test]
+    fn idle_watch_stop_yields_host_even_during_wakeup() {
+        // Regression: take_lane_host sent stop=true while EnsureRun had set
+        // wakeup_run, and watch_idle refused to exit until turn_completed.
+        assert!(idle_watch_yields_on_stop(true));
+        assert!(!idle_watch_yields_on_stop(false));
+    }
+
+    #[test]
+    fn stopped_idle_watch_discards_notification_chunks() {
+        let chunk = json!({
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": { "type": "text", "text": "leftover from monitor" }
+                }
+            }
+        });
+        assert_eq!(
+            idle_notification_action(&chunk),
+            IdleNotificationAction::EnsureRun
+        );
+        assert_eq!(classify_stale_idle_line(&chunk), StaleIdleLine::Discard);
+
+        let permission = json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "session/request_permission",
+            "params": { "options": [] }
+        });
+        assert_eq!(
+            classify_stale_idle_line(&permission),
+            StaleIdleLine::ClientRequest
+        );
+
+        let response = json!({ "jsonrpc": "2.0", "id": 3, "result": { "ok": true } });
+        assert_eq!(classify_stale_idle_line(&response), StaleIdleLine::Discard);
+    }
+
+    #[tokio::test]
+    async fn interrupted_wakeup_is_closed_under_its_own_run_id() {
+        let (tx, mut rx) = broadcast::channel(8);
+        emit_interrupted_wakeup(&tx, "wakeup-run", Some("sess-1"));
+
+        let end = rx.recv().await.expect("end event");
+        assert_eq!(end.run_id, "wakeup-run");
+        assert!(matches!(
+            end.kind,
+            QueueMessageKind::Event {
+                event: GrokEvent::End {
+                    ref session_id,
+                    ref request_id,
+                    ..
+                },
+                ..
+            } if session_id == "sess-1" && request_id == "wakeup"
+        ));
+
+        let done = rx.recv().await.expect("done state");
+        assert_eq!(done.run_id, "wakeup-run");
+        assert!(matches!(
+            done.kind,
+            QueueMessageKind::StateChanged {
+                state: super::super::db::RunState::Done,
+                ..
+            }
+        ));
     }
 }

@@ -214,6 +214,8 @@ impl RunQueue {
     async fn take_lane_host(&self, lane_id: &str) -> Option<AcpHost> {
         let watch = self.idle_watches.lock().await.remove(lane_id);
         if let Some(watch) = watch {
+            // watch_idle must return on stop even mid-wakeup; otherwise this
+            // join waits forever for turn_completed and the next prompt hangs.
             let _ = watch.stop.send(true);
             return watch.join.await.ok();
         }
