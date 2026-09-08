@@ -1107,6 +1107,52 @@ describe('MessageItem rendering states', () => {
     expect(screen.getByRole('button', { name: 'Copy response' })).toBeInTheDocument();
   });
 
+  it('omits Copy and Fork when the parent marks the turn as non-tip', async () => {
+    applyRunEvent('copy-non-tip', { type: 'text', data: 'answer' });
+    await act(async () => {
+      applyRunEvent('copy-non-tip', {
+        type: 'end',
+        stopReason: 'EndTurn',
+        sessionId: 'session',
+        requestId: 'request',
+      });
+    });
+    render(<MessageItem runId="copy-non-tip" showCopy={false} showFork={false} canFork={false} />);
+    expect(screen.queryByRole('button', { name: 'Copy response' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Fork/i })).not.toBeInTheDocument();
+  });
+
+  it('hides Copy and Fork while idle monitors are still watching', async () => {
+    applyRunEvent('copy-while-watch', { type: 'text', data: 'watching now' });
+    await act(async () => {
+      applyRunEvent('copy-while-watch', {
+        type: 'end',
+        stopReason: 'EndTurn',
+        sessionId: 'session',
+        requestId: 'request',
+      });
+      applyStateChange('copy-while-watch', {
+        state: 'Done',
+        startedAt: Date.now() - 1000,
+        endedAt: Date.now(),
+      });
+      applyWatching('copy-while-watch', { active: true, startedAt: Date.now() });
+    });
+    render(
+      <MessageItem
+        runId="copy-while-watch"
+        showCopy
+        showFork
+        canFork
+        canUndo
+        onUndo={() => {}}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Undo response' })).not.toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Copy response' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Fork/i })).not.toBeInTheDocument();
+  });
+
   it('shows a shimmering compaction line while auto-compact is running', async () => {
     applyStateChange('compact-hint', { state: 'Running', startedAt: Date.now() });
     applyRunEvent('compact-hint', { type: 'thought', data: 'checking' });

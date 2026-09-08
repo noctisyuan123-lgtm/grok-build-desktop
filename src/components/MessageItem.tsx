@@ -34,6 +34,8 @@ interface Props {
   canFork?: boolean;
   showFork?: boolean;
   onFork?: () => void;
+  /** When false, hide Copy even if the run has finished (non-tip turns). */
+  showCopy?: boolean;
   status?: ChatMessageStatus;
 }
 
@@ -50,6 +52,7 @@ function MessageItemImpl({
   canFork = false,
   showFork = false,
   onFork,
+  showCopy = true,
   status,
 }: Props) {
   const snap = useRunSnapshot(runId);
@@ -67,8 +70,12 @@ function MessageItemImpl({
   // actually arrived, otherwise the last intermediate response briefly gets
   // promoted into the final answer and then jumps back into the work rail.
   const responseTerminalReady = !snap || snap.lastEventType === 'end' || snap.stopReason != null;
-  const forkVisible = showFork && (!snap || (!runIsLive && responseTerminalReady));
+  // Hold Copy/Fork while idle monitors are still watching — the episode tip
+  // only exposes them after watches settle (or a later wakeup becomes tip).
+  const tipActionsSettled = !runIsLive && responseTerminalReady && !snap?.watching;
+  const forkVisible = showFork && (!snap || tipActionsSettled);
   const forkEnabled = canFork && forkVisible;
+  const copyVisible = showCopy && (!snap || tipActionsSettled);
 
   // markdown-it does not sanitize; strip scripts/handlers before injecting.
   const safeHtml = useMemo(() => (html ? sanitizeHtml(html) : html), [html]);
@@ -130,6 +137,7 @@ function MessageItemImpl({
           onUndo={onUndo}
           canFork={forkEnabled}
           showFork={forkVisible}
+          showCopy={copyVisible}
           onFork={onFork}
         />
       );
@@ -142,7 +150,7 @@ function MessageItemImpl({
           <MessageActions
             sourceText={fallbackText || ''}
             canUndo={canUndo}
-            showCopy
+            showCopy={copyVisible}
             showUndo={showUndo}
             onUndo={onUndo}
             canFork={forkEnabled}
@@ -160,7 +168,7 @@ function MessageItemImpl({
           <MessageActions
             sourceText={fallbackText}
             canUndo={canUndo}
-            showCopy
+            showCopy={copyVisible}
             showUndo={showUndo}
             onUndo={onUndo}
             canFork={forkEnabled}
@@ -208,6 +216,7 @@ function MessageItemImpl({
           onUndo={onUndo}
           canFork={forkEnabled}
           showFork={forkVisible}
+          showCopy={copyVisible}
           onFork={onFork}
         />
       ) : (
@@ -253,7 +262,7 @@ function MessageItemImpl({
           <MessageActions
             sourceText={snap.text || fallbackText || ''}
             canUndo={canUndo && !runIsLive}
-            showCopy={!runIsLive && responseTerminalReady}
+            showCopy={copyVisible}
             showUndo={showUndo}
             onUndo={onUndo}
             canFork={forkEnabled}
@@ -288,6 +297,7 @@ export function TranscriptMessage({
   canFork = false,
   showFork = false,
   onFork,
+  showCopy = true,
 }: {
   runId: string;
   transcript: TranscriptSegment[];
@@ -305,6 +315,7 @@ export function TranscriptMessage({
   canFork?: boolean;
   showFork?: boolean;
   onFork?: () => void;
+  showCopy?: boolean;
 }) {
   const [expanded, setExpanded] = useState(autoExpandWork);
   const wasLive = useRef(live);
@@ -444,7 +455,7 @@ export function TranscriptMessage({
       <MessageActions
         sourceText={finalText}
         canUndo={canUndo}
-        showCopy={!live && responseTerminalReady}
+        showCopy={showCopy && !live && responseTerminalReady}
         showUndo={showUndo}
         onUndo={onUndo}
         canFork={canFork}

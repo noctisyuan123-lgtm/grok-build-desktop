@@ -1719,6 +1719,13 @@ function App() {
     const latestTurnCanUndo = Boolean(
       latestMessage && !activeSessionIsRunning && !latestMessageIsLive,
     );
+    const tipCopyForkReady = Boolean(
+      latestMessage?.role === 'assistant' &&
+        latestMessage.status !== 'streaming' &&
+        Boolean(latestMessage.content.trim()) &&
+        !activeSessionIsRunning &&
+        !latestMessageIsLive,
+    );
     const latestUserIndex =
       latestMessage?.role === 'assistant' && latestMessage.status !== 'streaming'
         ? latestIndex - 1
@@ -1765,8 +1772,12 @@ function App() {
             id: m.id,
             canUndo: index === latestIndex && latestTurnCanUndo,
             showUndo: index === latestIndex && latestTurnCanUndo,
-            canFork: m.status !== 'streaming' && Boolean(m.content.trim()),
-            showFork: m.status !== 'streaming' && Boolean(m.content.trim()),
+            // Copy/Fork only on the conversation tip after the turn has
+            // finished. Intermediate wakeups/monitor bubbles stay action-light;
+            // Undo eligibility above is intentionally unchanged.
+            canFork: index === latestIndex && tipCopyForkReady,
+            showFork: index === latestIndex && tipCopyForkReady,
+            showCopy: index === latestIndex && tipCopyForkReady,
           },
     );
   }, [activeSessionIsRunning, messageAttachments, messages]);

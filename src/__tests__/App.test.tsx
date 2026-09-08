@@ -248,6 +248,12 @@ describe('composer submit → queued run → streamed reply', () => {
     expect(convo().queryByText('Keep watching the download')).toBeInTheDocument();
     const assistantBubbles = document.querySelectorAll('.message-assistant');
     expect(assistantBubbles.length).toBeGreaterThanOrEqual(2);
+    // Intermediate parent + tip wakeup: only the finished tip exposes Copy/Fork.
+    expect(convo().getAllByRole('button', { name: t('message.copy') })).toHaveLength(1);
+    expect(convo().getAllByRole('button', { name: t('message.fork') })).toHaveLength(1);
+    const tip = assistantBubbles[assistantBubbles.length - 1]!;
+    expect(tip.querySelector('[aria-label="' + t('message.copy') + '"]')).toBeTruthy();
+    expect(tip.querySelector('[aria-label="' + t('message.fork') + '"]')).toBeTruthy();
     expect(tauri.unknownCommands).toEqual([]);
   });
 
@@ -266,6 +272,9 @@ describe('composer submit → queued run → streamed reply', () => {
     expect(await convo().findByText(/Watching for/)).toBeInTheDocument();
     const undo = await convo().findByRole('button', { name: t('message.undoResponse') });
     expect(undo).not.toBeDisabled();
+    // Copy/Fork wait until watches settle; Undo stays available.
+    expect(convo().queryByRole('button', { name: t('message.copy') })).not.toBeInTheDocument();
+    expect(convo().queryByRole('button', { name: t('message.fork') })).not.toBeInTheDocument();
   });
 
   it('checkpoints partial assistant text into storage while the run is still live', async () => {
@@ -983,7 +992,7 @@ describe('session tabs and history', () => {
     expect(enqueue.args.args).toContain('--fork-session');
   });
 
-  it('replays only the selected branch when forking an older response', async () => {
+  it('exposes Copy and Fork only on the finished conversation tip', async () => {
     const ctx = await bootApp();
     const { tauri, user } = ctx;
 
@@ -991,23 +1000,25 @@ describe('session tabs and history', () => {
     await act(async () => {
       await tauri.streamReply(firstRun, ['First response']);
     });
+    expect(convo().getAllByRole('button', { name: t('message.fork') })).toHaveLength(1);
+    expect(convo().getAllByRole('button', { name: t('message.copy') })).toHaveLength(1);
+
     const secondRun = await submitPrompt(ctx, 'Later turn to exclude');
     await act(async () => {
       await tauri.streamReply(secondRun, ['Later response']);
     });
 
-    const forkButtons = convo().getAllByRole('button', { name: t('message.fork') });
-    await user.click(forkButtons[0]!);
-    expect(convo().queryByText('Later turn to exclude')).not.toBeInTheDocument();
-    expect(convo().queryByText('Later response')).not.toBeInTheDocument();
+    // Intermediate assistant replies no longer offer Copy/Fork — only the tip.
+    expect(convo().getAllByRole('button', { name: t('message.fork') })).toHaveLength(1);
+    expect(convo().getAllByRole('button', { name: t('message.copy') })).toHaveLength(1);
+    const assistants = document.querySelectorAll('.message-assistant');
+    expect(assistants).toHaveLength(2);
+    expect(assistants[0]!.querySelector('[aria-label="' + t('message.fork') + '"]')).toBeNull();
+    expect(assistants[1]!.querySelector('[aria-label="' + t('message.fork') + '"]')).toBeTruthy();
 
-    await submitPrompt(ctx, 'Continue this older branch');
-    const enqueue = [...tauri.calls].reverse().find((call) => call.cmd === 'enqueue_run')!;
-    expect(enqueue.args.args).not.toContain('--resume');
-    const args = enqueue.args.args as string[];
-    const rules = args[args.indexOf('--rules') + 1] ?? '';
-    expect(rules).toContain('First response');
-    expect(rules).not.toContain('Later response');
+    await user.click(convo().getByRole('button', { name: t('message.fork') }));
+    expect(await convo().findByText('Later turn to exclude')).toBeInTheDocument();
+    expect(await convo().findByText('Later response')).toBeInTheDocument();
   });
 
   it('creates a fresh session and switches back through the history row', async () => {

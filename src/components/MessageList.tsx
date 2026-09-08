@@ -36,6 +36,7 @@ export interface MessageRef {
   showUndo?: boolean;
   canFork?: boolean;
   showFork?: boolean;
+  showCopy?: boolean;
   canEdit?: boolean;
   showEdit?: boolean;
   attachments?: ComposerAttachment[];
@@ -258,7 +259,7 @@ export function MessageList({
         // strict no-'unsafe-inline' style-src), and the codebase stays free of
         // inline-style props (guarded in scripts/smoke_test.mjs).
         increaseViewportBy={{ top: 200, bottom: 160 }}
-        itemContent={(_, msg) => {
+        itemContent={(index, msg) => {
           const flash = msg.id && msg.id === flashId ? ' message-flash' : '';
           if (msg.role === 'user') {
             const isEditing = msg.id === editingId;
@@ -367,8 +368,15 @@ export function MessageList({
           // DOM while scrolling; this keeps the callback bound to the message
           // represented by this render rather than an index or mutable lookup.
           const assistantId = msg.id;
+          const followsAssistant =
+            index > 0 && messages[index - 1]?.role === 'assistant'
+              ? ' message-assistant-followup'
+              : '';
           return (
-            <div className={`message message-assistant${flash}`} data-message-id={msg.id}>
+            <div
+              className={`message message-assistant${followsAssistant}${flash}`}
+              data-message-id={msg.id}
+            >
               <MessageItem
                 runId={msg.runId}
                 fallbackText={msg.fallbackText}
@@ -381,6 +389,7 @@ export function MessageList({
                 showUndo={Boolean(msg.showUndo)}
                 canFork={Boolean(msg.canFork)}
                 showFork={Boolean(msg.showFork)}
+                showCopy={Boolean(msg.showCopy)}
                 onUndo={
                   assistantId && onUndoAssistant ? () => onUndoAssistant(assistantId) : undefined
                 }

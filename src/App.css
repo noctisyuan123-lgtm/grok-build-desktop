@@ -8607,7 +8607,7 @@ select:focus-visible {
   flex-direction: column;
   justify-content: flex-end;
   align-items: flex-end;
-  padding: 12px 28px 20px;
+  padding: 12px 28px 14px;
 }
 
 .message-attachments {
@@ -9043,7 +9043,13 @@ select:focus-visible {
 
 .message.message-assistant {
   background: transparent;
-  padding: 26px 28px 24px;
+  padding: 12px 28px 10px;
+}
+
+/* Back-to-back assistant/wakeup bubbles: denser than user↔assistant turns.
+   Class is set by MessageList because Virtuoso wraps each row. */
+.message.message-assistant.message-assistant-followup {
+  padding-top: 4px;
 }
 
 .message-worked {
