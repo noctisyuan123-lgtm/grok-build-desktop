@@ -8226,8 +8226,9 @@ button.history-section-head.toggle:hover {
   display: flex;
   font: inherit;
   gap: 7px;
-  line-height: 1.4;
-  min-height: 24px;
+  justify-content: flex-start;
+  line-height: 1.3;
+  min-height: 0;
   padding: 0;
   text-align: left;
   width: fit-content;
@@ -8286,8 +8287,8 @@ button.activity-summary:hover .activity-label {
   display: flex;
   flex-direction: column;
   gap: 0;
-  margin: 5px 0 1px 2px;
-  padding: 1px 0 1px 12px;
+  margin: 2px 0 1px 2px;
+  padding: 0 0 1px 12px;
 }
 
 .activity-item {
@@ -10593,9 +10594,12 @@ body,
   font-family: inherit;
   font-size: 13px;
   gap: 7px;
-  line-height: 1.4;
+  justify-content: flex-start;
+  line-height: 1.3;
+  min-height: 0;
   padding: 0;
   text-align: left;
+  width: fit-content;
 }
 
 .transcript-thought > button:hover,
@@ -10634,24 +10638,41 @@ body,
   display: flex;
   flex-direction: column;
   gap: 1px;
-  margin-top: 1px;
+  margin-top: 0;
 }
 
 .transcript-thought-body {
   color: color-mix(in srgb, var(--conversation-text) 64%, transparent) !important;
-  margin-top: 3px !important;
+  margin-top: 1px !important;
 }
 
 .transcript-thought-truncated {
   color: color-mix(in srgb, var(--conversation-text) 42%, transparent);
   font-size: 11px;
   line-height: 16px;
-  margin-top: 3px;
+  margin-top: 1px;
 }
 
-.transcript-tool-group .message-worked-list {
-  margin: 1px 0 0;
+/* Keep disclosure rows flush with the summary; global button min-height and
+   the shared .message-worked-list bottom margin otherwise leave a tall gap. */
+.transcript-tool-group,
+.transcript-thought,
+.transcript-phase {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+}
+
+.transcript-segments .activity-list,
+.transcript-segments .message-worked-list,
+.transcript-tool-group .message-worked-list,
+.transcript-phase-body .activity-list,
+.transcript-phase-body .message-worked-list {
+  margin: 0;
+  padding-bottom: 0;
   padding-left: 0;
+  padding-top: 0;
 }
 
 /* A tool group stays compact by default, but its one current call gets a
