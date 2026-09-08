@@ -1768,7 +1768,7 @@ pre {
 
 .app-shell.theme-dark {
   --app-bg: #0b0c0d;
-  --sidebar-bg: rgba(18, 20, 22, 0.48);
+  --sidebar-bg: rgba(20, 14, 10, 0.42);
   --topbar-bg: #0d0f10;
   --panel: #101214;
   --panel-raised: #151719;
@@ -1793,28 +1793,29 @@ pre {
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.36);
 }
 
-/* Frosted navigation rail. The translucent surface is backed by the shell's
-   subtle glow, while the WebKit-prefixed filter keeps this working in Tauri's
-   WKWebView instead of silently falling back to an opaque panel. */
+/* Frosted navigation rail (CSS fallback). In the packaged Tauri app the later
+   native-material block disables backdrop-filter so NSVisualEffectView shows
+   through; this block still covers browser/dev shells without vibrancy.
+   Premium = restraint: soft depth, clean edge highlight, quiet fill. */
 .app-shell.theme-dark .app-sidebar {
   position: relative;
   isolation: isolate;
-  background: linear-gradient(165deg, rgba(27, 30, 33, 0.56), rgba(12, 14, 16, 0.38));
-  -webkit-backdrop-filter: blur(30px) saturate(115%);
-  backdrop-filter: blur(30px) saturate(115%);
-  border-right: 1px solid rgba(255, 255, 255, 0.09);
+  background: linear-gradient(180deg, rgba(32, 22, 16, 0.56), rgba(14, 10, 8, 0.4));
+  -webkit-backdrop-filter: blur(36px) saturate(140%);
+  backdrop-filter: blur(36px) saturate(140%);
+  border-right: 1px solid rgba(255, 255, 255, 0.07);
   box-shadow:
-    inset -1px 0 0 rgba(255, 255, 255, 0.018),
-    16px 0 42px rgba(0, 0, 0, 0.24);
+    inset 0 1px 0 rgba(255, 255, 255, 0.055),
+    inset -1px 0 0 rgba(255, 255, 255, 0.06),
+    10px 0 28px rgba(0, 0, 0, 0.16);
 }
 
-/* A restrained light veil makes the glass legible even in WKWebView, where a
-   uniform near-black backdrop otherwise makes blur indistinguishable from an
-   opaque fill. It is decorative only and never intercepts sidebar input. */
+/* Specular veil — decorative only; never intercepts sidebar input. */
 .app-shell.theme-dark .app-sidebar::before {
   background:
-    radial-gradient(ellipse 110% 46% at 0% 0%, rgba(255, 255, 255, 0.075), transparent 62%),
-    linear-gradient(110deg, rgba(255, 255, 255, 0.022), transparent 46%);
+    radial-gradient(ellipse 90% 42% at 8% -4%, rgba(255, 236, 220, 0.08), transparent 58%),
+    linear-gradient(180deg, rgba(255, 230, 210, 0.03), transparent 42%),
+    linear-gradient(90deg, rgba(255, 220, 190, 0.018), transparent 38%);
   content: '';
   inset: 0;
   pointer-events: none;
@@ -1825,22 +1826,22 @@ pre {
 /* Keep internal controls translucent too; opaque children were previously
    masking most of the frosted rail. */
 .app-shell.theme-dark .app-sidebar .search-box {
-  background: rgba(8, 10, 12, 0.34);
-  border-color: rgba(255, 255, 255, 0.075);
+  background: rgba(14, 9, 6, 0.34);
+  border-color: rgba(255, 255, 255, 0.07);
 }
 .app-shell.theme-dark .app-sidebar .primary-nav .nav-list {
   background: transparent;
-  border-color: rgba(255, 255, 255, 0.055);
+  border-color: rgba(255, 255, 255, 0.05);
 }
 .app-shell.theme-dark .app-sidebar .history-row.active,
 .app-shell.theme-dark .app-sidebar .history-row.menu-open {
-  background: rgba(255, 255, 255, 0.085);
+  background: rgba(255, 255, 255, 0.09);
 }
 .app-shell.theme-dark .app-sidebar .history-row:hover:not(.active) {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.045);
 }
 .app-shell.theme-dark .app-sidebar .account-strip {
-  border-top-color: rgba(255, 255, 255, 0.06);
+  border-top-color: rgba(255, 255, 255, 0.055);
 }
 
 .app-shell.theme-light {
@@ -9110,7 +9111,8 @@ button.message-worked:hover {
 
 /* Native macOS material is visible only through genuinely transparent webview
    pixels. The main workspace remains opaque; the navigation rail alone lets
-   the NSVisualEffectView show the desktop beneath it. */
+   the NSVisualEffectView show the desktop beneath it. Keep CSS backdrop-filter
+   off here so the vibrancy isn't double-blurred into mud. */
 :root,
 html,
 body,
@@ -9130,13 +9132,28 @@ body,
   background: transparent;
 }
 
+/* Dark glass wash over native sidebar vibrancy — restrained fill, top/edge
+   specular, soft depth. Opacity stays high enough for text/icon contrast. */
 .app-shell.theme-dark .app-sidebar {
-  background: rgba(16, 18, 20, 0.38);
+  background: linear-gradient(
+    180deg,
+    rgba(30, 20, 14, 0.44) 0%,
+    rgba(16, 11, 8, 0.36) 100%
+  );
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.055);
   box-shadow:
-    inset -1px 0 0 rgba(255, 255, 255, 0.045),
-    14px 0 36px rgba(0, 0, 0, 0.2);
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset -1px 0 0 rgba(255, 255, 255, 0.075),
+    8px 0 24px rgba(0, 0, 0, 0.12);
+}
+
+.app-shell.theme-dark .app-sidebar::before {
+  background:
+    radial-gradient(ellipse 88% 40% at 6% -6%, rgba(255, 236, 220, 0.09), transparent 56%),
+    linear-gradient(180deg, rgba(255, 230, 210, 0.035), transparent 40%),
+    linear-gradient(90deg, rgba(255, 220, 190, 0.02), transparent 36%);
 }
 
 /* Light mode uses the same native macOS sidebar material. A translucent white
@@ -9145,19 +9162,25 @@ body,
 .app-shell.theme-light .app-sidebar {
   position: relative;
   isolation: isolate;
-  background: rgba(248, 248, 245, 0.46);
+  background: linear-gradient(
+    180deg,
+    rgba(252, 252, 250, 0.5) 0%,
+    rgba(246, 246, 243, 0.38) 100%
+  );
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
-  border-right-color: rgba(43, 43, 38, 0.12);
+  border-right-color: rgba(43, 43, 38, 0.1);
   box-shadow:
-    inset -1px 0 0 rgba(255, 255, 255, 0.42),
-    14px 0 36px rgba(43, 43, 38, 0.09);
+    inset 0 1px 0 rgba(255, 255, 255, 0.62),
+    inset -1px 0 0 rgba(255, 255, 255, 0.5),
+    8px 0 22px rgba(43, 43, 38, 0.055);
 }
 
 .app-shell.theme-light .app-sidebar::before {
   background:
-    radial-gradient(ellipse 110% 46% at 0% 0%, rgba(255, 255, 255, 0.42), transparent 62%),
-    linear-gradient(110deg, rgba(255, 255, 255, 0.16), transparent 46%);
+    radial-gradient(ellipse 88% 40% at 6% -6%, rgba(255, 255, 255, 0.55), transparent 56%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22), transparent 44%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.1), transparent 40%);
   content: '';
   inset: 0;
   pointer-events: none;
@@ -9166,20 +9189,20 @@ body,
 }
 
 .app-shell.theme-light .app-sidebar .search-box {
-  background: rgba(255, 255, 255, 0.34);
-  border-color: rgba(43, 43, 38, 0.1);
+  background: rgba(255, 255, 255, 0.38);
+  border-color: rgba(43, 43, 38, 0.09);
 }
 
 .app-shell.theme-light .app-sidebar .history-row.active,
 .app-shell.theme-light .app-sidebar .history-row.menu-open {
-  background: rgba(255, 255, 255, 0.48);
+  background: rgba(255, 255, 255, 0.52);
 }
 .app-shell.theme-light .app-sidebar .history-row:hover:not(.active) {
-  background: rgba(43, 43, 38, 0.05);
+  background: rgba(43, 43, 38, 0.045);
 }
 
 .app-shell.theme-light .app-sidebar .account-strip {
-  border-top-color: rgba(43, 43, 38, 0.09);
+  border-top-color: rgba(43, 43, 38, 0.08);
 }
 
 /* Keep the canvas, composer and fenced code in one neutral graphite family.
