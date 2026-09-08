@@ -27,7 +27,10 @@ export function parseStoredModelIds(raw: string | null | undefined): string[] {
   }
 }
 
-export function resolveModelOptions(availableModels: readonly string[], stored: readonly string[]): string[] {
+export function resolveModelOptions(
+  availableModels: readonly string[],
+  stored: readonly string[],
+): string[] {
   const fromCli = availableModels.filter(
     (value) => value && !NOISE_MODEL_TOKENS.has(value.toLowerCase()),
   );
@@ -53,8 +56,7 @@ export function parseAvailableModels(output: string): string[] {
       continue;
     }
     const match =
-      line.match(/^\s*[*\-•·●✓✔]\s*([\w./:@-]+)/) ??
-      line.match(/^\s+(grok[\w./:@-]*)\b/i);
+      line.match(/^\s*[*\-•·●✓✔]\s*([\w./:@-]+)/) ?? line.match(/^\s+(grok[\w./:@-]*)\b/i);
     if (!match) {
       if (sawItem) break;
       continue;
@@ -85,6 +87,18 @@ export function formatRunDuration(ms: number): string {
   return `${hours}h ${mins}m`;
 }
 
+/** Remaining billing-window countdown: "6d 10h", "10h 5m", "12 min". */
+export function formatRemainingDuration(ms: number): string {
+  const totalMin = Math.max(0, Math.round(ms / 60_000));
+  if (totalMin < 1) return 'under 1 min';
+  const days = Math.floor(totalMin / (60 * 24));
+  const hours = Math.floor((totalMin - days * 60 * 24) / 60);
+  const mins = totalMin % 60;
+  if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  if (hours > 0) return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  return `${totalMin} min`;
+}
+
 /** CLI `/usage` reset timestamp, e.g. "Sep 1, 5:58 PM". */
 export function formatUsageReset(iso: string | null | undefined): string {
   if (!iso) return '';
@@ -96,6 +110,23 @@ export function formatUsageReset(iso: string | null | undefined): string {
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+/** Reset timestamp with year, e.g. "Sep 15, 2026 at 12:06 AM". */
+export function formatUsageResetAt(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const datePart = date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+  const timePart = date.toLocaleString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  return `${datePart} at ${timePart}`;
 }
 
 /** Dollar amounts from grok billing `val` fields. */

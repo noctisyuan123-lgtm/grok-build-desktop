@@ -3,8 +3,10 @@ import type { ToolRun } from '../../lib/grok';
 import {
   formatOutput,
   formatRunDuration,
+  formatRemainingDuration,
   formatUsdAmount,
   formatUsageReset,
+  formatUsageResetAt,
   grokInspectCount,
   grokInspectLine,
   grokInspectSection,
@@ -65,6 +67,27 @@ describe('formatUsageReset', () => {
   it('returns empty for missing timestamps and keeps unparsable strings', () => {
     expect(formatUsageReset(undefined)).toBe('');
     expect(formatUsageReset('not-a-date')).toBe('not-a-date');
+  });
+});
+
+describe('formatRemainingDuration', () => {
+  it('renders days, hours, and short leftovers', () => {
+    expect(formatRemainingDuration(6 * 24 * 60 * 60_000 + 10 * 60 * 60_000)).toBe('6d 10h');
+    expect(formatRemainingDuration(10 * 60 * 60_000 + 5 * 60_000)).toBe('10h 5m');
+    expect(formatRemainingDuration(12 * 60_000)).toBe('12 min');
+    expect(formatRemainingDuration(20_000)).toBe('under 1 min');
+  });
+});
+
+describe('formatUsageResetAt', () => {
+  it('returns empty for missing timestamps and keeps unparsable strings', () => {
+    expect(formatUsageResetAt(undefined)).toBe('');
+    expect(formatUsageResetAt('not-a-date')).toBe('not-a-date');
+  });
+
+  it('includes the year and an at-separator', () => {
+    expect(formatUsageResetAt('2026-09-15T00:06:00.000Z')).toMatch(/2026/);
+    expect(formatUsageResetAt('2026-09-15T00:06:00.000Z')).toMatch(/ at /);
   });
 });
 

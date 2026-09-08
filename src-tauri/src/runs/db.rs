@@ -44,6 +44,18 @@ pub struct WeeklyUsage {
     pub since: i64,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BillingSnapshot {
+    pub sampled_at: i64,
+    pub remaining_percent: i32,
+    pub period_start: Option<String>,
+    pub period_end: Option<String>,
+}
+
+const BILLING_ANCHOR_MS: i64 = 15 * 60 * 1000;
+const BILLING_RETENTION_MS: i64 = 90 * 24 * 60 * 60 * 1000;
+
 #[derive(Debug, Clone)]
 pub struct RunRecord {
     pub id: String,
@@ -119,6 +131,16 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 CREATE INDEX IF NOT EXISTS idx_runs_state ON runs(state);
 CREATE INDEX IF NOT EXISTS idx_runs_enqueued_at ON runs(enqueued_at);
+CREATE TABLE IF NOT EXISTS billing_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sampled_at INTEGER NOT NULL,
+    remaining_percent INTEGER NOT NULL,
+    period_start TEXT,
+    period_end TEXT,
+    is_anchor INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_billing_snapshots_period
+    ON billing_snapshots(period_start, sampled_at);
 "#;
 
 /// Columns added after the initial schema. Applied with ALTER TABLE so
@@ -301,5 +323,97 @@ impl Db {
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected())
+    }
+
+    pub async fn latest_billing_snapshot(&self) -> Result<Option<BillingSnapshot>, sqlx::Error> {
+        sqlx::query_as::<_, (i64, i32, Option<String>, Option<String>)>(
+            "SELECT sampled_at, remaining_percent, period_start, period_end
+             FROM billing_snapshots
+             ORDER BY sampled_at DESC, id DESC
+             LIMIT 1",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map(|row| {
+            row.map(
+                |(sampled_at, remaining_percent, period_start, period_end)| BillingSnapshot {
+                    sampled_at,
+                    remaining_percent,
+                    period_start,
+                    period_end,
+                },
+            )
+        })
+    }
+
+    /// Records a remaining-quota sample when the value changed, the billing
+    /// cycle changed, or 15 minutes have passed since the last row.
+    pub async fn record_billing_snapshot(
+        &self,
+        remaining_percent: i32,
+        period_start: Option<&str>,
+        period_end: Option<&str>,
+        now_ms: i64,
+    ) -> Result<bool, sqlx::Error> {
+        let remaining_percent = remaining_percent.clamp(0, 100);
+        let previous = self.latest_billing_snapshot().await?;
+        let (should_insert, is_anchor) = match previous {
+            None => (true, false),
+            Some(prev) => {
+                let new_cycle = prev.period_start.as_deref() != period_start;
+                let changed = prev.remaining_percent != remaining_percent;
+                let due = now_ms.saturating_sub(prev.sampled_at) >= BILLING_ANCHOR_MS;
+                (new_cycle || changed || due, !new_cycle && !changed && due)
+            }
+        };
+        if !should_insert {
+            return Ok(false);
+        }
+        sqlx::query(
+            "INSERT INTO billing_snapshots (sampled_at, remaining_percent, period_start, period_end, is_anchor)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(now_ms)
+        .bind(remaining_percent)
+        .bind(period_start)
+        .bind(period_end)
+        .bind(if is_anchor { 1 } else { 0 })
+        .execute(&self.pool)
+        .await?;
+        let cutoff = now_ms.saturating_sub(BILLING_RETENTION_MS);
+        sqlx::query("DELETE FROM billing_snapshots WHERE sampled_at < ?")
+            .bind(cutoff)
+            .execute(&self.pool)
+            .await?;
+        Ok(true)
+    }
+
+    pub async fn list_billing_snapshots(
+        &self,
+        period_start: Option<&str>,
+    ) -> Result<Vec<BillingSnapshot>, sqlx::Error> {
+        let Some(period_start) = period_start else {
+            return Ok(Vec::new());
+        };
+        let rows: Vec<(i64, i32, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT sampled_at, remaining_percent, period_start, period_end
+             FROM billing_snapshots
+             WHERE period_start = ?
+             ORDER BY sampled_at ASC, id ASC",
+        )
+        .bind(period_start)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(sampled_at, remaining_percent, period_start, period_end)| BillingSnapshot {
+                    sampled_at,
+                    remaining_percent,
+                    period_start,
+                    period_end,
+                },
+            )
+            .collect())
     }
 }

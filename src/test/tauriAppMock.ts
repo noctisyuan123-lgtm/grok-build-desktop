@@ -47,7 +47,12 @@ export interface TauriAppMock {
   /** Emit grok-desktop://wakeup-run for idle monitor follow-up turns. */
   emitWakeup: (runId: string, laneId: string, sessionId?: string) => Promise<void>;
   /** Emit grok-desktop://run-watching for a completed turn with live monitors. */
-  emitWatching: (runId: string, active: boolean, startedAt?: number, label?: string) => Promise<void>;
+  emitWatching: (
+    runId: string,
+    active: boolean,
+    startedAt?: number,
+    label?: string,
+  ) => Promise<void>;
   /** Play a full streamed run: Running → text chunks → end → Done → empty queue. */
   streamReply: (runId: string, chunks: string[]) => Promise<void>;
 }
@@ -133,6 +138,7 @@ export function installTauriAppMock(overrides: Record<string, CommandHandler> = 
       prepaidBalance: 0,
       unifiedBilling: true,
       subscriptionTier: 'SuperGrok',
+      snapshots: [],
     }),
     clear_queue: () => 0,
     resume_pending_runs: () => 0,

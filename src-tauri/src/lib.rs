@@ -31,6 +31,7 @@ pub mod customize;
 pub mod prompts;
 pub mod runs;
 
+use crate::runs::billing::{remaining_percent_i32, CliUsageView};
 use crate::runs::db::{Db, RunState};
 use crate::runs::queue::{QueueMessage, QueueMessageKind, RunQueue};
 #[cfg(target_os = "macos")]
@@ -4266,17 +4267,42 @@ fn post_un_user_notification() -> bool {
 }
 
 #[tauri::command]
-async fn get_cli_usage() -> crate::runs::billing::CliUsage {
+async fn get_cli_usage(
+    queue: tauri::State<'_, std::sync::Arc<RunQueue>>,
+) -> Result<CliUsageView, String> {
     let program = env::var("GROK_DESKTOP_GROK_CMD").unwrap_or_else(|_| default_grok_binary());
     let path = command_path();
-    match tauri::async_runtime::spawn_blocking(move || {
+    let usage = match tauri::async_runtime::spawn_blocking(move || {
         crate::runs::billing::fetch_cli_billing(&program, &path)
     })
     .await
     {
         Ok(usage) => usage,
-        Err(error) => crate::runs::billing::CliUsage::fail(error.to_string()),
-    }
+        Err(error) => return Ok(CliUsageView::fail(error.to_string())),
+    };
+
+    let snapshots = if usage.ok {
+        let remaining = remaining_percent_i32(usage.credit_usage_percent);
+        let now = chrono::Utc::now().timestamp_millis();
+        let _ = queue
+            .db
+            .record_billing_snapshot(
+                remaining,
+                usage.period_start.as_deref(),
+                usage.period_end.as_deref(),
+                now,
+            )
+            .await;
+        queue
+            .db
+            .list_billing_snapshots(usage.period_start.as_deref())
+            .await
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    Ok(CliUsageView::from_usage(usage, snapshots))
 }
 
 async fn maybe_alert_background_completion(app: tauri::AppHandle, run_id: String) {

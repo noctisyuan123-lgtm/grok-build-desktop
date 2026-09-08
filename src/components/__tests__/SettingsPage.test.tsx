@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SettingsPage, type SettingsPageProps } from '../SettingsPage';
 
@@ -67,6 +67,7 @@ function makeProps(overrides: Partial<SettingsPageProps> = {}): SettingsPageProp
       prepaidBalance: 0,
       unifiedBilling: true,
       subscriptionTier: 'SuperGrok',
+      snapshots: [],
     },
     cliUsageLoading: false,
     onRefreshUsage: vi.fn(),
@@ -177,16 +178,57 @@ describe('SettingsPage', () => {
     expect(screen.queryByRole('button', { name: 'Refresh' })).not.toBeInTheDocument();
   });
 
-  it('usage: shows a credit ring, period, and refresh', async () => {
-    const user = userEvent.setup();
-    const props = makeProps({ section: 'usage' });
-    render(<SettingsPage {...props} />);
-    expect(screen.getByRole('heading', { name: 'Usage' })).toBeInTheDocument();
-    expect(screen.getByText('SuperGrok')).toBeInTheDocument();
-    expect(screen.getByText('Weekly allowance')).toBeInTheDocument();
-    expect(screen.getByText('66% used')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: /66% of Weekly allowance credits used/ })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Refresh' }));
-    expect(props.onRefreshUsage).toHaveBeenCalledTimes(1);
+  describe('usage', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('shows weekly quota bars, above-pace, and refresh', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-08-26T09:58:55.164Z'));
+      const props = makeProps({ section: 'usage' });
+      render(<SettingsPage {...props} />);
+      expect(screen.getByRole('heading', { name: 'Usage' })).toBeInTheDocument();
+      expect(screen.getByText('SuperGrok')).toBeInTheDocument();
+      expect(screen.getByText('Weekly quota')).toBeInTheDocument();
+      expect(screen.getByText('Above pace')).toBeInTheDocument();
+      expect(screen.getAllByText('Quota remaining').length).toBeGreaterThan(0);
+      expect(screen.getByText('Time remaining')).toBeInTheDocument();
+      expect(screen.getByRole('meter', { name: '34% quota remaining' })).toBeInTheDocument();
+      expect(
+        screen.getByRole('img', { name: 'Quota remaining over the current cycle' }),
+      ).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+      expect(props.onRefreshUsage).toHaveBeenCalledTimes(1);
+    });
+
+    it('unused credits (ok, null percent) show 100% remaining instead of a load error', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-08-26T09:58:55.164Z'));
+      render(
+        <SettingsPage
+          {...makeProps({
+            section: 'usage',
+            cliUsage: {
+              ok: true,
+              error: null,
+              creditUsagePercent: null,
+              periodType: 'weekly',
+              periodStart: '2026-08-25T09:58:55.164008+00:00',
+              periodEnd: '2026-09-01T09:58:55.164008+00:00',
+              onDemandCap: 0,
+              onDemandUsed: 0,
+              prepaidBalance: 0,
+              unifiedBilling: true,
+              subscriptionTier: 'SuperGrok',
+              snapshots: [],
+            },
+          })}
+        />,
+      );
+      expect(screen.queryByText(/Couldn't load usage from the Grok CLI/)).not.toBeInTheDocument();
+      expect(screen.getByText('On track')).toBeInTheDocument();
+      expect(screen.getByRole('meter', { name: '100% quota remaining' })).toBeInTheDocument();
+    });
   });
 });

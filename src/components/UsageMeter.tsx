@@ -1,7 +1,34 @@
-import { useLayoutEffect, useRef } from 'react';
-import { formatUsdAmount, formatUsageReset } from '../app/format';
+import { useEffect, useState, type ReactNode } from 'react';
+import {
+  BatteryMedium,
+  CircleCheck,
+  CircleHelp,
+  Clock,
+  Hourglass,
+  TriangleAlert,
+} from 'lucide-react';
+import { formatRemainingDuration, formatUsdAmount, formatUsageResetAt } from '../app/format';
 import { t } from '../i18n';
-import { clampPercent, formatPercent, usageTone } from '../lib/contextMetrics';
+import { formatPercent } from '../lib/contextMetrics';
+import {
+  consumptionPace,
+  cycleLengthDays,
+  parseTimestamp,
+  quotaFillTone,
+  remainingPercent,
+  remainingTimePercent,
+  type ConsumptionPace,
+  type QuotaFillTone,
+} from '../lib/quotaPace';
+import {
+  buildCurrentCycleChart,
+  chartPoint,
+  type BillingSnapshot,
+  type QuotaChartPoint,
+  type QuotaCycleChart,
+} from '../lib/quotaHistory';
+
+export type { BillingSnapshot };
 
 export type CliUsage = {
   ok: boolean;
@@ -15,17 +42,37 @@ export type CliUsage = {
   prepaidBalance: number | null;
   unifiedBilling: boolean;
   subscriptionTier: string | null;
+  snapshots?: BillingSnapshot[];
 };
 
-const RING_SIZE = 92;
-const STROKE = 8;
-const RADIUS = (RING_SIZE - STROKE) / 2;
-const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+const SPARK_W = 320;
+const SPARK_H = 92;
+const SPARK_PAD_X = 6;
+const SPARK_PAD_Y = 10;
+
+const RING_SIZE = 118;
+const RING_OUTER = 8;
+const RING_INNER = 6;
+const RING_GAP = 5;
+const RING_CX = RING_SIZE / 2;
+const OUTER_R = (RING_SIZE - RING_OUTER) / 2;
+const INNER_R = OUTER_R - RING_OUTER / 2 - RING_GAP - RING_INNER / 2;
+const OUTER_CIRC = 2 * Math.PI * OUTER_R;
+const INNER_CIRC = 2 * Math.PI * INNER_R;
 
 function periodLabel(kind: string | null): string {
   if (kind === 'monthly') return t('settings.usagePeriodMonthly');
   if (kind === 'weekly') return t('settings.usagePeriodWeekly');
   return t('settings.usagePeriodUnknown');
+}
+
+function useNow(intervalMs = 60_000): number {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((n) => n + 1), intervalMs);
+    return () => window.clearInterval(id);
+  }, [intervalMs]);
+  return Date.now();
 }
 
 export function UsageMeter({
@@ -37,113 +84,141 @@ export function UsageMeter({
   loading: boolean;
   onRefresh: () => void;
 }) {
-  const ready = Boolean(usage?.ok && usage.creditUsagePercent != null);
-  const percent = ready ? clampPercent(usage!.creditUsagePercent ?? 0) : 0;
-  const remaining = clampPercent(100 - percent);
-  const tone = ready ? usageTone(percent) : loading ? 'loading' : usage ? 'error' : 'empty';
-  const dashOffset = CIRCUMFERENCE * (1 - percent / 100);
+  const now = useNow();
+  const ready = Boolean(usage?.ok);
+  const used = ready ? (usage!.creditUsagePercent ?? 0) : 0;
+  const remaining = remainingPercent(used);
+  const window = {
+    usedPercent: used,
+    periodStart: usage?.periodStart ?? null,
+    periodEnd: usage?.periodEnd ?? null,
+  };
+  const remainingTime = ready ? remainingTimePercent(window, now) : null;
+  const pace = ready ? consumptionPace(window, now) : 'unavailable';
+  const fillTone = quotaFillTone(remaining);
   const period = periodLabel(usage?.periodType ?? null);
-  const aria = ready
-    ? t('settings.usageAria', { percent: formatPercent(percent), period })
-    : loading
-      ? t('settings.usageLoading')
-      : t('settings.usageError');
+  const snapshots = usage?.snapshots ?? [];
+  const chart = ready
+    ? buildCurrentCycleChart({
+        snapshots,
+        periodStart: usage!.periodStart,
+        periodEnd: usage!.periodEnd,
+        remainingPercent: remaining,
+        now,
+      })
+    : null;
 
   return (
     <div className="set-cli-usage">
       <div className="set-cli-usage-toolbar">
         <p className="set-cli-usage-hint">{t('settings.usageHint')}</p>
-        <button
-          type="button"
-          className="set-cli-refresh"
-          onClick={onRefresh}
-          disabled={loading}
-        >
+        <button type="button" className="set-cli-refresh" onClick={onRefresh} disabled={loading}>
           {t('settings.usageRefresh')}
         </button>
       </div>
 
-      <div className="set-cli-usage-hero">
-        <div
-          className={`set-credit-ring tone-${tone}${loading ? ' is-loading' : ''}`}
-          role="img"
-          aria-label={aria}
-        >
-          <svg
-            className="set-credit-svg"
-            width={RING_SIZE}
-            height={RING_SIZE}
-            viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`}
-            aria-hidden="true"
-          >
-            <circle
-              className="set-credit-track"
-              cx={RING_SIZE / 2}
-              cy={RING_SIZE / 2}
-              r={RADIUS}
-              fill="none"
-              strokeWidth={STROKE}
-            />
-            <circle
-              className="set-credit-progress"
-              cx={RING_SIZE / 2}
-              cy={RING_SIZE / 2}
-              r={RADIUS}
-              fill="none"
-              strokeWidth={STROKE}
-              strokeLinecap="round"
-              strokeDasharray={CIRCUMFERENCE}
-              strokeDashoffset={ready ? dashOffset : CIRCUMFERENCE}
-              transform={`rotate(-90 ${RING_SIZE / 2} ${RING_SIZE / 2})`}
-            />
-          </svg>
-          <span className="set-credit-center">
-            {loading ? '…' : ready ? formatPercent(percent) : '—'}
-          </span>
-        </div>
-
-        <div className="set-cli-usage-copy">
-          {loading ? (
-            <p className="set-cli-muted">{t('settings.usageLoading')}</p>
-          ) : usage && !usage.ok ? (
-            <p className="set-cli-muted">{usage.error || t('settings.usageError')}</p>
-          ) : ready && usage ? (
-            <UsageCopy usage={usage} percent={percent} remaining={remaining} period={period} />
-          ) : (
-            <p className="set-cli-muted">{t('settings.usageError')}</p>
-          )}
-        </div>
-      </div>
-
-      {ready ? <UsageBreakdown percent={percent} remaining={remaining} /> : null}
+      {loading && !ready ? (
+        <p className="set-cli-muted">{t('settings.usageLoading')}</p>
+      ) : usage && !usage.ok ? (
+        <p className="set-cli-muted">{usage.error || t('settings.usageError')}</p>
+      ) : ready && usage ? (
+        <>
+          <QuotaCard
+            usage={usage}
+            period={period}
+            remaining={remaining}
+            remainingTime={remainingTime}
+            pace={pace}
+            fillTone={fillTone}
+            now={now}
+          />
+          <QuotaHistory
+            remaining={remaining}
+            days={cycleLengthDays(usage.periodStart, usage.periodEnd)}
+            chart={chart}
+          />
+        </>
+      ) : (
+        <p className="set-cli-muted">{t('settings.usageError')}</p>
+      )}
     </div>
   );
 }
 
-function UsageCopy({
+function QuotaCard({
   usage,
-  percent,
-  remaining,
   period,
+  remaining,
+  remainingTime,
+  pace,
+  fillTone,
+  now,
 }: {
   usage: CliUsage;
-  percent: number;
-  remaining: number;
   period: string;
+  remaining: number;
+  remainingTime: number | null;
+  pace: ConsumptionPace;
+  fillTone: QuotaFillTone;
+  now: number;
 }) {
-  const reset = formatUsageReset(usage.periodEnd);
+  const resetAt = formatUsageResetAt(usage.periodEnd);
+  const resetMs = parseTimestamp(usage.periodEnd);
+  const resetIn = resetMs != null && resetMs >= now ? formatRemainingDuration(resetMs - now) : null;
   const paygOn = (usage.onDemandCap ?? 0) > 0;
+  const quotaPct = formatPercent(remaining);
+  const timePct = remainingTime == null ? '—' : formatPercent(remainingTime);
+
   return (
-    <>
-      {usage.subscriptionTier ? (
-        <div className="set-cli-tier">{t('settings.usageTier', { tier: usage.subscriptionTier })}</div>
-      ) : null}
-      <div className="set-cli-period">{period}</div>
-      <div className="set-cli-used">{t('settings.usagePercent', { percent: formatPercent(percent) })}</div>
-      <div className="set-cli-remain">
-        {t('settings.usageRemaining', { percent: formatPercent(remaining) })}
+    <section className="set-quota-card">
+      <header className="set-quota-head">
+        <div>
+          <h3 className="set-quota-title">{period}</h3>
+          {usage.subscriptionTier ? (
+            <div className="set-cli-tier">
+              {t('settings.usageTier', { tier: usage.subscriptionTier })}
+            </div>
+          ) : null}
+        </div>
+        <PaceBadge pace={pace} />
+      </header>
+
+      <div className="set-quota-hero">
+        <QuotaRings remaining={remaining} remainingTime={remainingTime} fillTone={fillTone} />
+        <div className="set-quota-metrics">
+          <MetricBar
+            icon={<BatteryMedium size={14} strokeWidth={2} aria-hidden="true" />}
+            label={t('settings.usageQuotaRemaining')}
+            valueLabel={quotaPct}
+            value={remaining}
+            fillClass={`quota tone-${fillTone}`}
+            ariaLabel={t('settings.usageAriaQuota', { percent: quotaPct })}
+          />
+          <MetricBar
+            icon={<Clock size={14} strokeWidth={2} aria-hidden="true" />}
+            label={t('settings.usageTimeRemaining')}
+            valueLabel={timePct}
+            value={remainingTime}
+            fillClass="time"
+            ariaLabel={t('settings.usageAriaTime', { percent: timePct })}
+          />
+        </div>
       </div>
-      {reset ? <div className="set-cli-reset">{t('settings.usageReset', { when: reset })}</div> : null}
+
+      <div className="set-quota-reset">
+        <span className="set-quota-reset-in">
+          <Hourglass size={13} strokeWidth={2} aria-hidden="true" />
+          {resetIn
+            ? t('settings.usageResetIn', { when: resetIn })
+            : t('settings.usageResetUnavailable')}
+        </span>
+        {resetAt ? (
+          <span className="set-quota-reset-at">
+            {t('settings.usageResetsAt', { when: resetAt })}
+          </span>
+        ) : null}
+      </div>
+
       {paygOn ? (
         <div className="set-cli-extra">
           {t('settings.usageOnDemand')}:{' '}
@@ -160,45 +235,209 @@ function UsageCopy({
           {t('settings.usagePrepaid')}: {formatUsdAmount(usage.prepaidBalance)}
         </div>
       ) : null}
-    </>
+    </section>
   );
 }
 
-function UsageBreakdown({ percent, remaining }: { percent: number; remaining: number }) {
-  const barRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const bar = barRef.current;
-    if (!bar) return;
-    const used = bar.querySelector<HTMLElement>('[data-seg="used"]');
-    const free = bar.querySelector<HTMLElement>('[data-seg="free"]');
-    if (used) {
-      used.style.width = percent > 0 ? `${percent}%` : '0%';
-      used.style.display = percent > 0 ? '' : 'none';
-    }
-    if (free) {
-      free.style.width = remaining > 0 ? `${remaining}%` : '0%';
-      free.style.display = remaining > 0 ? '' : 'none';
-    }
-  }, [percent, remaining]);
+function PaceBadge({ pace }: { pace: ConsumptionPace }) {
+  if (pace === 'onTrack') {
+    return (
+      <span className="set-quota-pace on-track">
+        <CircleCheck size={14} strokeWidth={2} aria-hidden="true" />
+        {t('settings.usagePaceOnTrack')}
+      </span>
+    );
+  }
+  if (pace === 'overPace') {
+    return (
+      <span className="set-quota-pace over-pace">
+        <TriangleAlert size={14} strokeWidth={2} aria-hidden="true" />
+        {t('settings.usagePaceOver')}
+      </span>
+    );
+  }
+  return (
+    <span className="set-quota-pace unavailable">
+      <CircleHelp size={14} strokeWidth={2} aria-hidden="true" />
+      {t('settings.usagePaceUnavailable')}
+    </span>
+  );
+}
+
+function ringOffset(circumference: number, value: number | null): number {
+  if (value == null) return circumference;
+  return circumference * (1 - Math.max(0, Math.min(100, value)) / 100);
+}
+
+function QuotaRings({
+  remaining,
+  remainingTime,
+  fillTone,
+}: {
+  remaining: number;
+  remainingTime: number | null;
+  fillTone: QuotaFillTone;
+}) {
+  const quotaPct = formatPercent(remaining);
+  const timePct = remainingTime == null ? '—' : formatPercent(remainingTime);
+  return (
+    <div
+      className={`set-quota-rings tone-${fillTone}`}
+      role="img"
+      aria-label={t('settings.usageAriaRings', { quota: quotaPct, time: timePct })}
+    >
+      <svg
+        className="set-quota-rings-svg"
+        width={RING_SIZE}
+        height={RING_SIZE}
+        viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`}
+        aria-hidden="true"
+      >
+        <circle
+          className="set-quota-ring-track outer"
+          cx={RING_CX}
+          cy={RING_CX}
+          r={OUTER_R}
+          fill="none"
+          strokeWidth={RING_OUTER}
+        />
+        <circle
+          className="set-quota-ring-fill outer"
+          cx={RING_CX}
+          cy={RING_CX}
+          r={OUTER_R}
+          fill="none"
+          strokeWidth={RING_OUTER}
+          strokeLinecap="round"
+          strokeDasharray={OUTER_CIRC}
+          strokeDashoffset={ringOffset(OUTER_CIRC, remaining)}
+          transform={`rotate(-90 ${RING_CX} ${RING_CX})`}
+        />
+        <circle
+          className="set-quota-ring-track inner"
+          cx={RING_CX}
+          cy={RING_CX}
+          r={INNER_R}
+          fill="none"
+          strokeWidth={RING_INNER}
+        />
+        <circle
+          className={`set-quota-ring-fill inner${remainingTime == null ? ' is-unknown' : ''}`}
+          cx={RING_CX}
+          cy={RING_CX}
+          r={INNER_R}
+          fill="none"
+          strokeWidth={RING_INNER}
+          strokeLinecap="round"
+          strokeDasharray={INNER_CIRC}
+          strokeDashoffset={ringOffset(INNER_CIRC, remainingTime)}
+          transform={`rotate(-90 ${RING_CX} ${RING_CX})`}
+        />
+      </svg>
+      <div className="set-quota-rings-center">
+        <span className="set-quota-rings-pct">{quotaPct}</span>
+        <span className="set-quota-rings-cap">{t('settings.usageRingCaption')}</span>
+      </div>
+    </div>
+  );
+}
+
+function MetricBar({
+  icon,
+  label,
+  valueLabel,
+  value,
+  fillClass,
+  ariaLabel,
+}: {
+  icon: ReactNode;
+  label: string;
+  valueLabel: string;
+  value: number | null;
+  fillClass: string;
+  ariaLabel: string;
+}) {
+  const width = value == null ? 0 : Math.max(0, Math.min(100, value));
+  return (
+    <div className="set-quota-metric">
+      <div className="set-quota-metric-row">
+        <span className="set-quota-metric-label">
+          {icon}
+          {label}
+        </span>
+        <span className="set-quota-metric-value">{valueLabel}</span>
+      </div>
+      <div
+        className={`set-quota-track${value == null ? ' is-unknown' : ''}`}
+        role="meter"
+        aria-label={ariaLabel}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={value == null ? undefined : Math.round(width)}
+      >
+        <span className={`set-quota-fill ${fillClass}`} style={{ width: `${width}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function QuotaHistory({
+  remaining,
+  days,
+  chart,
+}: {
+  remaining: number;
+  days: number | null;
+  chart: QuotaCycleChart | null;
+}) {
+  return (
+    <section className="set-quota-history">
+      <header className="set-quota-history-head">
+        <div>
+          <h3 className="set-quota-title">{t('settings.usageHistoryTitle')}</h3>
+          <p className="set-quota-history-sub">
+            {days ? t('settings.usageHistoryCycle', { days }) : t('settings.usageHistoryEmpty')}
+          </p>
+        </div>
+        <div className="set-quota-history-remain">
+          <span className="set-quota-history-pct">{formatPercent(remaining)}</span>
+          <span className="set-quota-history-cap">{t('settings.usageQuotaRemaining')}</span>
+        </div>
+      </header>
+      {chart ? (
+        <QuotaSparkline chart={chart} />
+      ) : (
+        <p className="set-cli-muted">{t('settings.usageHistoryEmpty')}</p>
+      )}
+    </section>
+  );
+}
+
+function QuotaSparkline({ chart }: { chart: QuotaCycleChart }) {
+  const innerW = SPARK_W - SPARK_PAD_X * 2;
+  const innerH = SPARK_H - SPARK_PAD_Y * 2;
+  const toXy = (point: QuotaChartPoint) => {
+    const raw = chartPoint(point.t, point.remaining, chart.start, chart.end, innerW, innerH);
+    return { x: raw.x + SPARK_PAD_X, y: raw.y + SPARK_PAD_Y };
+  };
+  const ideal = chart.ideal.map(toXy);
+  const actual = chart.actual.map(toXy);
+  const latest = actual[actual.length - 1];
+  const idealD = `M ${ideal[0].x} ${ideal[0].y} L ${ideal[1].x} ${ideal[1].y}`;
+  const actualLine = actual.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+  const areaD = `${actualLine} L ${latest.x} ${SPARK_H - SPARK_PAD_Y} L ${actual[0].x} ${SPARK_H - SPARK_PAD_Y} Z`;
 
   return (
-    <>
-      <div ref={barRef} className="set-cli-bar" role="img" aria-hidden="true">
-        <span data-seg="used" className="set-cli-bar-seg seg-used" />
-        <span data-seg="free" className="set-cli-bar-seg seg-free" />
-      </div>
-      <ul className="set-cli-legend">
-        <li>
-          <span className="set-cli-swatch seg-used" aria-hidden="true" />
-          <span>{t('settings.usageUsedSeg')}</span>
-          <span className="set-cli-legend-value">{formatPercent(percent)}</span>
-        </li>
-        <li>
-          <span className="set-cli-swatch seg-free" aria-hidden="true" />
-          <span>{t('settings.usageFreeSeg')}</span>
-          <span className="set-cli-legend-value">{formatPercent(remaining)}</span>
-        </li>
-      </ul>
-    </>
+    <svg
+      className="set-quota-spark"
+      viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
+      role="img"
+      aria-label={t('settings.usageAriaHistory')}
+    >
+      <path className="set-quota-spark-area" d={areaD} />
+      <path className="set-quota-spark-ideal" d={idealD} />
+      <path className="set-quota-spark-actual" d={actualLine} />
+      <circle className="set-quota-spark-tip" cx={latest.x} cy={latest.y} r="3.5" />
+    </svg>
   );
 }

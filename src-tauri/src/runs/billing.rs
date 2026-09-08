@@ -10,6 +10,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use super::db::BillingSnapshot;
 use super::process::default_proxy_env;
 
 const BILLING_TIMEOUT: Duration = Duration::from_secs(25);
@@ -28,6 +29,29 @@ pub struct CliUsage {
     pub prepaid_balance: Option<f64>,
     pub unified_billing: bool,
     pub subscription_tier: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CliUsageView {
+    #[serde(flatten)]
+    pub usage: CliUsage,
+    pub snapshots: Vec<BillingSnapshot>,
+}
+
+impl CliUsageView {
+    pub fn from_usage(usage: CliUsage, snapshots: Vec<BillingSnapshot>) -> Self {
+        Self { usage, snapshots }
+    }
+
+    pub fn fail(message: impl Into<String>) -> Self {
+        Self::from_usage(CliUsage::fail(message), Vec::new())
+    }
+}
+
+pub fn remaining_percent_i32(used: Option<f64>) -> i32 {
+    let used = used.filter(|value| value.is_finite()).unwrap_or(0.0);
+    ((100.0 - used).round() as i32).clamp(0, 100)
 }
 
 impl CliUsage {
@@ -99,9 +123,7 @@ pub fn fetch_cli_billing(program: &str, path_env: &str) -> CliUsage {
         }
     };
     if let Some(stderr) = child.stderr.take() {
-        thread::spawn(move || {
-            for _ in BufReader::new(stderr).lines() {}
-        });
+        thread::spawn(move || for _ in BufReader::new(stderr).lines() {});
     }
 
     let (tx, rx) = mpsc::channel::<Value>();
@@ -147,14 +169,7 @@ pub fn fetch_cli_billing(program: &str, path_env: &str) -> CliUsage {
         return CliUsage::fail(format!("initialize: {}", init["error"]));
     }
 
-    let billing = match rpc(
-        &stdin,
-        &rx,
-        2,
-        "_x.ai/billing",
-        json!({}),
-        deadline,
-    ) {
+    let billing = match rpc(&stdin, &rx, 2, "_x.ai/billing", json!({}), deadline) {
         Ok(value) => value,
         Err(error) => {
             terminate(&mut child, pgid);
@@ -171,18 +186,34 @@ pub fn fetch_cli_billing(program: &str, path_env: &str) -> CliUsage {
 
 pub fn parse_billing_result(result: &Value) -> CliUsage {
     let config = result.get("config").unwrap_or(result);
+    // Unused accounts may return null/empty billing. That is zero usage, not a load failure.
     if config.is_null() {
-        return CliUsage::fail("Grok CLI returned empty billing data");
+        return CliUsage {
+            ok: true,
+            error: None,
+            credit_usage_percent: Some(0.0),
+            period_type: None,
+            period_start: None,
+            period_end: None,
+            on_demand_cap: None,
+            on_demand_used: None,
+            prepaid_balance: None,
+            unified_billing: false,
+            subscription_tier: None,
+        };
     }
     let period = config.get("currentPeriod").cloned().unwrap_or(Value::Null);
-    let period_start = string_field(&period, "start")
-        .or_else(|| string_field(config, "billingPeriodStart"));
+    let period_start =
+        string_field(&period, "start").or_else(|| string_field(config, "billingPeriodStart"));
     let period_end =
         string_field(&period, "end").or_else(|| string_field(config, "billingPeriodEnd"));
     CliUsage {
         ok: true,
         error: None,
-        credit_usage_percent: json_f64(config.get("creditUsagePercent").unwrap_or(&Value::Null)),
+        // Missing percent (common before any credits are consumed) means 0% used.
+        credit_usage_percent: Some(
+            json_f64(config.get("creditUsagePercent").unwrap_or(&Value::Null)).unwrap_or(0.0),
+        ),
         period_type: string_field(&period, "type")
             .map(|raw| period_kind(&raw))
             .or_else(|| string_field(config, "periodType").map(|raw| period_kind(&raw))),
@@ -338,5 +369,43 @@ mod tests {
     #[test]
     fn period_kind_maps_monthly() {
         assert_eq!(period_kind("USAGE_PERIOD_TYPE_MONTHLY"), "monthly");
+    }
+
+    #[test]
+    fn null_billing_is_zero_usage_not_error() {
+        let usage = parse_billing_result(&Value::Null);
+        assert!(usage.ok);
+        assert_eq!(usage.credit_usage_percent, Some(0.0));
+        assert!(usage.error.is_none());
+    }
+
+    #[test]
+    fn remaining_percent_treats_missing_as_full() {
+        assert_eq!(remaining_percent_i32(None), 100);
+        assert_eq!(remaining_percent_i32(Some(32.0)), 68);
+        assert_eq!(remaining_percent_i32(Some(140.0)), 0);
+        assert_eq!(remaining_percent_i32(Some(-10.0)), 100);
+    }
+
+    #[test]
+    fn missing_credit_percent_defaults_to_zero() {
+        let result = json!({
+            "config": {
+                "currentPeriod": {
+                    "type": "USAGE_PERIOD_TYPE_WEEKLY",
+                    "start": "2026-08-25T09:58:55.164008+00:00",
+                    "end": "2026-09-01T09:58:55.164008+00:00"
+                },
+                "onDemandCap": { "val": 0 },
+                "onDemandUsed": { "val": 0 },
+                "isUnifiedBillingUser": true
+            },
+            "subscription_tier": "SuperGrok"
+        });
+        let usage = parse_billing_result(&result);
+        assert!(usage.ok);
+        assert_eq!(usage.credit_usage_percent, Some(0.0));
+        assert_eq!(usage.period_type.as_deref(), Some("weekly"));
+        assert_eq!(usage.subscription_tier.as_deref(), Some("SuperGrok"));
     }
 }

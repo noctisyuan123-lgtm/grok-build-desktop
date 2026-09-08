@@ -157,3 +157,52 @@ async fn weekly_usage_counts_recent_finished_runs() {
     assert_eq!(usage.cancelled, 0);
     assert_eq!(usage.duration_ms, 50_000 + 10_000);
 }
+
+#[tokio::test]
+async fn billing_snapshots_record_changes_and_15_minute_anchors() {
+    let db = Db::open_memory().await.unwrap();
+    let start = "2026-09-08T00:06:00Z";
+    let end = "2026-09-15T00:06:00Z";
+    let t0 = 1_778_000_000_000;
+
+    assert!(db
+        .record_billing_snapshot(68, Some(start), Some(end), t0)
+        .await
+        .unwrap());
+    assert!(!db
+        .record_billing_snapshot(68, Some(start), Some(end), t0 + 60_000)
+        .await
+        .unwrap());
+    assert!(db
+        .record_billing_snapshot(60, Some(start), Some(end), t0 + 120_000)
+        .await
+        .unwrap());
+    assert!(db
+        .record_billing_snapshot(60, Some(start), Some(end), t0 + 15 * 60 * 1000 + 120_000)
+        .await
+        .unwrap());
+
+    let next_start = "2026-09-15T00:06:00Z";
+    assert!(db
+        .record_billing_snapshot(
+            100,
+            Some(next_start),
+            Some("2026-09-22T00:06:00Z"),
+            t0 + 16 * 60 * 1000,
+        )
+        .await
+        .unwrap());
+
+    let current = db.list_billing_snapshots(Some(start)).await.unwrap();
+    assert_eq!(current.len(), 3);
+    assert_eq!(
+        current
+            .iter()
+            .map(|row| row.remaining_percent)
+            .collect::<Vec<_>>(),
+        vec![68, 60, 60]
+    );
+    let next = db.list_billing_snapshots(Some(next_start)).await.unwrap();
+    assert_eq!(next.len(), 1);
+    assert_eq!(next[0].remaining_percent, 100);
+}

@@ -121,6 +121,25 @@ function mergeRebasedTranscript(base: ChatMessage[], imported: ChatMessage[]): C
   return [...base, ...imported];
 }
 
+const DEV_SETTINGS_SECTIONS = new Set<SettingsSection>([
+  'general',
+  'model',
+  'permissions',
+  'usage',
+  'about',
+]);
+
+function readDevSettingsQuery(): { open: boolean; section: SettingsSection } {
+  if (!import.meta.env.DEV || typeof window === 'undefined') {
+    return { open: false, section: 'general' };
+  }
+  const raw = new URLSearchParams(window.location.search).get('settings');
+  if (raw && DEV_SETTINGS_SECTIONS.has(raw as SettingsSection)) {
+    return { open: true, section: raw as SettingsSection };
+  }
+  return { open: false, section: 'general' };
+}
+
 function App() {
   // The textarea lives inside Composer (uncontrolled ref). We hold a
   // ComposerHandle so starter cards / history clicks / drafts can seed it.
@@ -298,8 +317,10 @@ function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   // Dedicated Settings page (Claude-Desktop-style modal). settingsSection
   // selects which left-nav panel is shown.
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
+  const [settingsOpen, setSettingsOpen] = useState(() => readDevSettingsQuery().open);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>(
+    () => readDevSettingsQuery().section,
+  );
   // Dedicated Tools / MCP hub (community-tool integration).
   const [toolsPageOpen, setToolsPageOpen] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);

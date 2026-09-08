@@ -19,6 +19,7 @@ import {
   permissionModes,
   reasoningEfforts,
 } from '../app/constants';
+import { hasTauriRuntime } from '../lib/runtime';
 
 export interface SettingsHostProps {
   open: boolean;
@@ -81,7 +82,13 @@ export function SettingsHost({
     if (!open || section !== 'usage') return;
     let cancelled = false;
     setCliUsageLoading(true);
-    void invoke<CliUsage>('get_cli_usage')
+    const load = hasTauriRuntime()
+      ? invoke<CliUsage>('get_cli_usage')
+      : fetch('/__grok/cli-usage').then(async (response) => {
+          const usage = (await response.json()) as CliUsage;
+          return usage;
+        });
+    void load
       .then((usage) => {
         if (!cancelled) setCliUsage(usage);
       })
@@ -99,6 +106,7 @@ export function SettingsHost({
             prepaidBalance: null,
             unifiedBilling: false,
             subscriptionTier: null,
+            snapshots: [],
           });
         }
       })
