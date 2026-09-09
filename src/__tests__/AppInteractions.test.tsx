@@ -72,7 +72,7 @@ describe('keyboard shortcuts', () => {
 
     await user.keyboard('{Meta>},{/Meta}');
     expect(await screen.findByRole('dialog', { name: t('settings.title') })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: t('settings.close') }));
+    await user.keyboard('{Escape}');
 
     // Mode switch leaves the composer empty — no seeded default prompt.
     const chatButton = screen.getByRole('button', { name: t('sidebar.mode.standard') });

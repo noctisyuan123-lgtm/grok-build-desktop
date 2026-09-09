@@ -57,6 +57,7 @@ export const storageKeys = {
   historyGroups: 'grok-desktop-history-groups-v1',
   historyArchived: 'grok-desktop-history-archived-v1',
   historyDeleted: 'grok-desktop-history-deleted-v1',
+  billingSnapshots: 'grok-desktop-billing-snapshots-v1',
 };
 
 // No seeded prompt text: a fresh mode starts with an EMPTY composer (the

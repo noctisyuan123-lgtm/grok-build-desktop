@@ -129,12 +129,12 @@ function Toggle({
  */
 export function SettingsPage(props: SettingsPageProps) {
   const { open, section, onSection, onClose } = props;
-  const closeRef = useRef<HTMLButtonElement | null>(null);
+  const navFocusRef = useRef<HTMLButtonElement | null>(null);
   const modalRef = useRef<HTMLDivElement | null>(null);
 
   // Focus trap: Tab/Shift+Tab cycle inside the card, Escape closes, focus
   // returns to the opener on close.
-  useModalFocus(open, modalRef, { initialFocus: closeRef, onEscape: onClose });
+  useModalFocus(open, modalRef, { initialFocus: navFocusRef, onEscape: onClose });
 
   if (!open) return null;
 
@@ -157,6 +157,7 @@ export function SettingsPage(props: SettingsPageProps) {
           {NAV.map((n) => (
             <button
               key={n.id}
+              ref={n.id === section ? navFocusRef : undefined}
               type="button"
               className={`settings-nav-item${section === n.id ? ' is-active' : ''}`}
               onClick={() => onSection(n.id)}
@@ -167,16 +168,6 @@ export function SettingsPage(props: SettingsPageProps) {
         </aside>
 
         <div className="settings-content">
-          <button
-            ref={closeRef}
-            type="button"
-            className="settings-close"
-            aria-label={t('settings.close')}
-            onClick={onClose}
-          >
-            ✕
-          </button>
-
           {section === 'general' ? (
             <section className="settings-section">
               <h2>{t('settings.nav.general')}</h2>

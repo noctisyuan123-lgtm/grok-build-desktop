@@ -19,6 +19,7 @@ import {
   permissionModes,
   reasoningEfforts,
 } from '../app/constants';
+import { persistWebBillingSnapshot } from '../lib/quotaHistory';
 import { hasTauriRuntime } from '../lib/runtime';
 
 export interface SettingsHostProps {
@@ -86,6 +87,13 @@ export function SettingsHost({
       ? invoke<CliUsage>('get_cli_usage')
       : fetch('/__grok/cli-usage').then(async (response) => {
           const usage = (await response.json()) as CliUsage;
+          if (usage.ok) {
+            usage.snapshots = persistWebBillingSnapshot({
+              creditUsagePercent: usage.creditUsagePercent,
+              periodStart: usage.periodStart,
+              periodEnd: usage.periodEnd,
+            });
+          }
           return usage;
         });
     void load

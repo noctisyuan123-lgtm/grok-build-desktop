@@ -62,7 +62,7 @@ export function remainingTimePercent(window: QuotaWindowInput, now: number): num
 export function consumptionPace(window: QuotaWindowInput, now: number): ConsumptionPace {
   const remainingTime = remainingTimePercent(window, now);
   if (remainingTime == null) return 'unavailable';
-  // Compare integer percents so pace matches the two meters (68% vs 92%),
+  // Compare integer percents so pace matches the displayed ring values,
   // not a 0.4% float remainder that still renders as the same whole number.
   return remainingPercent(window.usedPercent) >= Math.round(remainingTime) ? 'onTrack' : 'overPace';
 }

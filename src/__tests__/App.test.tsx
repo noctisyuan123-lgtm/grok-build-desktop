@@ -1175,7 +1175,7 @@ describe('command palette, settings, panels, shortcuts', () => {
     expect(
       await within(dialog).findByRole('heading', { name: t('settings.nav.model') }),
     ).toBeInTheDocument();
-    await user.click(within(dialog).getByRole('button', { name: t('settings.close') }));
+    await user.keyboard('{Escape}');
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: t('settings.title') })).not.toBeInTheDocument();
     });

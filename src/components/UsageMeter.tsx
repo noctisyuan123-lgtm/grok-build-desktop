@@ -1,13 +1,6 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import {
-  BatteryMedium,
-  CircleCheck,
-  CircleHelp,
-  Clock,
-  Hourglass,
-  TriangleAlert,
-} from 'lucide-react';
-import { formatRemainingDuration, formatUsdAmount, formatUsageResetAt } from '../app/format';
+import { useEffect, useState } from 'react';
+import { CircleCheck, CircleHelp, TriangleAlert } from 'lucide-react';
+import { formatRemainingDuration, formatUsdAmount, formatUsageReset } from '../app/format';
 import { t } from '../i18n';
 import { formatPercent } from '../lib/contextMetrics';
 import {
@@ -162,12 +155,11 @@ function QuotaCard({
   fillTone: QuotaFillTone;
   now: number;
 }) {
-  const resetAt = formatUsageResetAt(usage.periodEnd);
+  const resetAt = formatUsageReset(usage.periodEnd);
   const resetMs = parseTimestamp(usage.periodEnd);
   const resetIn = resetMs != null && resetMs >= now ? formatRemainingDuration(resetMs - now) : null;
   const paygOn = (usage.onDemandCap ?? 0) > 0;
-  const quotaPct = formatPercent(remaining);
-  const timePct = remainingTime == null ? '—' : formatPercent(remainingTime);
+  const usedPct = `${Math.round(100 - remaining)}%`;
 
   return (
     <section className="set-quota-card">
@@ -185,38 +177,24 @@ function QuotaCard({
 
       <div className="set-quota-hero">
         <QuotaRings remaining={remaining} remainingTime={remainingTime} fillTone={fillTone} />
-        <div className="set-quota-metrics">
-          <MetricBar
-            icon={<BatteryMedium size={14} strokeWidth={2} aria-hidden="true" />}
-            label={t('settings.usageQuotaRemaining')}
-            valueLabel={quotaPct}
-            value={remaining}
-            fillClass={`quota tone-${fillTone}`}
-            ariaLabel={t('settings.usageAriaQuota', { percent: quotaPct })}
+        <div className="set-quota-facts">
+          <MetricStat
+            kind="quota"
+            fillTone={fillTone}
+            kicker={t('settings.usageLegendQuota')}
+            value={t('settings.usageQuotaUsed', { percent: usedPct })}
           />
-          <MetricBar
-            icon={<Clock size={14} strokeWidth={2} aria-hidden="true" />}
-            label={t('settings.usageTimeRemaining')}
-            valueLabel={timePct}
-            value={remainingTime}
-            fillClass="time"
-            ariaLabel={t('settings.usageAriaTime', { percent: timePct })}
+          <MetricStat
+            kind="time"
+            kicker={t('settings.usageLegendWindow')}
+            value={resetIn ?? '—'}
+            hint={
+              resetAt
+                ? t('settings.usageResetsAt', { when: resetAt })
+                : t('settings.usageResetUnavailable')
+            }
           />
         </div>
-      </div>
-
-      <div className="set-quota-reset">
-        <span className="set-quota-reset-in">
-          <Hourglass size={13} strokeWidth={2} aria-hidden="true" />
-          {resetIn
-            ? t('settings.usageResetIn', { when: resetIn })
-            : t('settings.usageResetUnavailable')}
-        </span>
-        {resetAt ? (
-          <span className="set-quota-reset-at">
-            {t('settings.usageResetsAt', { when: resetAt })}
-          </span>
-        ) : null}
       </div>
 
       {paygOn ? (
@@ -342,40 +320,30 @@ function QuotaRings({
   );
 }
 
-function MetricBar({
-  icon,
-  label,
-  valueLabel,
+function MetricStat({
+  kind,
+  fillTone,
+  kicker,
   value,
-  fillClass,
-  ariaLabel,
+  hint,
 }: {
-  icon: ReactNode;
-  label: string;
-  valueLabel: string;
-  value: number | null;
-  fillClass: string;
-  ariaLabel: string;
+  kind: 'quota' | 'time';
+  fillTone?: QuotaFillTone;
+  kicker: string;
+  value: string;
+  hint?: string;
 }) {
-  const width = value == null ? 0 : Math.max(0, Math.min(100, value));
+  const swatchClass =
+    kind === 'quota'
+      ? `set-quota-swatch quota tone-${fillTone ?? 'yellow'}`
+      : 'set-quota-swatch time';
   return (
-    <div className="set-quota-metric">
-      <div className="set-quota-metric-row">
-        <span className="set-quota-metric-label">
-          {icon}
-          {label}
-        </span>
-        <span className="set-quota-metric-value">{valueLabel}</span>
-      </div>
-      <div
-        className={`set-quota-track${value == null ? ' is-unknown' : ''}`}
-        role="meter"
-        aria-label={ariaLabel}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={value == null ? undefined : Math.round(width)}
-      >
-        <span className={`set-quota-fill ${fillClass}`} style={{ width: `${width}%` }} />
+    <div className={`set-quota-stat ${kind}`}>
+      <span className={swatchClass} aria-hidden="true" />
+      <div className="set-quota-stat-copy">
+        <div className="set-quota-stat-kicker">{kicker}</div>
+        <div className="set-quota-stat-value">{value}</div>
+        {hint ? <div className="set-quota-stat-hint">{hint}</div> : null}
       </div>
     </div>
   );

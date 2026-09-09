@@ -81,7 +81,7 @@ describe('SettingsPage', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('navigates between sections and closes on Escape / close button / overlay click', async () => {
+  it('navigates between sections and closes on Escape / overlay click', async () => {
     const user = userEvent.setup();
     const props = makeProps();
     render(<SettingsPage {...props} />);
@@ -90,7 +90,7 @@ describe('SettingsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Model & reasoning' }));
     expect(props.onSection).toHaveBeenCalledWith('model');
 
-    await user.click(screen.getByRole('button', { name: 'Close settings' }));
+    fireEvent.click(document.querySelector('.settings-overlay')!);
     expect(props.onClose).toHaveBeenCalledTimes(1);
     await user.keyboard('{Escape}');
     expect(props.onClose).toHaveBeenCalledTimes(2);
@@ -99,14 +99,10 @@ describe('SettingsPage', () => {
   it('traps focus inside the modal: Tab wraps last→first, Shift+Tab wraps first→last', async () => {
     const user = userEvent.setup();
     render(<SettingsPage {...makeProps()} />);
-    // Initial focus lands on the close button.
-    expect(screen.getByRole('button', { name: 'Close settings' })).toHaveFocus();
-
-    // First focusable is the "General" nav item; last is the completion sound toggle.
     const first = screen.getByRole('button', { name: 'General' });
     const last = screen.getByRole('switch', { name: 'Background completion alerts' });
+    expect(first).toHaveFocus();
 
-    first.focus();
     await user.tab({ shift: true }); // wrap: first → last
     expect(last).toHaveFocus();
     await user.tab(); // wrap: last → first
@@ -183,7 +179,7 @@ describe('SettingsPage', () => {
       vi.useRealTimers();
     });
 
-    it('shows weekly quota bars, above-pace, and refresh', () => {
+    it('shows weekly quota, above-pace, and refresh', () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-08-26T09:58:55.164Z'));
       const props = makeProps({ section: 'usage' });
@@ -193,8 +189,11 @@ describe('SettingsPage', () => {
       expect(screen.getByText('Weekly quota')).toBeInTheDocument();
       expect(screen.getByText('Above pace')).toBeInTheDocument();
       expect(screen.getAllByText('Quota remaining').length).toBeGreaterThan(0);
-      expect(screen.getByText('Time remaining')).toBeInTheDocument();
-      expect(screen.getByRole('meter', { name: '34% quota remaining' })).toBeInTheDocument();
+      expect(screen.getByText('Time left')).toBeInTheDocument();
+      expect(screen.getByText('66% used')).toBeInTheDocument();
+      expect(
+        screen.getByRole('img', { name: /34% quota remaining; .* of the billing window remaining/ }),
+      ).toBeInTheDocument();
       expect(
         screen.getByRole('img', { name: 'Quota remaining over the current cycle' }),
       ).toBeInTheDocument();
@@ -228,7 +227,10 @@ describe('SettingsPage', () => {
       );
       expect(screen.queryByText(/Couldn't load usage from the Grok CLI/)).not.toBeInTheDocument();
       expect(screen.getByText('On track')).toBeInTheDocument();
-      expect(screen.getByRole('meter', { name: '100% quota remaining' })).toBeInTheDocument();
+      expect(screen.getByText('0% used')).toBeInTheDocument();
+      expect(
+        screen.getByRole('img', { name: /100% quota remaining; .* of the billing window remaining/ }),
+      ).toBeInTheDocument();
     });
   });
 });
