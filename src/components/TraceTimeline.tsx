@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useElapsed } from '../hooks/useElapsed';
 import { useRunSnapshot } from '../hooks/useRunSnapshot';
@@ -102,64 +102,32 @@ export function ActivityGroup({
 }) {
   const visible = traces.filter(isVisibleTrace);
   const [expanded, setExpanded] = useState(false);
-  const [settlingTrace, setSettlingTrace] = useState<TraceEvent | null>(null);
-  const settleTimer = useRef<number | null>(null);
-  const previousActiveKeyRef = useRef<string | null>(null);
-  // Newest running call only — collapsed groups stage that one row.
   const activeTrace = [...visible].reverse().find((trace) => trace.status === 'running') ?? null;
   const activeKey = activeTrace?.key ?? null;
-  // Stable content signature so settle logic does not re-fire on new array identity.
-  const tracesFingerprint = visible.map((trace) => `${trace.key}:${trace.status}`).join('\0');
+  const [motionState, setMotionState] = useState<{
+    activeKey: string | null;
+    settling: TraceEvent | null;
+  }>({ activeKey, settling: null });
 
+  // Adjust before committing children: completion must not unmount the active
+  // row for a frame before the exit animation gets a chance to start.
+  if (motionState.activeKey !== activeKey) {
+    const finished = visible.find((trace) => trace.key === motionState.activeKey);
+    setMotionState({
+      activeKey,
+      settling: finished && finished.status !== 'running' ? finished : motionState.settling,
+    });
+  }
+  const settlingTrace = motionState.settling;
   useEffect(() => {
-    return () => {
-      if (settleTimer.current != null) window.clearTimeout(settleTimer.current);
-    };
-  }, []);
-
-  useEffect(() => {
-    const clearSettleTimer = () => {
-      if (settleTimer.current != null) {
-        window.clearTimeout(settleTimer.current);
-        settleTimer.current = null;
-      }
-    };
-
-    const previousKey = previousActiveKeyRef.current;
-    if (activeKey) {
-      clearSettleTimer();
-      if (previousKey && previousKey !== activeKey) {
-        const finished = visible.find((trace) => trace.key === previousKey);
-        if (finished && finished.status !== 'running') {
-          setSettlingTrace(finished);
-          settleTimer.current = window.setTimeout(() => {
-            setSettlingTrace(null);
-            settleTimer.current = null;
-            // Keep in sync with --workflow-settle-ms / activity-row-settle.
-          }, ACTIVITY_SETTLE_MS);
-        }
-      }
-      previousActiveKeyRef.current = activeKey;
-      return;
-    }
-
-    previousActiveKeyRef.current = null;
-    if (!previousKey) return;
-
-    const finished = visible.find((trace) => trace.key === previousKey);
-    if (!finished || finished.status === 'running') return;
-
-    clearSettleTimer();
-    setSettlingTrace(finished);
-    settleTimer.current = window.setTimeout(() => {
-      setSettlingTrace(null);
-      settleTimer.current = null;
+    if (!settlingTrace) return;
+    const timer = window.setTimeout(() => {
+      setMotionState((current) =>
+        current.settling === settlingTrace ? { ...current, settling: null } : current,
+      );
     }, ACTIVITY_SETTLE_MS);
-
-    return;
-    // visible is read via tracesFingerprint; listing it would churn on every parent render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fingerprint tracks visible content
-  }, [activeKey, tracesFingerprint]);
+    return () => window.clearTimeout(timer);
+  }, [settlingTrace]);
 
   if (visible.length === 0) return null;
 
@@ -219,10 +187,10 @@ export function ActivityGroup({
     !expanded && (settlingTrace || activeTrace) ? (
       <>
         {settlingTrace && (!hideEditDetails || !isEditTrace(settlingTrace)) ? (
-          <ActivityRow key={`settle:${settlingTrace.key}`} trace={settlingTrace} motion="settle" />
+          <ActivityRow key={settlingTrace.key} trace={settlingTrace} motion="settle" />
         ) : null}
         {activeTrace && (!hideEditDetails || !isEditTrace(activeTrace)) ? (
-          <ActivityRow key={`enter:${activeTrace.key}`} trace={activeTrace} motion="enter" />
+          <ActivityRow key={activeTrace.key} trace={activeTrace} motion="enter" />
         ) : null}
       </>
     ) : null;

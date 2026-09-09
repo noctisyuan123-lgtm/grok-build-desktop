@@ -70,13 +70,13 @@ describe('useSessionPersistence in the browser (no Tauri runtime)', () => {
     expect(result.current.messages[124].id).toBe('m124');
   });
 
-  it('mirrors mode and theme changes to localStorage and the DOM theme attribute', () => {
+  it('mirrors mode while retaining the dark-only theme', () => {
     const { result } = render();
     act(() => result.current.setMode('standard'));
     expect(window.localStorage.getItem(storageKeys.mode)).toBe('standard');
     act(() => result.current.setThemeMode('light'));
-    expect(window.localStorage.getItem(storageKeys.themeMode)).toBe('light');
-    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+    expect(window.localStorage.getItem(storageKeys.themeMode)).toBe('dark');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
   });
 });
 

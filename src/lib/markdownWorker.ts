@@ -11,7 +11,11 @@ const inflight = new Set<string>();
 // Streaming Markdown is whole-document parsing. Keep it off the hot path:
 // intermediate renders are trailing-edge throttled, while the terminal parse
 // can still be requested immediately for an exact final document.
-const MIN_PARSE_INTERVAL_MS = 250;
+// Short live thoughts should update within a few frames. Long documents retain
+// a lower parse rate because each result replaces and sanitizes the full HTML.
+function parseInterval(text: string): number {
+  return text.length < 8_000 ? 40 : text.length < 32_000 ? 80 : 160;
+}
 const lastParseAt = new Map<string, number>();
 const parseTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -86,16 +90,21 @@ export function scheduleMarkdownParse(
     postParse(runId, text);
     return;
   }
+  const interval = parseInterval(text);
   const elapsed = Date.now() - (lastParseAt.get(runId) ?? 0);
-  if (elapsed < MIN_PARSE_INTERVAL_MS) {
+  if (elapsed < interval) {
     latestByRun.set(runId, text);
     if (!parseTimers.has(runId)) {
       parseTimers.set(
         runId,
-        setTimeout(() => flushParked(runId), MIN_PARSE_INTERVAL_MS - elapsed),
+        setTimeout(() => flushParked(runId), interval - elapsed),
       );
     }
     return;
   }
+  const timer = parseTimers.get(runId);
+  if (timer) clearTimeout(timer);
+  parseTimers.delete(runId);
+  latestByRun.delete(runId);
   postParse(runId, text);
 }

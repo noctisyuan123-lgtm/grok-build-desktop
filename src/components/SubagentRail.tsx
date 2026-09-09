@@ -1,3 +1,4 @@
+import { LongTaskList } from './LongTaskList';
 import {
   useCallback,
   useEffect,
@@ -107,7 +108,13 @@ export function SubagentUiProvider({
   );
 }
 
-export function SubagentRail() {
+export function SubagentRail({
+  messages = [],
+  onStopTask,
+}: {
+  messages?: readonly ChatMessage[];
+  onStopTask: (runId: string) => void;
+}) {
   const ui = useSubagentUi();
   const railRef = useRef<HTMLElement | null>(null);
 
@@ -117,14 +124,14 @@ export function SubagentRail() {
     return () => ui.registerIgnoreNode('rail', null);
   }, [ui]);
 
-  if (!ui || ui.items.length === 0) return null;
+  if (!ui) return null;
 
   const { active, done } = partitionSessionSubagents(ui.items);
   const collapsed = ui.collapsed;
   const summary =
     collapsed && active.length > 0
       ? t('subagent.railWorkingCount', { count: active.length })
-      : String(ui.items.length);
+      : `${ui.items.length} agents`;
 
   return (
     <aside
@@ -144,6 +151,7 @@ export function SubagentRail() {
       </button>
       {collapsed ? null : (
         <div className="subagent-rail-body">
+          <LongTaskList messages={messages} onStop={onStopTask} />
           {active.length > 0 ? (
             <RailSection
               title={t('subagent.railActive')}

@@ -26,6 +26,8 @@ export interface TraceEvent {
   /** Full prompt the parent agent sent this subagent. Preserved across updates. */
   prompt?: string;
   detail?: string;
+  /** Command retained when later output replaces the input detail. */
+  command?: string;
   parentKey?: string;
   progress?: string;
   path?: string;
@@ -372,6 +374,7 @@ export function classifyEvent(raw: unknown, now = Date.now()): TraceParseResult 
       endedAt: status === 'running' ? null : now,
       sessionId,
       prompt,
+      command: inputObj ? readField(inputObj, 'command', 'cmd', 'script') : undefined,
       detail,
       parentKey: parent ? `subagent:${parent}` : undefined,
       progress,

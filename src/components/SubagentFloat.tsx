@@ -1,13 +1,6 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type PointerEvent as ReactPointerEvent,
-} from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import { Bot, X } from 'lucide-react';
+import { Bot } from 'lucide-react';
 import { useElapsed } from '../hooks/useElapsed';
 import { useRunSnapshot } from '../hooks/useRunSnapshot';
 import { streamStore } from '../lib/streamStore';
@@ -20,14 +13,9 @@ import { TranscriptMessage } from './MessageItem';
 import { isLongUserText } from '../lib/longText';
 import { t } from '../i18n';
 
-const SUBAGENT_DRAWER_WIDTH_KEY = 'grok-desktop-subagent-drawer-width';
-const SUBAGENT_DRAWER_DEFAULT_WIDTH = 520;
-const SUBAGENT_DRAWER_MIN_WIDTH = 360;
-const SUBAGENT_DRAWER_MAX_WIDTH = 760;
-
 /**
  * Compact capsules above the composer for every subagent on the current
- * session's latest assistant run. A capsule opens the right-side inspector
+ * session's latest assistant run. A capsule opens the matching inspector
  * with that child session's workflow transcript.
  */
 export function SubagentFloat({ sessionRunIds = [] }: { sessionRunIds?: readonly string[] }) {
@@ -99,13 +87,15 @@ export function SubagentFloat({ sessionRunIds = [] }: { sessionRunIds?: readonly
                 onClick={() => setOpenKey(drawerOpen ? null : subagent.key)}
               >
                 <Bot size={14} aria-hidden />
-                <span className="subagent-float-label">{subagent.label}</span>
+                <span className="subagent-float-copy">
+                  <span className="subagent-float-label">{subagent.label}</span>
+                  {subagent.progress ? (
+                    <span className="subagent-float-progress">{subagent.progress}</span>
+                  ) : null}
+                </span>
                 <span className={`subagent-float-status status-${subagent.status}`}>
                   {statusLabelFor(subagent.status)}
                 </span>
-                {subagent.progress ? (
-                  <span className="subagent-float-progress">{subagent.progress}</span>
-                ) : null}
               </button>
             </div>
           );
@@ -137,27 +127,14 @@ export function SubagentInspector({
   onSelect: (item: SessionSubagent) => void;
   onClose: () => void;
 }) {
-  const [drawerWidth, setDrawerWidth] = useState(readSubagentDrawerWidth);
-  const resizingCleanupRef = useRef<(() => void) | null>(null);
   const drawerRef = useRef<HTMLDivElement | null>(null);
-  const closeRef = useRef<HTMLButtonElement | null>(null);
   const now = useTickingNow(selected.status === 'running');
   const selectedElapsed = elapsedMs(selected.startedAt, selected.endedAt, now);
 
-  useEffect(() => {
-    window.localStorage.setItem(SUBAGENT_DRAWER_WIDTH_KEY, String(drawerWidth));
-    document.documentElement.style.setProperty('--subagent-drawer-open-width', `${drawerWidth}px`);
-    return () => {
-      document.documentElement.style.removeProperty('--subagent-drawer-open-width');
-    };
-  }, [drawerWidth]);
-
-  useEffect(
-    () => () => {
-      resizingCleanupRef.current?.();
-    },
-    [],
-  );
+  // The drawer is portalled into .app-shell, so it can inherit the exact
+  // visible bounds of the main composer column. This covers a collapsed
+  // sidebar and the transient left shift caused by the right task rail.
+  useConversationColumnBounds(true);
 
   useEffect(() => {
     drawerRef.current?.focus();
@@ -182,66 +159,16 @@ export function SubagentInspector({
     };
   }, [ignoreRefs, onClose, selected.key]);
 
-  function startDrawerResize(event: ReactPointerEvent<HTMLDivElement>) {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    const startX = event.clientX;
-    const startWidth = drawerWidth;
-    document.body.classList.add('subagent-drawer-resizing');
-
-    const move = (moveEvent: PointerEvent) => {
-      const next = clampSubagentDrawerWidth(startWidth + startX - moveEvent.clientX);
-      setDrawerWidth(next);
-    };
-    const stop = () => {
-      document.body.classList.remove('subagent-drawer-resizing');
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', stop);
-      window.removeEventListener('pointercancel', stop);
-      resizingCleanupRef.current = null;
-    };
-    resizingCleanupRef.current?.();
-    resizingCleanupRef.current = stop;
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', stop);
-    window.addEventListener('pointercancel', stop);
-  }
-
-  function nudgeDrawerWidth(delta: number) {
-    setDrawerWidth((current) => clampSubagentDrawerWidth(current + delta));
-  }
-
   return createPortal(
     <aside
       id={`subagent-session-drawer-${sanitizeKey(selected.key)}`}
       className="subagent-drawer"
       ref={drawerRef}
       role="dialog"
-      aria-modal="false"
+      aria-modal="true"
       aria-label={t('subagent.drawerTitle', { label: selected.label })}
-      style={{ width: `${drawerWidth}px` }}
       tabIndex={-1}
     >
-      <div
-        aria-label={t('subagent.resize')}
-        aria-orientation="vertical"
-        aria-valuemax={SUBAGENT_DRAWER_MAX_WIDTH}
-        aria-valuemin={SUBAGENT_DRAWER_MIN_WIDTH}
-        aria-valuenow={drawerWidth}
-        className="subagent-drawer-resizer"
-        onKeyDown={(event) => {
-          if (event.key === 'ArrowLeft') {
-            event.preventDefault();
-            nudgeDrawerWidth(16);
-          } else if (event.key === 'ArrowRight') {
-            event.preventDefault();
-            nudgeDrawerWidth(-16);
-          }
-        }}
-        onPointerDown={startDrawerResize}
-        role="separator"
-        tabIndex={0}
-      />
       <header className="subagent-drawer-head">
         <div className="subagent-drawer-title">
           {peers.length > 1 ? (
@@ -277,19 +204,10 @@ export function SubagentInspector({
             </span>
           </span>
         </div>
-        <button
-          ref={closeRef}
-          type="button"
-          className="subagent-drawer-close"
-          aria-label={t('subagent.drawerClose')}
-          onClick={onClose}
-        >
-          <X size={16} aria-hidden />
-        </button>
       </header>
       <SubagentDrawerBody key={selected.key} runId={selected.runId} subagent={selected} />
     </aside>,
-    document.body,
+    document.querySelector<HTMLElement>('.app-shell') ?? document.body,
   );
 }
 
@@ -321,7 +239,7 @@ function SubagentDrawerBody({ runId, subagent }: { runId: string; subagent: Trac
       ) : null}
       {planEntries?.length ? <PlanTodoList entries={planEntries} /> : null}
       {hasTranscript ? (
-        <div className="subagent-drawer-transcript">
+        <div className="message message-assistant subagent-drawer-transcript">
           <TranscriptMessage
             runId={transcriptRunId}
             transcript={transcript}
@@ -337,6 +255,7 @@ function SubagentDrawerBody({ runId, subagent }: { runId: string; subagent: Trac
             autoExpandWork={live}
             canUndo={false}
             showUndo={false}
+            showCopy={false}
           />
         </div>
       ) : children.length > 0 ? (
@@ -353,6 +272,71 @@ function SubagentDrawerBody({ runId, subagent }: { runId: string; subagent: Trac
       )}
     </div>
   );
+}
+
+function useConversationColumnBounds(enabled: boolean) {
+  useLayoutEffect(() => {
+    if (!enabled) return;
+    const shell = document.querySelector<HTMLElement>('.app-shell');
+    const column = document.querySelector<HTMLElement>('.conversation-panel > .composer-row');
+    if (!shell || !column) return;
+
+    let frame = 0;
+    let followFrame = 0;
+    let previousBounds = '';
+    const sync = () => {
+      const bounds = column.getBoundingClientRect();
+      if (bounds.width <= 0) return;
+      const bleed = Math.min(80, Math.max(48, Math.round(bounds.width * 0.08)));
+      const left = Math.max(24, Math.round(bounds.left - bleed));
+      const right = Math.min(
+        window.innerWidth - 24,
+        Math.round(bounds.left + bounds.width + bleed),
+      );
+      const width = Math.max(0, right - left);
+      const nextBounds = `${left}:${width}`;
+      if (nextBounds === previousBounds) return;
+      previousBounds = nextBounds;
+      shell.style.setProperty('--subagent-drawer-left', `${left}px`);
+      shell.style.setProperty('--subagent-drawer-width', `${width}px`);
+    };
+    const schedule = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(sync);
+    };
+    const followLayoutTransition = () => {
+      const deadline = performance.now() + 260;
+      const tick = () => {
+        sync();
+        if (performance.now() < deadline) {
+          followFrame = window.requestAnimationFrame(tick);
+        }
+      };
+      window.cancelAnimationFrame(followFrame);
+      followFrame = window.requestAnimationFrame(tick);
+    };
+
+    sync();
+    const resizeObserver =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
+    resizeObserver?.observe(shell);
+    resizeObserver?.observe(column);
+    const classObserver = new MutationObserver(followLayoutTransition);
+    classObserver.observe(shell, { attributes: true, attributeFilter: ['class'] });
+    window.addEventListener('resize', schedule);
+    shell.addEventListener('transitionrun', followLayoutTransition);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.cancelAnimationFrame(followFrame);
+      resizeObserver?.disconnect();
+      classObserver.disconnect();
+      window.removeEventListener('resize', schedule);
+      shell.removeEventListener('transitionrun', followLayoutTransition);
+      shell.style.removeProperty('--subagent-drawer-left');
+      shell.style.removeProperty('--subagent-drawer-width');
+    };
+  }, [enabled]);
 }
 
 /** Newest live subagent, else most recent subagent on this run. */
@@ -432,24 +416,4 @@ function useTickingNow(active: boolean): number {
 
 function sanitizeKey(key: string): string {
   return key.replace(/[^a-zA-Z0-9_-]/g, '-');
-}
-
-function readSubagentDrawerWidth(): number {
-  try {
-    const stored = Number.parseInt(
-      window.localStorage.getItem(SUBAGENT_DRAWER_WIDTH_KEY) ?? '',
-      10,
-    );
-    return Number.isFinite(stored)
-      ? clampSubagentDrawerWidth(stored)
-      : SUBAGENT_DRAWER_DEFAULT_WIDTH;
-  } catch {
-    return SUBAGENT_DRAWER_DEFAULT_WIDTH;
-  }
-}
-
-function clampSubagentDrawerWidth(width: number): number {
-  return Math.round(
-    Math.min(SUBAGENT_DRAWER_MAX_WIDTH, Math.max(SUBAGENT_DRAWER_MIN_WIDTH, width)),
-  );
 }

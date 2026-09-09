@@ -59,8 +59,6 @@ function renderDrawer(overrides: { setInspectorTab?: (tab: string) => void } = {
       onClose={() => {}}
       inspectorTab="skills"
       setInspectorTab={setInspectorTab as never}
-      dockPosition="right"
-      onDockPositionChange={() => {}}
       runners={runnersStub}
       modelConfig={modelConfigStub}
       actionPolicy="patch"

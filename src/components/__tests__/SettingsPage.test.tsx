@@ -109,14 +109,12 @@ describe('SettingsPage', () => {
     expect(first).toHaveFocus();
   });
 
-  it('general: theme buttons and dock select drive their setters', async () => {
+  it('general: retains sidebar and completion controls only', async () => {
     const user = userEvent.setup();
     const props = makeProps();
     render(<SettingsPage {...props} />);
-    await user.click(screen.getByRole('button', { name: 'Light' }));
-    expect(props.setThemeMode).toHaveBeenCalledWith('light');
-    await user.selectOptions(screen.getByLabelText('Dock position'), 'bottom');
-    expect(props.setDockPosition).toHaveBeenCalledWith('bottom');
+    expect(screen.queryByRole('button', { name: 'Light' })).toBeNull();
+    expect(screen.queryByLabelText('Dock position')).toBeNull();
     await user.click(screen.getByRole('switch', { name: 'Collapse sidebar' }));
     expect(props.setSidebarCollapsed).toHaveBeenCalledWith(true);
     await user.click(screen.getByRole('switch', { name: 'Background completion alerts' }));

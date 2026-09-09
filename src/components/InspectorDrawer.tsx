@@ -31,7 +31,6 @@ import type { useGrokRunners } from '../hooks/useGrokRunners';
 import type { useModelConfig } from '../hooks/useModelConfig';
 import type {
   ActionPolicy,
-  DockPosition,
   GrokModelId,
   InspectorTab,
   PermissionMode,
@@ -61,8 +60,6 @@ export interface InspectorDrawerProps {
   onClose: () => void;
   inspectorTab: InspectorTab;
   setInspectorTab: (tab: InspectorTab) => void;
-  dockPosition: DockPosition;
-  onDockPositionChange: (next: DockPosition) => void;
   runners: ReturnType<typeof useGrokRunners>;
   modelConfig: ReturnType<typeof useModelConfig>;
   actionPolicy: ActionPolicy;
@@ -81,8 +78,6 @@ export function InspectorDrawer({
   onClose,
   inspectorTab,
   setInspectorTab,
-  dockPosition,
-  onDockPositionChange,
   runners,
   modelConfig,
   actionPolicy,
@@ -199,18 +194,6 @@ export function InspectorDrawer({
               {tab.label}
             </button>
           ))}
-          <button
-            aria-label={t('inspector.toggleDock')}
-            onClick={() => onDockPositionChange(dockPosition === 'right' ? 'bottom' : 'right')}
-            title={
-              dockPosition === 'right'
-                ? t('inspector.moveDockBottom')
-                : t('inspector.moveDockRight')
-            }
-            type="button"
-          >
-            <PanelRight size={16} />
-          </button>
           <button
             aria-label={t('inspector.close')}
             onClick={onClose}

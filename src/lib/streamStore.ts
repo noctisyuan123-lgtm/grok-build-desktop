@@ -285,14 +285,20 @@ export function applyRunEvent(
       });
       return;
     }
-    streamStore.patchRun(runId, {
-      thoughtChars: (cur?.thoughtChars ?? 0) + data.length,
-      transcript: appendThought(cur?.transcript ?? [], data, now),
-      lastEventType: 'thought',
-      sessionId: cur?.sessionId ?? sessionId ?? null,
-      rootSessionId: cur?.rootSessionId ?? sessionId ?? null,
-      state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
-    });
+    const startsThought = cur?.transcript.at(-1)?.kind !== 'thought';
+    streamStore.patchRun(
+      runId,
+      {
+        thoughtChars: (cur?.thoughtChars ?? 0) + data.length,
+        transcript: appendThought(cur?.transcript ?? [], data, now),
+        lastEventType: 'thought',
+        sessionId: cur?.sessionId ?? sessionId ?? null,
+        rootSessionId: cur?.rootSessionId ?? sessionId ?? null,
+        state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
+      },
+      { notify: startsThought },
+    );
+    if (!startsThought) streamStore.scheduleNotify();
   } else if (event.type === 'text') {
     const { data } = event as Extract<GrokEvent, { type: 'text' }>;
     const owner = findSubagentOwner(cur?.traces ?? [], sessionId, cur?.rootSessionId);
@@ -445,6 +451,7 @@ export function applyRunEvent(
               ? updated[idx]!.label
               : normalizedEvent.label,
           detail: normalizedEvent.detail ?? updated[idx]!.detail,
+          command: normalizedEvent.command ?? updated[idx]!.command,
           prompt: updated[idx]!.prompt || normalizedEvent.prompt,
           parentKey: normalizedEvent.parentKey ?? updated[idx]!.parentKey,
           progress: normalizedEvent.progress ?? updated[idx]!.progress,

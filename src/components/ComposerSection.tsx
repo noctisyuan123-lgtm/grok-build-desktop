@@ -6,7 +6,6 @@
 import { useCallback, useState } from 'react';
 import { AlertTriangle, SlidersHorizontal } from 'lucide-react';
 import { Composer, type ComposerHandle } from './Composer';
-import { ContextUsageRing } from './ContextUsageRing';
 import { SubagentFloat } from './SubagentFloat';
 import { PlanFloat } from './PlanTodoList';
 import {
@@ -257,9 +256,6 @@ export function ComposerSection({
           </div>
         }
       />
-      <div className="composer-context-footer">
-        <ContextUsageRing messages={messages} cwd={codingCwd} />
-      </div>
     </div>
   );
 }

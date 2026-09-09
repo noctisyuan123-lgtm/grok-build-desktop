@@ -3,7 +3,7 @@
 // hydrated from localStorage at boot, mirrored back on change, and synced
 // with the Rust-side session_state.json (load once, save debounced).
 // Extracted from App.tsx unchanged.
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type SetStateAction } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { ToolRun } from '../lib/grok';
 import { hasTauriRuntime } from '../lib/runtime';
@@ -12,7 +12,6 @@ import {
   isActionPolicy,
   isChatMessage,
   isMode,
-  isThemeMode,
   isToolRun,
   type ActionPolicy,
   type ChatMessage,
@@ -70,13 +69,13 @@ export function useSessionPersistence({
   const [codingWorkflow, setCodingWorkflow] = useState(
     () => window.localStorage.getItem(storageKeys.codingWorkflow) ?? 'analyze',
   );
-  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
-    const stored = window.localStorage.getItem(storageKeys.themeMode);
-    const cleanLayoutMigrated =
-      window.localStorage.getItem(storageKeys.cleanLayoutTheme) === 'true';
-    if (!cleanLayoutMigrated) return 'dark';
-    return isThemeMode(stored) ? stored : 'dark';
-  });
+  const [themeMode, setThemeModeState] = useState<ThemeMode>('dark');
+  // The app is deliberately dark-only. Keep the setter shape for the session
+  // adapter, while preventing stored state or an internal caller from reviving
+  // the retired light theme.
+  const setThemeMode = useCallback((_mode: SetStateAction<ThemeMode>) => {
+    setThemeModeState('dark');
+  }, []);
   const [lastRun, setLastRun] = useState<ToolRun | null>(() => storedLastRun());
   const [history, setHistory] = useState<ToolRun[]>(() => storedRunHistory());
   const [totalRuns, setTotalRuns] = useState<number>(() => {
@@ -156,9 +155,6 @@ export function useSessionPersistence({
           if (isActionPolicy(restored.actionPolicy)) setActionPolicy(restored.actionPolicy);
           if (typeof restored.codingWorkflow === 'string') {
             setCodingWorkflow(restored.codingWorkflow);
-          }
-          if (isThemeMode(restored.themeMode)) {
-            setThemeMode(restored.themeMode);
           }
           // session_state.json is often a stale 300ms snapshot and does not
           // store the tab list. Never replace a longer local history with a

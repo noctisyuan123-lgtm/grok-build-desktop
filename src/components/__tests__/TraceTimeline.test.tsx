@@ -93,7 +93,8 @@ describe('ActivityGroup staged tool motion', () => {
         traces={[makeTrace({ key: 'tool:1', label: 'Download dependencies', status: 'running' })]}
       />,
     );
-    expect(container.querySelector('.activity-motion-enter')).toBeInTheDocument();
+    const enteringRow = container.querySelector('.activity-motion-enter');
+    expect(enteringRow).toBeInTheDocument();
 
     rerender(
       <ActivityGroup
@@ -107,7 +108,7 @@ describe('ActivityGroup staged tool motion', () => {
         ]}
       />,
     );
-    expect(container.querySelector('.activity-motion-settle')).toBeInTheDocument();
+    expect(container.querySelector('.activity-motion-settle')).toBe(enteringRow);
     expect(screen.getByText('Download dependencies')).toBeInTheDocument();
 
     act(() => {

@@ -27,6 +27,8 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 export interface ContextUsageRingProps {
   messages: readonly ChatMessage[];
   cwd: string;
+  compact?: boolean;
+  className?: string;
 }
 
 function ringAriaLabel(view: ContextUsageViewState, streaming: boolean): string {
@@ -63,7 +65,12 @@ function segmentTokens(breakdown: ContextUsageBreakdown, key: BreakdownSegmentKe
   }
 }
 
-export function ContextUsageRing({ messages, cwd }: ContextUsageRingProps) {
+export function ContextUsageRing({
+  messages,
+  cwd,
+  compact = false,
+  className = '',
+}: ContextUsageRingProps) {
   const { view, streaming, refresh } = useContextUsage(messages, cwd);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -111,7 +118,7 @@ export function ContextUsageRing({ messages, cwd }: ContextUsageRingProps) {
   const label = ringAriaLabel(view, streaming);
 
   return (
-    <div className="context-usage" ref={rootRef}>
+    <div className={`context-usage${className ? ` ${className}` : ''}`} ref={rootRef}>
       <button
         ref={buttonRef}
         type="button"
@@ -157,6 +164,11 @@ export function ContextUsageRing({ messages, cwd }: ContextUsageRingProps) {
             transform={`rotate(-90 ${RING_SIZE / 2} ${RING_SIZE / 2})`}
           />
         </svg>
+        {compact ? null : (
+          <span className="context-usage-label" aria-hidden="true">
+            {view.kind === 'ready' ? formatPercent(view.percent) : 'Usage'}
+          </span>
+        )}
       </button>
 
       {open ? (

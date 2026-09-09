@@ -1195,7 +1195,7 @@ describe('command palette, settings, panels, shortcuts', () => {
     await waitFor(() => expect(dock()).not.toBeInTheDocument());
   });
 
-  it('toggles the sidebar with ⌘B and the theme with ⌘⇧L', async () => {
+  it('toggles the sidebar with ⌘B and keeps the interface dark', async () => {
     const { view, user } = await bootApp();
     const shell = view.container.querySelector('main.app-shell')!;
 
@@ -1208,7 +1208,7 @@ describe('command palette, settings, panels, shortcuts', () => {
 
     expect(shell.className).toContain('theme-dark');
     await user.keyboard('{Meta>}{Shift>}L{/Shift}{/Meta}');
-    await waitFor(() => expect(shell.className).toContain('theme-light'));
-    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+    expect(shell.className).toContain('theme-dark');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
   });
 });

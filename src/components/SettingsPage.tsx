@@ -171,34 +171,6 @@ export function SettingsPage(props: SettingsPageProps) {
           {section === 'general' ? (
             <section className="settings-section">
               <h2>{t('settings.nav.general')}</h2>
-              <Row title={t('settings.appearance')} hint={t('settings.appearanceHint')}>
-                <div className="set-segmented">
-                  <button
-                    type="button"
-                    className={props.themeMode === 'dark' ? 'is-active' : ''}
-                    onClick={() => props.setThemeMode('dark')}
-                  >
-                    {t('common.dark')}
-                  </button>
-                  <button
-                    type="button"
-                    className={props.themeMode === 'light' ? 'is-active' : ''}
-                    onClick={() => props.setThemeMode('light')}
-                  >
-                    {t('common.light')}
-                  </button>
-                </div>
-              </Row>
-              <Row title={t('settings.dockPosition')} hint={t('settings.dockPositionHint')}>
-                <select
-                  aria-label={t('settings.dockPosition')}
-                  value={props.dockPosition}
-                  onChange={(e) => props.setDockPosition(e.currentTarget.value as DockPosition)}
-                >
-                  <option value="right">{t('common.right')}</option>
-                  <option value="bottom">{t('common.bottom')}</option>
-                </select>
-              </Row>
               <Row
                 title={t('settings.collapseSidebarTitle')}
                 hint={t('settings.collapseSidebarHint')}

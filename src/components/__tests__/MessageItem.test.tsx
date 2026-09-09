@@ -775,7 +775,7 @@ describe('MessageItem rendering states', () => {
     expect(container.querySelector('.transcript-response')).toBeNull();
   });
 
-  it('keeps prior mid-responds visible while a later mid-respond is streaming (live multi-mid)', async () => {
+  it('folds prior mid-responds on a new response and keeps them available in Work for)', async () => {
     applyStateChange('live-multi-mid', { state: 'Running', startedAt: Date.now() });
     render(
       <MessageItem
@@ -815,7 +815,12 @@ describe('MessageItem rendering states', () => {
       />,
     );
 
-    // Current trailing mid is exterior; earlier mid stays readable in the rail.
+    expect(screen.queryByText('Mid one: checking weclaw.')).toBeNull();
+    expect(screen.getByText('Mid two: still residual.')).toBeInTheDocument();
+    const work = screen.getByRole('button', { name: /Working for/ });
+    expect(work).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.click(work);
+    // Opening Work for restores earlier responses in chronological order.
     expect(screen.getByText('Mid one: checking weclaw.')).toBeInTheDocument();
     expect(screen.getByText('Mid two: still residual.')).toBeInTheDocument();
     // Process before each closed mid still folds.
@@ -872,9 +877,17 @@ describe('MessageItem rendering states', () => {
       applyRunEvent('response-starts', { type: 'text', data: 'Here is the first sentence.' });
     });
 
-    expect(screen.getByRole('button', { name: 'Thought and used 1 tool' })).toBeInTheDocument();
+    const work = screen.getByRole('button', { name: /Working for/ });
+    expect(work).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('button', { name: 'Thought and used 1 tool' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Thought briefly' })).toBeNull();
     expect(screen.getByText('Here is the first sentence.')).toBeInTheDocument();
+    await userEvent.click(work);
+    await act(async () => {
+      applyRunEvent('response-starts', { type: 'text', data: ' More detail.' });
+    });
+    expect(work).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Thought and used 1 tool' })).toBeInTheDocument();
   });
 
   it('keeps thought→tools→thought visible until a response starts', () => {
@@ -1139,14 +1152,7 @@ describe('MessageItem rendering states', () => {
       applyWatching('copy-while-watch', { active: true, startedAt: Date.now() });
     });
     render(
-      <MessageItem
-        runId="copy-while-watch"
-        showCopy
-        showFork
-        canFork
-        canUndo
-        onUndo={() => {}}
-      />,
+      <MessageItem runId="copy-while-watch" showCopy showFork canFork canUndo onUndo={() => {}} />,
     );
     expect(screen.getByRole('button', { name: 'Undo response' })).not.toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Copy response' })).not.toBeInTheDocument();
@@ -1191,12 +1197,7 @@ describe('MessageItem rendering states', () => {
     });
     applyWatching('r-watch', { active: true, startedAt: Date.now() });
     const { container } = render(
-      <MessageItem
-        runId="r-watch"
-        fallbackText="盯着了。"
-        canUndo
-        onUndo={() => {}}
-      />,
+      <MessageItem runId="r-watch" fallbackText="盯着了。" canUndo onUndo={() => {}} />,
     );
     const watching = screen.getByRole('status');
     expect(watching).toHaveTextContent(/Watching for/);

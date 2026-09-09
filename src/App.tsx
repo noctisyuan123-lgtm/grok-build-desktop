@@ -1,3 +1,4 @@
+import { useExpandedWindow } from './hooks/useExpandedWindow';
 import {
   useCallback,
   useEffect,
@@ -50,7 +51,6 @@ import { useAppShortcuts } from './hooks/useAppShortcuts';
 import { useHistoryOrganization } from './hooks/useHistoryOrganization';
 
 import {
-  isDockPosition,
   isInspectorTab,
   type DockPosition,
   type InspectorTab,
@@ -141,6 +141,7 @@ function readDevSettingsQuery(): { open: boolean; section: SettingsSection } {
 }
 
 function App() {
+  const expandedWindow = useExpandedWindow();
   // The textarea lives inside Composer (uncontrolled ref). We hold a
   // ComposerHandle so starter cards / history clicks / drafts can seed it.
   const composerRef = useRef<ComposerHandle | null>(null);
@@ -350,10 +351,7 @@ function App() {
   // width. Keep the grid transition off for that one hydration frame so the
   // sidebar doesn't visibly shrink on every app launch.
   const [sidebarTransitionReady, setSidebarTransitionReady] = useState(false);
-  const [dockPosition, setDockPosition] = useState<DockPosition>(() => {
-    const stored = window.localStorage.getItem(storageKeys.dockPosition);
-    return isDockPosition(stored) ? stored : 'right';
-  });
+  const dockPosition: DockPosition = 'bottom';
   const [completionSoundEnabled, setCompletionSoundEnabled] = useState<boolean>(() => {
     return window.localStorage.getItem(storageKeys.completionSoundEnabled) !== '0';
   });
@@ -1371,8 +1369,6 @@ function App() {
     setToolsPageOpen,
     setSettingsOpen,
     setInspectorTab,
-    themeMode,
-    setThemeMode,
     togglePanel,
     handleTabCreate,
     clearRunHistory,
@@ -1383,10 +1379,6 @@ function App() {
     drafts,
     mode,
   });
-  useEffect(() => {
-    window.localStorage.setItem(storageKeys.dockPosition, dockPosition);
-  }, [dockPosition]);
-
   useEffect(() => {
     window.localStorage.setItem(storageKeys.inspectorTab, inspectorTab);
   }, [inspectorTab]);
@@ -1742,10 +1734,10 @@ function App() {
     );
     const tipCopyForkReady = Boolean(
       latestMessage?.role === 'assistant' &&
-        latestMessage.status !== 'streaming' &&
-        Boolean(latestMessage.content.trim()) &&
-        !activeSessionIsRunning &&
-        !latestMessageIsLive,
+      latestMessage.status !== 'streaming' &&
+      Boolean(latestMessage.content.trim()) &&
+      !activeSessionIsRunning &&
+      !latestMessageIsLive,
     );
     const latestUserIndex =
       latestMessage?.role === 'assistant' && latestMessage.status !== 'streaming'
@@ -1804,7 +1796,7 @@ function App() {
   }, [activeSessionIsRunning, messageAttachments, messages]);
   return (
     <main
-      className={`app-shell theme-${themeMode}${sidebarCollapsed ? ' sidebar-collapsed' : ''}${sidebarTransitionReady ? ' sidebar-transition-ready' : ''}`}
+      className={`app-shell theme-${themeMode}${expandedWindow ? ' has-task-rail' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}${sidebarTransitionReady ? ' sidebar-transition-ready' : ''}`}
     >
       <CommandPalette
         open={paletteOpen}
@@ -1819,10 +1811,7 @@ function App() {
         themeMode={themeMode}
         setThemeMode={setThemeMode}
         dockPosition={dockPosition}
-        setDockPosition={(d) => {
-          setDockPosition(d);
-          window.localStorage.setItem(storageKeys.dockPosition, d);
-        }}
+        setDockPosition={() => {}}
         sidebarCollapsed={sidebarCollapsed}
         setSidebarCollapsed={setSidebarCollapsed}
         completionSoundEnabled={completionSoundEnabled}
@@ -1881,11 +1870,11 @@ function App() {
             input, model chip, Preview/Context/Terminal/Tools/Settings, status
             pill) is gone — those all live in the sidebar, ⌘K palette, the
             bottom status bar, and Settings now. What stays here is just the
-            project chip (click → folder picker), a draggable spacer, theme,
-            and panels. Stop replaces the composer send button while running. */}
+            project chip (click → folder picker), a draggable spacer, session
+            usage, and panels. Stop replaces the composer send button while running. */}
         <TitleBar
-          themeMode={themeMode}
-          setThemeMode={setThemeMode}
+          messages={messages}
+          codingCwd={codingCwd}
           anyPanelOpen={contextOpen || previewOpen || terminalOpen || toolsOpen}
           openPanelMenu={openPanelMenu}
         />
@@ -1959,7 +1948,7 @@ function App() {
                 laneId={activeTabId}
                 stopRun={stopRun}
               />
-              <SubagentRail />
+              {expandedWindow ? <SubagentRail messages={messages} onStopTask={stopRun} /> : null}
             </div>
             <PreviewPanel
               open={previewOpen}
@@ -1978,11 +1967,6 @@ function App() {
               onClose={() => setContextOpen(false)}
               inspectorTab={inspectorTab}
               setInspectorTab={setInspectorTab}
-              dockPosition={dockPosition}
-              onDockPositionChange={(next) => {
-                setDockPosition(next);
-                window.localStorage.setItem(storageKeys.dockPosition, next);
-              }}
               runners={runners}
               modelConfig={modelConfig}
               actionPolicy={actionPolicy}

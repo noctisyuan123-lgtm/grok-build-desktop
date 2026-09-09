@@ -317,16 +317,6 @@ export function TranscriptMessage({
   onFork?: () => void;
   showCopy?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(autoExpandWork);
-  const wasLive = useRef(live);
-  useEffect(() => {
-    if (wasLive.current && !live) {
-      setExpanded(false);
-    } else if (autoExpandWork && live) {
-      setExpanded(true);
-    }
-    wasLive.current = live;
-  }, [autoExpandWork, live]);
   const liveElapsed = useElapsed(live ? startedAt : null, null);
   // While live, only the transcript tail may sit below the work rail: an
   // intermediate response followed by a tool returns into chronological order.
@@ -338,6 +328,21 @@ export function TranscriptMessage({
     responseTerminalReady,
     fallbackText,
   );
+  // A new response folds the process in the same render as its first token.
+  // A subsequent tool/thought starts a new activity stage. Manual disclosure
+  // choices persist for the current stage, including further response tokens.
+  const disclosureStage = live
+    ? finalIndex >= 0
+      ? `response:${transcript[finalIndex]?.key}`
+      : 'activity'
+    : 'settled';
+  const [disclosure, setDisclosure] = useState<{ stage: string; open: boolean } | null>(null);
+  const expanded =
+    disclosure?.stage === disclosureStage
+      ? disclosure.open
+      : live && finalIndex < 0 && autoExpandWork;
+  const setExpanded = (update: (value: boolean) => boolean) =>
+    setDisclosure({ stage: disclosureStage, open: update(expanded) });
   const header = live ? `Working for ${formatWorkedDuration(liveElapsed ?? 0)}` : workedLabel;
   // Render-only phase groups: intermediate responses close a workflow phase and
   // fold its thought/tool records into one summary above the response. Stored

@@ -1,13 +1,12 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { pickCurrentSubagent, SubagentFloat } from '../SubagentFloat';
 import { streamStore } from '../../lib/streamStore';
 import type { TraceEvent } from '../../lib/traceParser';
 
 beforeEach(() => {
   streamStore.__reset();
-  window.localStorage.removeItem('grok-desktop-subagent-drawer-width');
 });
 
 function subagent(overrides: Partial<TraceEvent> = {}): TraceEvent {
@@ -83,8 +82,7 @@ describe('SubagentFloat', () => {
     expect(screen.queryByText('Status')).toBeNull();
     expect(screen.getByText('Read auth.ts')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Close subagent session' }));
-    expect(screen.queryByRole('dialog', { name: /Subagent · Review backend/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Close subagent session' })).toBeNull();
   });
 
   it('prefers the newest live subagent over older finished ones', () => {
@@ -241,7 +239,7 @@ describe('SubagentFloat', () => {
     expect(screen.getAllByText('Read workflow.ts')).toHaveLength(1);
   });
 
-  it('resizes the drawer from its left edge and remembers the width', async () => {
+  it('opens the inspector as a centered modal that matches the conversation width', async () => {
     const user = userEvent.setup();
     streamStore.patchRun('session-run', {
       state: 'running',
@@ -252,21 +250,39 @@ describe('SubagentFloat', () => {
     await user.click(screen.getByRole('button', { name: /Open subagent session/i }));
 
     const drawer = screen.getByRole('dialog', { name: /Subagent · Review backend/i });
-    const resizer = screen.getByRole('separator', { name: 'Resize subagent window' });
-    expect(drawer).toHaveStyle({ width: '520px' });
-    expect(document.documentElement.style.getPropertyValue('--subagent-drawer-open-width')).toBe(
-      '520px',
+    expect(drawer).toHaveAttribute('aria-modal', 'true');
+    expect(drawer).toHaveClass('subagent-drawer');
+    expect(screen.queryByRole('separator', { name: 'Resize subagent window' })).toBeNull();
+  });
+
+  it('uses the visible main conversation column as the inspector bounds', async () => {
+    const user = userEvent.setup();
+    const bounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function getBounds(this: HTMLElement) {
+        if (this.classList.contains('composer-row')) {
+          return { left: 214, width: 760 } as DOMRect;
+        }
+        return { left: 0, width: 0 } as DOMRect;
+      },
+    );
+    streamStore.patchRun('session-run', { state: 'running', traces: [subagent()] });
+    render(
+      <div className="app-shell">
+        <div className="conversation-panel">
+          <div className="composer-row" />
+        </div>
+        <SubagentFloat sessionRunIds={['session-run']} />
+      </div>,
     );
 
-    fireEvent.pointerDown(resizer, { button: 0, clientX: 900 });
-    fireEvent.pointerMove(window, { clientX: 820 });
-    fireEvent.pointerUp(window, { clientX: 820 });
+    await user.click(screen.getByRole('button', { name: /Open subagent session/i }));
 
-    expect(drawer).toHaveStyle({ width: '600px' });
-    expect(window.localStorage.getItem('grok-desktop-subagent-drawer-width')).toBe('600');
-    expect(document.documentElement.style.getPropertyValue('--subagent-drawer-open-width')).toBe(
-      '600px',
-    );
+    const shell = document.querySelector<HTMLElement>('.app-shell');
+    const drawer = screen.getByRole('dialog', { name: /Subagent · Review backend/i });
+    expect(shell?.style.getPropertyValue('--subagent-drawer-left')).toBe('153px');
+    expect(shell?.style.getPropertyValue('--subagent-drawer-width')).toBe('847px');
+    expect(drawer.parentElement).toBe(shell);
+    bounds.mockRestore();
   });
 
   it('closes the inspector when clicking outside the dock and drawer', async () => {

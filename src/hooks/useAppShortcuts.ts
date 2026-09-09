@@ -1,11 +1,11 @@
 // The command-palette catalogue and global keyboard shortcuts (⌘K palette,
-// ⌘B sidebar, ⌘, settings, ⌘⇧L theme, ⌘N new session, ⌘F search,
+// ⌘B sidebar, ⌘, settings, ⌘N new session, ⌘F search,
 // "/" composer focus, Esc panel dismissal, ⌘1/⌘2 mode switch). Extracted
 // from App.tsx unchanged; DOM focus targets arrive as callbacks.
 import { useEffect, useMemo, useRef } from 'react';
 import type { PaletteAction } from '../components/CommandPalette';
 import { streamStore } from '../lib/streamStore';
-import type { InspectorTab, Mode, ThemeMode } from '../app/types';
+import type { InspectorTab, Mode } from '../app/types';
 import { t } from '../i18n';
 
 export interface AppShortcutsDeps {
@@ -24,8 +24,6 @@ export interface AppShortcutsDeps {
   setToolsPageOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
   setInspectorTab: (tab: InspectorTab) => void;
-  themeMode: ThemeMode;
-  setThemeMode: React.Dispatch<React.SetStateAction<ThemeMode>>;
   togglePanel: (target: 'preview' | 'context' | 'terminal' | 'tools') => void;
   handleTabCreate: () => void;
   clearRunHistory: () => void;
@@ -54,8 +52,6 @@ export function useAppShortcuts(deps: AppShortcutsDeps) {
     setToolsPageOpen,
     setSettingsOpen,
     setInspectorTab,
-    themeMode,
-    setThemeMode,
     togglePanel,
     handleTabCreate,
     clearRunHistory,
@@ -138,13 +134,6 @@ export function useAppShortcuts(deps: AppShortcutsDeps) {
         run: () => togglePanel('terminal'),
       },
       {
-        id: 'toggle-theme',
-        label: themeMode === 'dark' ? t('titleBar.toLight') : t('titleBar.toDark'),
-        shortcut: '⌘⇧L',
-        group: t('palette.group.theme'),
-        run: () => setThemeMode(themeMode === 'dark' ? 'light' : 'dark'),
-      },
-      {
         id: 'open-desktop-bridge',
         label: t('palette.action.openDesktopBridge'),
         hint: t('palette.action.openDesktopBridgeHint'),
@@ -180,7 +169,7 @@ export function useAppShortcuts(deps: AppShortcutsDeps) {
       },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sidebarCollapsed, toolsOpen, terminalOpen, themeMode, previewOpen, contextOpen]);
+  }, [sidebarCollapsed, toolsOpen, terminalOpen, previewOpen, contextOpen]);
 
   // Global keyboard router — only fires while the palette isn't already in a
   // text-input state. Each shortcut is also surfaced via the palette so users
@@ -197,9 +186,6 @@ export function useAppShortcuts(deps: AppShortcutsDeps) {
       } else if (meta && e.key === ',') {
         e.preventDefault();
         setSettingsOpen(true);
-      } else if (meta && e.shiftKey && e.key.toLowerCase() === 'l') {
-        e.preventDefault();
-        setThemeMode((t) => (t === 'dark' ? 'light' : 'dark'));
       } else if (meta && e.key.toLowerCase() === 'n' && !e.shiftKey) {
         // Don't steal the system "New Window" shortcut if the user is in a
         // textarea (composer). Only act when focus is elsewhere.

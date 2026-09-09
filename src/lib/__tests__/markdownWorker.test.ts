@@ -55,6 +55,21 @@ afterEach(() => {
 });
 
 describe('scheduleMarkdownParse', () => {
+  it('publishes the latest short text within 40ms instead of a quarter second', async () => {
+    vi.useFakeTimers();
+    const { scheduleMarkdownParse } = await loadModule();
+    scheduleMarkdownParse('thought', 'first');
+    const worker = FakeWorker.instances[0]!;
+    worker.emit('message', { data: { runId: 'thought', html: '<p>first</p>' } });
+    scheduleMarkdownParse('thought', 'first second');
+    scheduleMarkdownParse('thought', 'first second third');
+    vi.advanceTimersByTime(39);
+    expect(worker.posted).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(worker.posted).toHaveLength(2);
+    expect(worker.posted[1]?.text).toBe('first second third');
+  });
+
   it('spins up one worker and posts the parse request', async () => {
     const { scheduleMarkdownParse } = await loadModule();
     scheduleMarkdownParse('r1', '# hi');

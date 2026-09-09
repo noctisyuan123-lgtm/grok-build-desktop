@@ -342,12 +342,12 @@ export const en = {
   'subagent.statusDone': 'Done',
   'subagent.statusError': 'Error',
   'subagent.statusCancelled': 'Cancelled',
-  'subagent.railTitle': 'Agents',
+  'subagent.railTitle': 'Agents & Tasks',
   'subagent.railWorkingCount': '{count} working',
   'subagent.railActive': 'Active',
   'subagent.railDone': 'Done',
-  'subagent.railCollapse': 'Hide agents',
-  'subagent.railExpand': 'Show agents',
+  'subagent.railCollapse': 'Collapse activity',
+  'subagent.railExpand': 'Expand activity',
 
   // ── Plan HUD ──────────────────────────────────────────────────────────────
   'plan.title': 'Plan',
