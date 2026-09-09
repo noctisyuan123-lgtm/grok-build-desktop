@@ -1892,15 +1892,7 @@ function App() {
               {/* Scroll position is owned by MessageList's Virtuoso instance —
                 this div only provides the flex sizing for it. */}
               <div className="conversation-scroll">
-                {messages.length === 0 ? (
-                  <EmptyState
-                    codingCwd={codingCwd}
-                    folderPickerBusy={folderPickerBusy}
-                    onPickWorkspace={() => {
-                      void pickFolder();
-                    }}
-                  />
-                ) : (
+                {messages.length > 0 ? (
                   <MessageList
                     key={activeTabId}
                     messages={messageRefs}
@@ -1912,7 +1904,7 @@ function App() {
                       void editLatestTurn(messageId, text);
                     }}
                   />
-                )}
+                ) : null}
               </div>
 
               {sessionNotice ? (
@@ -1947,6 +1939,17 @@ function App() {
                 activeRunId={activeSessionRunId}
                 laneId={activeTabId}
                 stopRun={stopRun}
+                emptyState={
+                  messages.length === 0 ? (
+                    <EmptyState
+                      codingCwd={codingCwd}
+                      folderPickerBusy={folderPickerBusy}
+                      onPickWorkspace={() => {
+                        void pickFolder();
+                      }}
+                    />
+                  ) : null
+                }
               />
               {expandedWindow ? <SubagentRail messages={messages} onStopTask={stopRun} /> : null}
             </div>

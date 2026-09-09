@@ -1,17 +1,15 @@
-// Cursor-style zero-message workspace row, with a time-of-day greeting above
-// the shared composer. The composer itself stays the real ComposerSection
-// below this block so drafts/attachments never fork.
+// Zero-message workspace row, with a daily greeting above the shared
+// composer. It renders in ComposerSection's same column, so workspace context
+// and the input never drift apart when an auxiliary panel reserves width.
 import { useEffect, useState } from 'react';
-import { ChevronDown, FolderGit2, Laptop, Loader2 } from 'lucide-react';
+import { Bot, ChevronDown, FolderGit2, Laptop, Loader2 } from 'lucide-react';
 import { t } from '../i18n';
-import { emptyGreetingKey } from '../lib/emptyGreeting';
+import { emptyGreeting, millisecondsUntilNextLocalDay } from '../lib/emptyGreeting';
 
 export interface EmptyStateProps {
   codingCwd: string;
   folderPickerBusy: boolean;
   onPickWorkspace: () => void;
-  /** Test seam. Production ticks from the local clock. */
-  now?: Date;
 }
 
 function folderName(path: string): string {
@@ -20,28 +18,31 @@ function folderName(path: string): string {
   return normalized.split('/').filter(Boolean).at(-1) ?? normalized;
 }
 
+function useDailyGreeting(): string {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setNow(new Date()), millisecondsUntilNextLocalDay(now));
+    return () => window.clearTimeout(timer);
+  }, [now]);
+
+  return emptyGreeting(now);
+}
+
 export function EmptyState({
   codingCwd,
   folderPickerBusy,
   onPickWorkspace,
-  now: nowProp,
 }: EmptyStateProps) {
-  const [clock, setClock] = useState(() => nowProp ?? new Date());
-  useEffect(() => {
-    if (nowProp) {
-      setClock(nowProp);
-      return;
-    }
-    const id = window.setInterval(() => setClock(new Date()), 60_000);
-    return () => window.clearInterval(id);
-  }, [nowProp]);
-
   const label = folderName(codingCwd);
-  const greeting = t(emptyGreetingKey(clock));
+  const greeting = useDailyGreeting();
   return (
     <div className="empty-state">
       <div className="empty-greeting">
-        <h1 className="empty-greeting-text">{greeting}</h1>
+        <div className="empty-greeting-lockup">
+          <Bot className="empty-greeting-logo" size={38} aria-hidden="true" />
+          <h1 className="empty-greeting-text">{greeting}</h1>
+        </div>
       </div>
       <div className="new-session-context">
         <button

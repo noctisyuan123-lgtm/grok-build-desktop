@@ -1,16 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ACTIVITY_SETTLE_MS, ActivityGroup, TraceTimeline } from '../TraceTimeline';
+import { ActivityGroup, TraceTimeline } from '../TraceTimeline';
 import { streamStore } from '../../lib/streamStore';
 import type { TraceEvent } from '../../lib/traceParser';
 
 beforeEach(() => {
   streamStore.__reset();
-});
-
-afterEach(() => {
-  vi.useRealTimers();
 });
 
 function makeTrace(overrides: Partial<TraceEvent> = {}): TraceEvent {
@@ -29,7 +25,7 @@ function seed(traces: TraceEvent[], state: 'running' | 'done' | 'failed' = 'runn
   streamStore.patchRun('r1', { traces, state, startedAt: 1_000 });
 }
 
-describe('ActivityGroup staged tool motion', () => {
+describe('ActivityGroup stable tool row', () => {
   it('exposes only the newest running tool while the group stays collapsed', () => {
     const { container } = render(
       <ActivityGroup
@@ -52,7 +48,7 @@ describe('ActivityGroup staged tool motion', () => {
     expect(screen.getByText('Download dependencies')).toBeInTheDocument();
     expect(screen.queryByText('Read a.ts')).toBeNull();
     expect(container.querySelectorAll('.activity-row')).toHaveLength(1);
-    expect(container.querySelector('.activity-motion-enter')).toBeInTheDocument();
+    expect(container.querySelector('.activity-motion-enter')).toBeNull();
     expect(
       container.querySelector('.activity-status-running .activity-row-label'),
     ).toBeInTheDocument();
@@ -82,19 +78,16 @@ describe('ActivityGroup staged tool motion', () => {
     expect(screen.getByText('Read a.ts')).toBeInTheDocument();
     expect(screen.getAllByText('Download dependencies')).toHaveLength(1);
     expect(container.querySelectorAll('.activity-row')).toHaveLength(2);
-    expect(container.querySelector('.activity-motion-enter')).toBeNull();
-    expect(container.querySelector('.activity-motion-settle')).toBeNull();
   });
 
-  it('settles the finished tool into the summary when no next call is running', () => {
-    vi.useFakeTimers();
+  it('keeps the completed call visible until the tool phase ends', () => {
     const { container, rerender } = render(
       <ActivityGroup
         traces={[makeTrace({ key: 'tool:1', label: 'Download dependencies', status: 'running' })]}
       />,
     );
-    const enteringRow = container.querySelector('.activity-motion-enter');
-    expect(enteringRow).toBeInTheDocument();
+    const stableRow = container.querySelector('.activity-item');
+    expect(stableRow).toBeInTheDocument();
 
     rerender(
       <ActivityGroup
@@ -108,21 +101,15 @@ describe('ActivityGroup staged tool motion', () => {
         ]}
       />,
     );
-    expect(container.querySelector('.activity-motion-settle')).toBe(enteringRow);
+    expect(container.querySelector('.activity-item')).toBe(stableRow);
     expect(screen.getByText('Download dependencies')).toBeInTheDocument();
-
-    act(() => {
-      vi.advanceTimersByTime(ACTIVITY_SETTLE_MS);
-    });
-    expect(container.querySelector('.activity-motion-settle')).toBeNull();
-    expect(screen.queryByText('Download dependencies')).toBeNull();
-    expect(screen.getByRole('button', { name: /Used 1 tool/i })).toBeInTheDocument();
   });
 
-  it('keeps the completed call floating out while the next call enters', () => {
+  it('reuses the same row when the next tool starts', () => {
     const { container, rerender } = render(
       <ActivityGroup traces={[makeTrace({ key: 'tool:1', label: 'Read a.ts' })]} />,
     );
+    const stableRow = container.querySelector('.activity-item');
     rerender(
       <ActivityGroup
         traces={[
@@ -131,8 +118,11 @@ describe('ActivityGroup staged tool motion', () => {
         ]}
       />,
     );
-    expect(container.querySelector('.activity-motion-settle')).toBeInTheDocument();
-    expect(container.querySelector('.activity-motion-enter')).toBeInTheDocument();
+    expect(container.querySelector('.activity-item')).toBe(stableRow);
+    expect(screen.queryByText('Read a.ts')).toBeNull();
+    expect(screen.getByText('Download dependencies')).toBeInTheDocument();
+    expect(container.querySelector('.activity-motion-enter')).toBeNull();
+    expect(container.querySelector('.activity-motion-settle')).toBeNull();
   });
 
   it('keeps a single edit compact and opens its diff directly under the short summary', async () => {

@@ -1,3 +1,11 @@
+@font-face {
+  font-display: swap;
+  font-family: 'Anthropic Serif';
+  font-style: normal;
+  font-weight: 100 900;
+  src: url('./assets/fonts/AnthropicSerif-Romans-Variable.ttf') format('truetype');
+}
+
 :root {
   /* ──────────────────────────────────────────────────────────────────────
    * v0.4.0 mono design tokens — graphite dark, no chromatic accent.
@@ -3122,6 +3130,14 @@ body[data-completion-popup='true'] {
   width: 100%;
 }
 
+/* The empty greeting/context lives inside the composer row, not the separate
+   scroll column. Its workspace controls and input now share the same width
+   calculation even when the task rail is visible. */
+.conversation-panel.is-empty .composer-row > .empty-state {
+  max-width: none;
+  padding-inline: 14px;
+}
+
 .conversation-panel.is-empty .composer-row .composer {
   padding: 0 14px 14px;
 }
@@ -3162,45 +3178,49 @@ body[data-completion-popup='true'] {
   width: 100%;
 }
 
-/* Closest live-type stand-in for OpenCode's WordmarkV2: huge, faint, fading
-   out at the foot. Their mark is a custom pixel SVG (inner window + 6–7%
-   fill); arbitrary greetings can't reuse that path, so this copies the
-   watermark register instead of a solid headline. */
+.empty-greeting-lockup {
+  align-items: center;
+  display: inline-flex;
+  gap: 10px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.empty-greeting-logo {
+  color: var(--text-1);
+  display: block;
+  flex: 0 0 auto;
+  height: 38px;
+  width: 38px;
+}
+
 .empty-greeting-text {
-  color: color-mix(in srgb, var(--text-1) 26%, transparent);
-  font-family: 'Rubik Mono One', 'Geist Variable', ui-sans-serif, sans-serif;
-  font-size: clamp(34px, 4.6vw, 56px);
+  color: var(--text-1);
+  font-family: 'Anthropic Serif', 'Iowan Old Style', 'Baskerville', 'Times New Roman', serif;
+  font-size: clamp(30px, 1.2rem + 2vw, 38px);
   font-style: normal;
-  font-weight: 400;
-  letter-spacing: 0.04em;
-  line-height: 1.08;
+  font-variation-settings: 'wght' 320;
+  font-weight: 360;
+  letter-spacing: normal;
+  line-height: 1.2;
   margin: 0;
-  mask-image: linear-gradient(
-    to bottom,
-    #000 12%,
-    rgba(0, 0, 0, 0.78) 38%,
-    rgba(0, 0, 0, 0.28) 68%,
-    transparent 100%
-  );
+  mask-image: none;
   overflow: hidden;
-  text-align: center;
+  text-align: start;
   text-overflow: clip;
   white-space: nowrap;
-  width: 100%;
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    #000 12%,
-    rgba(0, 0, 0, 0.78) 38%,
-    rgba(0, 0, 0, 0.28) 68%,
-    transparent 100%
-  );
+  width: auto;
+  -webkit-mask-image: none;
 }
 
 .new-session-context {
   align-items: center;
-  display: flex;
+  box-sizing: border-box;
+  display: grid;
   gap: 6px;
-  margin-inline: auto;
+  grid-template-columns: max-content max-content 1fr;
+  justify-content: start;
+  margin: 0 auto;
   max-width: 640px;
   min-width: 0;
   width: 100%;
@@ -10813,42 +10833,6 @@ body,
   }
 }
 
-/* A tool group stays compact by default, but its one current call gets a
-   brief stage while it runs. Soft enter from below; on completion it settles
-   upward slightly and fades into the collapsed summary. */
-.transcript-tool-group .activity-motion-enter {
-  animation: activity-row-enter var(--workflow-enter-ms, 220ms) var(--workflow-ease-enter, ease-out)
-    both;
-}
-
-.transcript-tool-group .activity-motion-settle {
-  animation: activity-row-settle var(--workflow-settle-ms, 260ms) var(--workflow-ease-exit, ease-in)
-    both;
-  pointer-events: none;
-}
-
-@keyframes activity-row-enter {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes activity-row-settle {
-  from {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-}
-
 @keyframes workflow-soft-enter {
   from {
     opacity: 0;
@@ -10970,8 +10954,6 @@ body,
   .transcript-thought.is-running > button > span,
   .activity-list .activity-item.activity-status-running .activity-row-label,
   .agent-starting > span:last-child,
-  .transcript-tool-group .activity-motion-enter,
-  .transcript-tool-group .activity-motion-settle,
   .transcript-phase-block,
   .transcript-thought,
   .transcript-response.message-body,

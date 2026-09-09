@@ -7,9 +7,6 @@ import { displayEdit, isEditTrace, sumEditStats } from '../lib/editStats';
 import type { TraceEvent, TraceStatus } from '../lib/traceParser';
 import { t } from '../i18n';
 
-/** Must match `--workflow-settle-ms` / `activity-row-settle` in App.css. */
-export const ACTIVITY_SETTLE_MS = 320;
-
 interface Props {
   runId: string;
   workedLabel?: string;
@@ -103,31 +100,6 @@ export function ActivityGroup({
   const visible = traces.filter(isVisibleTrace);
   const [expanded, setExpanded] = useState(false);
   const activeTrace = [...visible].reverse().find((trace) => trace.status === 'running') ?? null;
-  const activeKey = activeTrace?.key ?? null;
-  const [motionState, setMotionState] = useState<{
-    activeKey: string | null;
-    settling: TraceEvent | null;
-  }>({ activeKey, settling: null });
-
-  // Adjust before committing children: completion must not unmount the active
-  // row for a frame before the exit animation gets a chance to start.
-  if (motionState.activeKey !== activeKey) {
-    const finished = visible.find((trace) => trace.key === motionState.activeKey);
-    setMotionState({
-      activeKey,
-      settling: finished && finished.status !== 'running' ? finished : motionState.settling,
-    });
-  }
-  const settlingTrace = motionState.settling;
-  useEffect(() => {
-    if (!settlingTrace) return;
-    const timer = window.setTimeout(() => {
-      setMotionState((current) =>
-        current.settling === settlingTrace ? { ...current, settling: null } : current,
-      );
-    }, ACTIVITY_SETTLE_MS);
-    return () => window.clearTimeout(timer);
-  }, [settlingTrace]);
 
   if (visible.length === 0) return null;
 
@@ -181,18 +153,14 @@ export function ActivityGroup({
     );
   }
 
-  // Collapsed: one staged row (enter while running, settle on completion).
-  // Expanded: every row once, static aside from the running-label shimmer in CSS.
+  // Collapsed mode intentionally owns one stable row for the whole tool phase.
+  // Switching from one request to the next changes its contents in place instead
+  // of removing a finished row and animating a new one in. Between calls, retain
+  // the most recent completed action until the transcript moves on to a response.
+  const stableTrace = activeTrace ?? visible.at(-1) ?? null;
   const stagedRows =
-    !expanded && (settlingTrace || activeTrace) ? (
-      <>
-        {settlingTrace && (!hideEditDetails || !isEditTrace(settlingTrace)) ? (
-          <ActivityRow key={settlingTrace.key} trace={settlingTrace} motion="settle" />
-        ) : null}
-        {activeTrace && (!hideEditDetails || !isEditTrace(activeTrace)) ? (
-          <ActivityRow key={activeTrace.key} trace={activeTrace} motion="enter" />
-        ) : null}
-      </>
+    !expanded && stableTrace && (!hideEditDetails || !isEditTrace(stableTrace)) ? (
+      <ActivityRow trace={stableTrace} />
     ) : null;
 
   return (
@@ -311,7 +279,7 @@ function ActivitySummary({
   );
 }
 
-export function ActivityRow({ trace, motion }: { trace: TraceEvent; motion?: 'enter' | 'settle' }) {
+export function ActivityRow({ trace }: { trace: TraceEvent }) {
   // Subagent (and tool) detail bodies stay collapsed until the user opens the
   // summary row — never auto-open nested activity inside Work for / TraceTimeline.
   const [expanded, setExpanded] = useState(false);
@@ -352,7 +320,7 @@ export function ActivityRow({ trace, motion }: { trace: TraceEvent; motion?: 'en
 
   return (
     <div
-      className={`activity-item activity-kind-${trace.kind} activity-status-${trace.status}${isEdit ? ' activity-is-edit' : ''}${expanded ? ' row-open' : ''}${motion ? ` activity-motion-${motion}` : ''}`}
+      className={`activity-item activity-kind-${trace.kind} activity-status-${trace.status}${isEdit ? ' activity-is-edit' : ''}${expanded ? ' row-open' : ''}`}
       data-parent={trace.parentKey || undefined}
     >
       {hasBody ? (

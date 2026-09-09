@@ -3,7 +3,7 @@
 // reasoning) plus the inline Stop button. Extracted
 // from App.tsx unchanged; run-config state rides in as the grouped
 // useModelConfig result.
-import { useCallback, useState } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { AlertTriangle, SlidersHorizontal } from 'lucide-react';
 import { Composer, type ComposerHandle } from './Composer';
 import { SubagentFloat } from './SubagentFloat';
@@ -48,6 +48,8 @@ export interface ComposerSectionProps {
   /** UI session / tab id for concurrent lane scheduling. */
   laneId: string;
   stopRun: (runId: string) => void;
+  /** Empty-session greeting and workspace context, kept on the composer column. */
+  emptyState?: ReactNode;
 }
 
 export function ComposerSection({
@@ -70,6 +72,7 @@ export function ComposerSection({
   activeRunId,
   laneId,
   stopRun,
+  emptyState,
 }: ComposerSectionProps) {
   const {
     reasoningEffort,
@@ -137,6 +140,7 @@ export function ComposerSection({
           .map((message) => message.runId)
           .filter((id): id is string => Boolean(id))}
       />
+      {emptyState}
       <Composer
         ref={composerRef}
         cwd={codingCwd}
