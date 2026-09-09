@@ -9265,6 +9265,28 @@ body,
   border-top-color: rgba(43, 43, 38, 0.08);
 }
 
+/* Collapsed hover-peek overlays the conversation. Match the canvas and stay
+   fully opaque so glass/vibrancy does not show the chat through the rail. */
+.app-shell.theme-dark.sidebar-collapsed > .app-sidebar {
+  background: #171717;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 8px 0 24px rgba(0, 0, 0, 0.28);
+}
+.app-shell.theme-dark.sidebar-collapsed > .app-sidebar::before {
+  content: none;
+}
+
+.app-shell.theme-light.sidebar-collapsed > .app-sidebar {
+  background: var(--app-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.app-shell.theme-light.sidebar-collapsed > .app-sidebar::before {
+  content: none;
+}
+
 /* Keep the canvas, composer and fenced code in one neutral graphite family.
    Their contrast now comes from a small surface step instead of unrelated
    brown/near-black fills. */
