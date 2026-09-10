@@ -10,6 +10,9 @@ import { defaultTabName, makeTab, type Tab, type TabMessage } from '../lib/tabs'
 import type { ChatMessage, Mode } from '../app/types';
 import { storageKeys, tabsActiveKey, tabsStorageKey } from '../app/constants';
 import { storedMessages, writeLocalStorageJson } from '../app/storage';
+import { mergeTabLists, richerMessageList, tabMessages } from '../lib/conversationMerge';
+import { loadConversations, saveConversations } from '../lib/grok';
+import { hasTauriRuntime } from '../lib/runtime';
 
 export interface SessionTabsDeps {
   messages: ChatMessage[];
@@ -103,6 +106,8 @@ export function useSessionTabs(deps: SessionTabsDeps) {
   // render-scope variables there could act on state that is many turns old.
   const sessionStateRef = useRef({ activeTabId, messages, tabs, codingCwd });
   sessionStateRef.current = { activeTabId, messages, tabs, codingCwd };
+  const conversationsReadyRef = useRef(!hasTauriRuntime());
+  const [conversationsReady, setConversationsReady] = useState(() => !hasTauriRuntime());
   function handleTabCreate() {
     const current = sessionStateRef.current;
     // Already on a clean slate? Reuse it instead of stacking another empty
@@ -199,14 +204,59 @@ export function useSessionTabs(deps: SessionTabsDeps) {
     return fresh.id;
   }
 
-  // Persist tabs (and the active id) whenever the array changes. This is the
-  // single source of truth across reloads; localStorage hydrates on next boot.
+  // Persist tabs (and the active id) whenever the array changes. WebView
+  // localStorage is a cache — Application Support/conversations.json is the
+  // durable copy (reinstalls / ad-hoc signing do not wipe it).
   useEffect(() => {
     writeLocalStorageJson(tabsStorageKey, tabs);
   }, [tabs]);
   useEffect(() => {
     if (activeTabId) window.localStorage.setItem(tabsActiveKey, activeTabId);
   }, [activeTabId]);
+
+  useEffect(() => {
+    if (!hasTauriRuntime() || !conversationsReady || tabs.length === 0) return;
+    const timer = window.setTimeout(() => {
+      void saveConversations({ activeTabId, tabs }).catch(() => {
+        /* disk backup is best-effort; localStorage still holds a cache */
+      });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [activeTabId, conversationsReady, tabs]);
+
+  useEffect(() => {
+    if (!hasTauriRuntime()) return;
+    let cancelled = false;
+    void loadConversations()
+      .then((stored) => {
+        if (cancelled) return;
+        if (stored && Array.isArray(stored.tabs) && stored.tabs.length > 0) {
+          const diskTabs = stored.tabs as Tab[];
+          setTabs((current) => mergeTabLists(current, diskTabs));
+          const diskActive =
+            stored.activeTabId && diskTabs.some((tab) => tab.id === stored.activeTabId)
+              ? stored.activeTabId
+              : undefined;
+          setMessages((current) => {
+            const activeId = sessionStateRef.current.activeTabId || diskActive;
+            const diskTab = diskTabs.find((tab) => tab.id === activeId);
+            return richerMessageList(current, tabMessages(diskTab));
+          });
+        }
+      })
+      .catch(() => {
+        /* keep the localStorage hydrate */
+      })
+      .finally(() => {
+        conversationsReadyRef.current = true;
+        if (!cancelled) setConversationsReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Mount-only: a later merge would fight live typing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Whenever the global codingCwd or messages change, write them back into
   // the active tab. This keeps the tab "in sync" with the flat state without
@@ -380,7 +430,9 @@ export function useSessionTabs(deps: SessionTabsDeps) {
 
   function appendTabMessage(tabId: string, message: ChatMessage) {
     const current = sessionStateRef.current;
-    const alreadyOnActive = current.messages.some((row) => row.runId && row.runId === message.runId);
+    const alreadyOnActive = current.messages.some(
+      (row) => row.runId && row.runId === message.runId,
+    );
     const alreadyOnTab = current.tabs.some((tab) =>
       tab.messages.some((row) => row.runId === message.runId),
     );

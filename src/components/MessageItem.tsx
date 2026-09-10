@@ -9,6 +9,7 @@ import { t } from '../i18n';
 import { useElapsed } from '../hooks/useElapsed';
 import { sumEditStats, type EditStats } from '../lib/editStats';
 import type { RunCompaction, TraceEvent } from '../lib/traceParser';
+import { isNetworkFailure } from '../lib/connectionHealth';
 import { exteriorMarkdownKey, isRunInFlight, type TranscriptSegment } from '../lib/streamStore';
 import type { ChatMessageStatus } from '../app/types';
 
@@ -28,6 +29,8 @@ interface Props {
   /** When false, hide Copy even if the run has finished (non-tip turns). */
   showCopy?: boolean;
   status?: ChatMessageStatus;
+  onRetryTurn?: () => void;
+  onContinueTurn?: () => void;
 }
 
 function MessageItemImpl({
@@ -45,6 +48,8 @@ function MessageItemImpl({
   onFork,
   showCopy = true,
   status,
+  onRetryTurn,
+  onContinueTurn,
 }: Props) {
   const snap = useRunSnapshot(runId);
   const html = useRunHtml(runId);
@@ -61,12 +66,14 @@ function MessageItemImpl({
   // actually arrived, otherwise the last intermediate response briefly gets
   // promoted into the final answer and then jumps back into the work rail.
   const responseTerminalReady = !snap || snap.lastEventType === 'end' || snap.stopReason != null;
-  // Hold Copy/Fork while idle monitors are still watching — the episode tip
-  // only exposes them after watches settle (or a later wakeup becomes tip).
+  // Hold Copy/Fork/Undo while idle monitors are still watching — the episode
+  // tip only exposes them after watches settle (or a later wakeup becomes tip).
   const tipActionsSettled = !runIsLive && responseTerminalReady && !snap?.watching;
   const forkVisible = showFork && (!snap || tipActionsSettled);
   const forkEnabled = canFork && forkVisible;
   const copyVisible = showCopy && (!snap || tipActionsSettled);
+  const undoVisible = showUndo && (!snap || tipActionsSettled);
+  const undoEnabled = canUndo && tipActionsSettled;
 
   // markdown-it does not sanitize; strip scripts/handlers before injecting.
   const safeHtml = useMemo(() => (html ? sanitizeHtml(html) : html), [html]);
@@ -123,8 +130,8 @@ function MessageItemImpl({
           responseTerminalReady
           startedAt={null}
           autoExpandWork={autoExpandWork}
-          canUndo={canUndo}
-          showUndo={showUndo}
+          canUndo={undoEnabled}
+          showUndo={undoVisible}
           onUndo={onUndo}
           canFork={forkEnabled}
           showFork={forkVisible}
@@ -140,9 +147,9 @@ function MessageItemImpl({
           <MarkdownHtml html={safeHtml} owner={runId} className="message-body markdown-body" />
           <MessageActions
             sourceText={fallbackText || ''}
-            canUndo={canUndo}
+            canUndo={undoEnabled}
             showCopy={copyVisible}
-            showUndo={showUndo}
+            showUndo={undoVisible}
             onUndo={onUndo}
             canFork={forkEnabled}
             showFork={forkVisible}
@@ -158,9 +165,9 @@ function MessageItemImpl({
           <pre className="message-body">{fallbackText}</pre>
           <MessageActions
             sourceText={fallbackText}
-            canUndo={canUndo}
+            canUndo={undoEnabled}
             showCopy={copyVisible}
-            showUndo={showUndo}
+            showUndo={undoVisible}
             onUndo={onUndo}
             canFork={forkEnabled}
             showFork={forkVisible}
@@ -202,8 +209,8 @@ function MessageItemImpl({
           responseTerminalReady={responseTerminalReady}
           startedAt={snap.startedAt}
           autoExpandWork={autoExpandWork}
-          canUndo={canUndo && !runIsLive}
-          showUndo={showUndo}
+          canUndo={undoEnabled}
+          showUndo={undoVisible}
           onUndo={onUndo}
           canFork={forkEnabled}
           showFork={forkVisible}
@@ -239,11 +246,16 @@ function MessageItemImpl({
           other surface (StatusBar suffix) resets to "idle" as soon as the
           queue moves on, leaving a silent empty bubble. */}
       {snap.state === 'failed' ? (
-        <div className="message-error" role="alert">
-          {snap.error
-            ? t('message.runFailedWithError', { error: snap.error })
-            : t('message.runFailed')}
-        </div>
+        <NetworkFailureBlock
+          error={snap.error}
+          hasPartial={
+            snap.textChars > 0 ||
+            (transcript?.some((segment) => segment.kind === 'response') ?? false) ||
+            traces.some((trace) => trace.status === 'done' || trace.status === 'running')
+          }
+          onRetryTurn={onRetryTurn}
+          onContinueTurn={onContinueTurn}
+        />
       ) : null}
       {snap.state === 'cancelled' ? (
         <div className="message-error message-cancelled">{t('message.stopped')}</div>
@@ -252,9 +264,9 @@ function MessageItemImpl({
         <>
           <MessageActions
             sourceText={snap.text || fallbackText || ''}
-            canUndo={canUndo && !runIsLive}
+            canUndo={undoEnabled}
             showCopy={copyVisible}
-            showUndo={showUndo}
+            showUndo={undoVisible}
             onUndo={onUndo}
             canFork={forkEnabled}
             showFork={forkVisible}
@@ -263,7 +275,10 @@ function MessageItemImpl({
         </>
       ) : null}
       {snap.watching ? (
-        <WatchingRail startedAt={snap.watchingStartedAt ?? snap.endedAt ?? Date.now()} />
+        <WatchingRail
+          startedAt={snap.watchingStartedAt ?? snap.endedAt ?? Date.now()}
+          title={snap.watchingLabel}
+        />
       ) : null}
     </>
   );
@@ -788,19 +803,59 @@ function compactionLabel(compaction: RunCompaction): string | null {
   return t('message.compacting');
 }
 
-function WatchingRail({ startedAt }: { startedAt: number }) {
+function WatchingRail({ startedAt, title }: { startedAt: number; title?: string | null }) {
   const elapsed = useElapsed(startedAt, null);
   const label = t('message.watchingFor', {
     duration: formatWorkedDuration(elapsed ?? 0),
   });
+  const subtitle = title?.trim() || t('message.watchingFallback');
   return (
-    <section className="message-worked-rail transcript-work is-live" role="status">
+    <section
+      className="message-worked-rail transcript-work message-watching-rail is-live"
+      role="status"
+    >
       <div className="message-worked">
         <span className="message-worked-summary is-shimmer" data-label={label}>
           {label}
         </span>
       </div>
+      <span className="message-watching-title">{subtitle}</span>
     </section>
+  );
+}
+
+function NetworkFailureBlock({
+  error,
+  hasPartial,
+  onRetryTurn,
+  onContinueTurn,
+}: {
+  error: string | null;
+  hasPartial: boolean;
+  onRetryTurn?: () => void;
+  onContinueTurn?: () => void;
+}) {
+  const network = isNetworkFailure(error);
+  const copy = network
+    ? hasPartial
+      ? t('message.connectionLostIncomplete')
+      : t('message.disconnectedRetry')
+    : error
+      ? t('message.runFailedWithError', { error })
+      : t('message.runFailed');
+  const action = network ? (hasPartial ? onContinueTurn : onRetryTurn) : undefined;
+  const actionLabel = hasPartial ? t('message.continueTurn') : t('message.retryTurn');
+  return (
+    <div className="message-error" role="alert">
+      {copy}
+      {action ? (
+        <div className="message-network-actions">
+          <button type="button" onClick={action}>
+            {actionLabel}
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

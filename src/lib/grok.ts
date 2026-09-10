@@ -91,3 +91,19 @@ export async function resumePendingRuns(): Promise<number> {
 export async function cancelPendingRuns(): Promise<number> {
   return invoke('cancel_pending_runs');
 }
+
+export type PersistedConversations = {
+  activeTabId?: string | null;
+  tabs?: unknown;
+};
+
+export async function loadConversations(): Promise<PersistedConversations | null> {
+  return invoke('load_conversations');
+}
+
+export async function saveConversations(state: {
+  activeTabId?: string | null;
+  tabs: unknown;
+}): Promise<void> {
+  return invoke('save_conversations', { state });
+}

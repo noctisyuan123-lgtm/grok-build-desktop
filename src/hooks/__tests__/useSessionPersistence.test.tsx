@@ -97,12 +97,25 @@ describe('useSessionPersistence desktop restore guards', () => {
     const { result, setSessionNotice } = render();
     await waitFor(() => expect(result.current.sessionLoaded).toBe(true));
 
-    // The debounced file is always staler than the synchronous localStorage
-    // mirror — it may only fill in, never override.
+    // No overlapping ids → keep the tab-hydrated conversation.
     expect(result.current.messages.map((m) => m.id)).toEqual(['fresh-a', 'fresh-b']);
     expect(result.current.codingCwd).toBe('/fresh/repo');
     // The user still gets a restore notice (the file did contribute counts).
     expect(setSessionNotice).toHaveBeenCalledWith(expect.stringContaining('Restored'));
+  });
+
+  it('adopts a longer overlapping file transcript over a short tab hydrate', async () => {
+    seedActiveTab([message('u1'), message('a1')]);
+    mockIPC((cmd) =>
+      cmd === 'load_session_state'
+        ? {
+            messages: [message('u1'), message('a1'), message('u2'), message('a2')],
+          }
+        : undefined,
+    );
+    const { result } = render();
+    await waitFor(() => expect(result.current.sessionLoaded).toBe(true));
+    expect(result.current.messages.map((m) => m.id)).toEqual(['u1', 'a1', 'u2', 'a2']);
   });
 
   it('adopts the file conversation when nothing hydrated locally, coercing streaming to stopped', async () => {

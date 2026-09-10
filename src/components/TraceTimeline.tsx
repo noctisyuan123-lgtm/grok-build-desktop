@@ -14,9 +14,8 @@ interface Props {
 }
 
 /**
- * Compact, message-local activity rail. The current action is always visible;
- * individual tools and subagents stay behind one disclosure so a long task
- * does not become a wall of cards.
+ * Compact, message-local activity rail. Tool rows stay behind one disclosure
+ * so a long task does not become a wall of cards.
  */
 export function TraceTimeline({ runId, workedLabel, fallbackTraces = [] }: Props) {
   const snapshot = useRunSnapshot(runId);
@@ -100,6 +99,11 @@ export function ActivityGroup({
   const visible = traces.filter(isVisibleTrace);
   const [expanded, setExpanded] = useState(false);
   const activeTrace = [...visible].reverse().find((trace) => trace.status === 'running') ?? null;
+  const elapsed = useElapsed(activeTrace?.startedAt ?? null, activeTrace?.endedAt ?? null);
+  const liveDuration =
+    activeTrace && elapsed != null && elapsed >= 0 && elapsed < 86_400_000
+      ? formatDuration(Math.max(0, elapsed))
+      : null;
 
   if (visible.length === 0) return null;
 
@@ -110,6 +114,7 @@ export function ActivityGroup({
   const summary = singleEdit
     ? `Edited ${shortPath(singleEdit.path) || singleEdit.label.replace(/^Edit\s*/iu, '')}`
     : summarizeTraces(visible);
+  const summaryLabel = liveDuration ? `${summary} · ${liveDuration}` : summary;
   const detailTraces = hideEditDetails ? visible.filter((trace) => !isEditTrace(trace)) : visible;
 
   // Nested under a phase summary: one row per tool, no second group chrome.
@@ -124,7 +129,7 @@ export function ActivityGroup({
             onClick={() => setExpanded((value) => !value)}
             aria-expanded={expanded}
           >
-            <span>{summary}</span>
+            <span>{summaryLabel}</span>
             {additions > 0 || deletions > 0 ? (
               <span className="activity-diff-stats">
                 {additions > 0 ? <span className="is-add">+{additions}</span> : null}{' '}
@@ -153,16 +158,6 @@ export function ActivityGroup({
     );
   }
 
-  // Collapsed mode intentionally owns one stable row for the whole tool phase.
-  // Switching from one request to the next changes its contents in place instead
-  // of removing a finished row and animating a new one in. Between calls, retain
-  // the most recent completed action until the transcript moves on to a response.
-  const stableTrace = activeTrace ?? visible.at(-1) ?? null;
-  const stagedRows =
-    !expanded && stableTrace && (!hideEditDetails || !isEditTrace(stableTrace)) ? (
-      <ActivityRow trace={stableTrace} />
-    ) : null;
-
   return (
     <section className={`transcript-tool-group${expanded ? ' is-expanded' : ''}`}>
       <button
@@ -171,7 +166,7 @@ export function ActivityGroup({
         onClick={() => setExpanded((value) => !value)}
         aria-expanded={expanded}
       >
-        <span>{summary}</span>
+        <span>{summaryLabel}</span>
         {additions > 0 || deletions > 0 ? (
           <span className="activity-diff-stats">
             {additions > 0 ? <span className="is-add">+{additions}</span> : null}{' '}
@@ -180,16 +175,12 @@ export function ActivityGroup({
         ) : null}
         <ChevronDown size={14} strokeWidth={1.7} aria-hidden />
       </button>
-      {expanded || stagedRows ? (
+      {expanded ? (
         <div className="activity-list message-worked-list" aria-label={t('message.traceAriaLabel')}>
-          {expanded ? (
-            singleEdit ? (
-              <EditDetail trace={singleEdit} />
-            ) : (
-              detailTraces.map((trace) => <ActivityRow key={trace.key} trace={trace} />)
-            )
+          {singleEdit ? (
+            <EditDetail trace={singleEdit} />
           ) : (
-            stagedRows
+            detailTraces.map((trace) => <ActivityRow key={trace.key} trace={trace} />)
           )}
         </div>
       ) : null}

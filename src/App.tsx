@@ -13,10 +13,10 @@ import { listen } from '@tauri-apps/api/event';
 import { openPath, openUrl } from '@tauri-apps/plugin-opener';
 import { Globe2, PanelRight, TerminalSquare } from 'lucide-react';
 import './App.css';
-import { cancelRun, ensureStreamListenersAttached, prewarmRun } from './lib/grok';
+import { cancelRun, enqueueRun, ensureStreamListenersAttached, prewarmRun } from './lib/grok';
 import { onDocumentLinkClick } from './lib/externalLinks';
 import { hasTauriRuntime } from './lib/runtime';
-import { isRunInFlight, streamStore } from './lib/streamStore';
+import { cancelOpenWork, isRunInFlight, streamStore } from './lib/streamStore';
 import { playCompletionSound, primeCompletionSound } from './lib/completionSound';
 import { showCompletionPopup } from './lib/completionPopup';
 import { isBackgroundSessionRun } from './lib/completionNotification';
@@ -36,6 +36,7 @@ import { AttachmentPreviewPanel } from './components/AttachmentPreviewPanel';
 import { TerminalDock } from './components/TerminalDock';
 import { Toolbelt } from './components/Toolbelt';
 import { TitleBar } from './components/TitleBar';
+import { LiveRunHud } from './components/StatusBar';
 import { ComposerSection } from './components/ComposerSection';
 import { SubagentRail, SubagentUiProvider } from './components/SubagentRail';
 import { SettingsHost } from './components/SettingsHost';
@@ -48,6 +49,8 @@ import { useSessionPersistence } from './hooks/useSessionPersistence';
 import { useModelConfig } from './hooks/useModelConfig';
 import { useSessionTabs } from './hooks/useSessionTabs';
 import { useAppShortcuts } from './hooks/useAppShortcuts';
+import { useAppOnline } from './hooks/useAppOnline';
+import { useNetworkWatchdog } from './hooks/useNetworkWatchdog';
 import { useHistoryOrganization } from './hooks/useHistoryOrganization';
 
 import {
@@ -461,12 +464,58 @@ function App() {
   // promise rejections — Stop could silently do nothing while the run kept
   // streaming.
   function stopRun(runId: string) {
+    cancelOpenWork(runId);
     cancelRun(runId).catch((error) => {
       setSessionNotice(
         t('notices.stopFailed', { error: error instanceof Error ? error.message : String(error) }),
       );
     });
   }
+
+  function retryNetworkTurn(_messageId: string, runId: string) {
+    const idx = messages.findIndex((message) => message.runId === runId);
+    let userText = '';
+    for (let i = idx - 1; i >= 0; i -= 1) {
+      if (messages[i]?.role === 'user') {
+        userText = messages[i]!.content;
+        break;
+      }
+    }
+    if (!userText.trim()) return;
+    composerRef.current?.setValue(userText);
+    void composerRef.current?.submit();
+  }
+
+  async function continueNetworkTurn(_messageId: string, runId: string) {
+    const prompt = t('message.continuePrompt');
+    try {
+      const result = await enqueueRun({
+        prompt,
+        cwd: codingCwd,
+        args: [...buildRunArgs(), '-p', prompt],
+        parentRunId: runId,
+        laneId: activeTabId,
+      });
+      appendMessage({
+        id: makeId('a'),
+        role: 'assistant',
+        content: '',
+        ts: Date.now(),
+        runId: result.runId,
+        status: 'streaming',
+        meta: { model: activeModel, workflow: mode === 'coding' ? codingWorkflow : 'chat' },
+      });
+    } catch (error) {
+      setSessionNotice(
+        t('composerSection.sendFailed', {
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+  }
+
+  const appOnline = useAppOnline();
+  useNetworkWatchdog(appOnline, cancelRun);
 
   // External-command runners + inspector data (statuses, preview, models,
   // MCP/plugins/sessions, shell/browser/absorb/doctor) live in
@@ -1460,7 +1509,7 @@ function App() {
       assistant != null &&
       assistant.status === 'streaming' &&
       (!assistantSnapshot || isRunInFlight(assistantSnapshot));
-    if (assistantIsLive || !user || user.role !== 'user') {
+    if (assistantIsLive || assistantSnapshot?.watching || !user || user.role !== 'user') {
       return;
     }
 
@@ -1730,7 +1779,7 @@ function App() {
       latestMessage.status === 'streaming' &&
       (!latestSnapshot || isRunInFlight(latestSnapshot));
     const latestTurnCanUndo = Boolean(
-      latestMessage && !activeSessionIsRunning && !latestMessageIsLive,
+      latestMessage && !activeSessionIsRunning && !latestMessageIsLive && !latestSnapshot?.watching,
     );
     const tipCopyForkReady = Boolean(
       latestMessage?.role === 'assistant' &&
@@ -1785,9 +1834,8 @@ function App() {
             id: m.id,
             canUndo: index === latestIndex && latestTurnCanUndo,
             showUndo: index === latestIndex && latestTurnCanUndo,
-            // Copy/Fork only on the conversation tip after the turn has
-            // finished. Intermediate wakeups/monitor bubbles stay action-light;
-            // Undo eligibility above is intentionally unchanged.
+            // Copy/Fork/Undo only on the conversation tip after the turn has
+            // finished and idle monitors have settled.
             canFork: index === latestIndex && tipCopyForkReady,
             showFork: index === latestIndex && tipCopyForkReady,
             showCopy: index === latestIndex && tipCopyForkReady,
@@ -1878,6 +1926,7 @@ function App() {
           anyPanelOpen={contextOpen || previewOpen || terminalOpen || toolsOpen}
           openPanelMenu={openPanelMenu}
         />
+        <LiveRunHud messages={messages} />
         <SubagentUiProvider messages={messages}>
           <section className="workbench">
             <div
@@ -1903,11 +1952,19 @@ function App() {
                     onEditUser={(messageId, text) => {
                       void editLatestTurn(messageId, text);
                     }}
+                    onRetryTurn={retryNetworkTurn}
+                    onContinueTurn={(messageId, runId) => {
+                      void continueNetworkTurn(messageId, runId);
+                    }}
                   />
                 ) : null}
               </div>
 
-              {sessionNotice ? (
+              {!appOnline ? (
+                <div className="session-toast session-toast-sticky" role="status">
+                  {t('notices.disconnected')}
+                </div>
+              ) : sessionNotice ? (
                 <div className="session-toast" role="status">
                   {sessionNotice}
                 </div>
@@ -1935,6 +1992,7 @@ function App() {
                 setActionPolicy={setActionPolicy}
                 onHostSlash={handleHostSlash}
                 locked={turnMutationBusy}
+                offline={!appOnline}
                 grokIsRunning={activeSessionIsRunning}
                 activeRunId={activeSessionRunId}
                 laneId={activeTabId}

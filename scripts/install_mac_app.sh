@@ -17,6 +17,19 @@ npm run mac:build
 mkdir -p "$TARGET_DIR"
 if [[ -d "$TARGET_APP" ]]; then
   osascript -e 'tell application id "com.grok.desktop" to quit' >/dev/null 2>&1 || true
+  # AppleScript `quit` can return before the process actually exits. Deleting
+  # the bundle while WKWebView is still flushing localStorage corrupts the
+  # conversation cache.
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if ! pgrep -f "$TARGET_APP/Contents/MacOS/grok-desktop" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.2
+  done
+  if pgrep -f "$TARGET_APP/Contents/MacOS/grok-desktop" >/dev/null 2>&1; then
+    pkill -f "$TARGET_APP/Contents/MacOS/grok-desktop" >/dev/null 2>&1 || true
+    sleep 0.3
+  fi
   rm -rf "$TARGET_APP"
 fi
 

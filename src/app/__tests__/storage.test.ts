@@ -153,23 +153,22 @@ describe('storedActiveTabMessages', () => {
 });
 
 describe('writeLocalStorageJson', () => {
-  it('writes JSON and retries a compacted payload when quota is exceeded', () => {
+  it('writes JSON and does not throw when quota is exceeded', () => {
     expect(writeLocalStorageJson('k', { a: 1 })).toBe(true);
     expect(JSON.parse(window.localStorage.getItem('k')!)).toEqual({ a: 1 });
 
-    const setItem = vi.spyOn(Storage.prototype, 'setItem');
-    setItem.mockImplementationOnce(() => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('quota', 'QuotaExceededError');
     });
-    const tabs = [
-      {
-        id: 't1',
-        messages: [{ id: 'm1', meta: { traces: Array.from({ length: 80 }, (_, i) => i) } }],
-      },
-    ];
-    expect(writeLocalStorageJson('tabs', tabs)).toBe(true);
-    const stored = JSON.parse(window.localStorage.getItem('tabs')!) as typeof tabs;
-    expect(stored[0]?.messages[0]?.meta.traces).toHaveLength(30);
+    expect(() =>
+      writeLocalStorageJson(tabsStorageKey, [{ id: 't1', messages: [{ id: 'm1' }] }]),
+    ).not.toThrow();
     setItem.mockRestore();
+  });
+
+  it('skips caching an oversized tabs blob instead of filling the origin quota', () => {
+    const huge = [{ id: 't1', messages: [{ id: 'm', content: 'x'.repeat(1_600_000) }] }];
+    expect(writeLocalStorageJson(tabsStorageKey, huge)).toBe(false);
+    expect(window.localStorage.getItem(tabsStorageKey)).toBeNull();
   });
 });

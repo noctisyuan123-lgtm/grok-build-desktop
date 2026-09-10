@@ -25,6 +25,40 @@ describe('classifyEvent', () => {
     expect(classifyEvent(null).kind).toBe('ignore');
   });
 
+  it('derives a command name when Execute wraps the shell and no description exists', () => {
+    const event = eventOf({
+      type: 'tool_call_update',
+      toolCallId: 'long',
+      title: "Execute `curl -L https://hf-mirror.com/very/long/model.safetensors -o model.safetensors`",
+      status: 'in_progress',
+    });
+    expect(event).toMatchObject({
+      key: 'tool:long',
+      label: 'curl',
+      command:
+        'curl -L https://hf-mirror.com/very/long/model.safetensors -o model.safetensors',
+    });
+  });
+
+  it('prefers a short shell description over Execute wrapping the full command', () => {
+    const event = eventOf({
+      type: 'tool_call_update',
+      toolCallId: 'sleep',
+      title: "Execute `python - <<'PY'\nprint('hi')\nPY`",
+      status: 'in_progress',
+      rawInput: {
+        command: "python - <<'PY'\nprint('hi')\nPY",
+        description: 'activate comfyui',
+      },
+      content: [{ type: 'content', content: { type: 'text', text: 'activate comfyui' } }],
+    });
+    expect(event).toMatchObject({
+      key: 'tool:sleep',
+      label: 'activate comfyui',
+      command: "python - <<'PY'\nprint('hi')\nPY",
+    });
+  });
+
   it('normalises the official Grok 0.2.118 tool_call shape', () => {
     const event = eventOf({
       type: 'tool_call',

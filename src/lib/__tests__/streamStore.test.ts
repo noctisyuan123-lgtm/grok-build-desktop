@@ -4,6 +4,7 @@ import {
   applyRunEvent,
   applyStateChange,
   applyWatching,
+  cancelOpenWork,
   replaceQueue,
 } from '../streamStore';
 
@@ -17,6 +18,7 @@ describe('streamStore', () => {
     expect(snap?.text).toBe('hello world');
     expect(snap?.textChars).toBe(11);
     expect(snap?.lastEventType).toBe('text');
+    expect(snap?.lastEventAt).toEqual(expect.any(Number));
   });
 
   it('counts thought chars separately', () => {
@@ -96,6 +98,84 @@ describe('streamStore', () => {
     applyWatching('watch', { active: false });
     expect(streamStore.getRunSnapshot('watch')?.watching).toBe(false);
     expect(streamStore.getRunSnapshot('watch')?.watchingStartedAt).toBeNull();
+  });
+
+  it('cancels leftover running traces when the user stops a watching task', () => {
+    applyRunEvent(
+      'stop-watch',
+      { type: 'unknown' },
+      {
+        type: 'tool_call',
+        toolCallId: 'curl-1',
+        title: 'curl',
+        rawInput: { command: 'curl -L https://example.com/a.bin' },
+        status: 'in_progress',
+      },
+    );
+    applyWatching('stop-watch', { active: true, startedAt: 3 });
+    cancelOpenWork('stop-watch');
+    expect(streamStore.getRunSnapshot('stop-watch')).toMatchObject({
+      watching: false,
+    });
+    expect(streamStore.getRunSnapshot('stop-watch')?.traces[0]?.status).toBe('cancelled');
+  });
+
+  it('replaces a generic Tool label with the executable from Execute wrapping', () => {
+    applyRunEvent(
+      'tool-label',
+      { type: 'unknown' },
+      {
+        type: 'tool_call',
+        toolCallId: 'call-2',
+        title: 'run_terminal_command',
+        status: 'in_progress',
+      },
+    );
+    applyRunEvent(
+      'tool-label',
+      { type: 'unknown' },
+      {
+        type: 'tool_call_update',
+        toolCallId: 'call-2',
+        title: "Execute `curl -L https://example.com/a.bin -o a.bin`",
+        status: 'in_progress',
+      },
+    );
+    expect(streamStore.getRunSnapshot('tool-label')?.traces[0]).toMatchObject({
+      label: 'curl',
+      command: 'curl -L https://example.com/a.bin -o a.bin',
+    });
+  });
+
+  it('does not replace a short shell label with Execute wrapping the command', () => {
+    applyRunEvent(
+      'shell-label',
+      { type: 'unknown' },
+      {
+        type: 'tool_call',
+        toolCallId: 'call-1',
+        title: 'run_terminal_command',
+        rawInput: {
+          command: "python - <<'PY'\nprint('hi')\nPY",
+          description: 'activate comfyui',
+        },
+        status: 'in_progress',
+      },
+    );
+    applyRunEvent(
+      'shell-label',
+      { type: 'unknown' },
+      {
+        type: 'tool_call_update',
+        toolCallId: 'call-1',
+        title: "Execute `python - <<'PY'\nprint('hi')\nPY`",
+        status: 'in_progress',
+      },
+    );
+    expect(streamStore.getRunSnapshot('shell-label')?.traces[0]).toMatchObject({
+      label: 'activate comfyui',
+      command: "python - <<'PY'\nprint('hi')\nPY",
+    });
   });
 
   it('does not count a watching run as an in-flight run', () => {

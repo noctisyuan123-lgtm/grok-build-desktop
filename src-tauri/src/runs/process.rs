@@ -184,6 +184,55 @@ pub async fn kill_group(pgid: i32) {
     let _ = killpg(Pid::from_raw(pgid), Signal::SIGKILL);
 }
 
+/// SIGTERM/KILL every descendant of `pid`, but not `pid` itself. Used to stop
+/// a stuck shell/download without tearing down the ACP grok host/session.
+#[cfg(unix)]
+pub async fn kill_descendants(pid: i32) {
+    let children = collect_descendants(pid);
+    for child in &children {
+        let _ = nix::sys::signal::kill(Pid::from_raw(*child), Signal::SIGTERM);
+    }
+    if children.is_empty() {
+        return;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    for child in &children {
+        let _ = nix::sys::signal::kill(Pid::from_raw(*child), Signal::SIGKILL);
+    }
+}
+
+#[cfg(unix)]
+fn collect_descendants(pid: i32) -> Vec<i32> {
+    let mut out = Vec::new();
+    let mut stack = vec![pid];
+    while let Some(parent) = stack.pop() {
+        let Ok(output) = std::process::Command::new("pgrep")
+            .args(["-P", &parent.to_string()])
+            .output()
+        else {
+            continue;
+        };
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let Ok(child) = line.trim().parse::<i32>() else {
+                continue;
+            };
+            if child > 1 && child != pid {
+                out.push(child);
+                stack.push(child);
+            }
+        }
+    }
+    out
+}
+
+#[cfg(windows)]
+pub async fn kill_descendants(pid: i32) {
+    // /T already walks the tree; callers that must keep the host should not
+    // use this on Windows. Fall back to tree-kill of children via wmic is
+    // unreliable, so leave the host and only kill known tree when requested.
+    let _ = pid;
+}
+
 #[cfg(windows)]
 pub async fn kill_group(pgid: i32) {
     // On Windows we use taskkill /F /T to terminate the whole process tree

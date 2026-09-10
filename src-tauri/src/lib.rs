@@ -821,6 +821,32 @@ fn session_state_path() -> PathBuf {
     app_support_dir().join("session_state.json")
 }
 
+fn conversations_path() -> PathBuf {
+    app_support_dir().join("conversations.json")
+}
+
+#[derive(Deserialize, Serialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+struct ConversationsFile {
+    active_tab_id: Option<String>,
+    tabs: serde_json::Value,
+}
+
+fn write_json_atomic(path: PathBuf, raw: String) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Could not create session directory: {error}"))?;
+    }
+    let tmp = path.with_extension(format!(
+        "{}.tmp",
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("json")
+    ));
+    fs::write(&tmp, raw).map_err(|error| format!("Could not save {}: {error}", path.display()))?;
+    fs::rename(&tmp, &path).map_err(|error| format!("Could not save {}: {error}", path.display()))
+}
+
 fn attachment_asset_path(session_id: &str, asset_id: &str) -> Result<PathBuf, String> {
     let valid_component = |value: &str| {
         !value.is_empty()
@@ -984,18 +1010,51 @@ async fn save_session_state(state: SessionState) -> Result<(), String> {
 }
 
 fn save_session_state_blocking(state: SessionState) -> Result<(), String> {
-    let path = session_state_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("Could not create session directory: {error}"))?;
-    }
     let raw = serde_json::to_string_pretty(&state)
         .map_err(|error| format!("Could not serialize session state: {error}"))?;
-    // Write atomically (tmp + rename): a crash mid-`fs::write` would leave a
-    // truncated JSON file and destroy the whole conversation history.
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, raw).map_err(|error| format!("Could not save session state: {error}"))?;
-    fs::rename(&tmp, &path).map_err(|error| format!("Could not save session state: {error}"))
+    write_json_atomic(session_state_path(), raw)
+}
+
+#[tauri::command]
+async fn load_conversations() -> Result<Option<ConversationsFile>, String> {
+    tauri::async_runtime::spawn_blocking(load_conversations_blocking)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn load_conversations_blocking() -> Result<Option<ConversationsFile>, String> {
+    let path = conversations_path();
+    match fs::read_to_string(&path) {
+        Ok(raw) => match serde_json::from_str::<ConversationsFile>(&raw) {
+            Ok(state) => Ok(Some(state)),
+            Err(error) => {
+                let backup = path.with_extension(format!(
+                    "json.corrupt-{}",
+                    chrono::Utc::now().timestamp_millis()
+                ));
+                let _ = fs::rename(&path, &backup);
+                Err(format!(
+                    "Could not parse conversations (moved aside to {}): {error}",
+                    backup.to_string_lossy()
+                ))
+            }
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("Could not read conversations: {error}")),
+    }
+}
+
+#[tauri::command]
+async fn save_conversations(state: ConversationsFile) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || save_conversations_blocking(state))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn save_conversations_blocking(state: ConversationsFile) -> Result<(), String> {
+    let raw = serde_json::to_string(&state)
+        .map_err(|error| format!("Could not serialize conversations: {error}"))?;
+    write_json_atomic(conversations_path(), raw)
 }
 
 fn preview_root(cwd: Option<String>) -> PathBuf {
@@ -4845,6 +4904,8 @@ pub fn run() {
             get_tool_statuses,
             load_session_state,
             save_session_state,
+            load_conversations,
+            save_conversations,
             get_grok_auth_status,
             start_grok_login,
             consume_desktop_handoff,

@@ -932,6 +932,14 @@ impl AcpHost {
         self.watch_started_at = None;
     }
 
+    pub fn clear_background_for(&mut self, run_id: &str, tx: &broadcast::Sender<QueueMessage>) {
+        self.pending_background.retain(|_, owner| owner != run_id);
+        self.watch_labels.remove(run_id);
+        if self.watching_run_id.as_deref() == Some(run_id) {
+            self.emit_watch_state(tx, false);
+        }
+    }
+
     fn track_background(
         &mut self,
         message: &Value,

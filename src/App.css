@@ -2514,6 +2514,27 @@ button.status-cluster.status-action:disabled {
   color: var(--text-2);
 }
 
+.message-network-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.message-network-actions button {
+  background: color-mix(in srgb, var(--conversation-text) 8%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--conversation-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.message-network-actions button:hover {
+  background: color-mix(in srgb, var(--conversation-text) 12%, transparent);
+}
+
 /* Session-level notices (folder pick, restore/save failures, send errors)
    surfaced as a transient toast over the conversation — previously they
    rendered only inside the collapsed Terminal dock where nobody saw them. */
@@ -4343,6 +4364,34 @@ body[data-completion-popup='true'] {
   line-height: 1.35;
   margin-top: 10px;
   min-height: 16px;
+}
+
+.run-status-line.is-titlebar {
+  color: var(--text-3);
+  flex-shrink: 1;
+  margin-top: 0;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.run-status-line.is-hud {
+  bottom: 16px;
+  color: color-mix(in srgb, var(--text-3) 78%, transparent);
+  font-size: 11px;
+  margin: 0;
+  min-height: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 18px;
+  white-space: nowrap;
+  z-index: 4;
+}
+
+.run-status-rate {
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
 }
 
 .run-status-mark {
@@ -10620,6 +10669,25 @@ body,
   margin-bottom: 10px;
 }
 
+.message-watching-rail {
+  margin-top: 32px;
+  margin-bottom: 4px;
+}
+
+.message-watching-rail > .message-worked {
+  margin-bottom: 6px;
+}
+
+.message-watching-title {
+  color: var(--text-soft);
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  margin: 0;
+  max-width: 42em;
+}
+
 .message-compaction {
   color: var(--text-muted);
   font-size: 14px;
@@ -11232,6 +11300,18 @@ body,
   padding-bottom: 12px;
   border-bottom: 1px solid color-mix(in srgb, var(--conversation-text) 9%, transparent);
 }
+.task-rail-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.task-rail-row .task-rail-entry {
+  flex: 1;
+  min-width: 0;
+}
+.task-rail-row .task-rail-stop {
+  margin-top: 9px;
+}
 .task-rail-entry {
   border-radius: 8px;
 }
@@ -11274,7 +11354,9 @@ body,
 .task-rail-copy strong {
   font-size: 12px;
   font-weight: 500;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .task-rail-copy code {
   font-size: 11px;

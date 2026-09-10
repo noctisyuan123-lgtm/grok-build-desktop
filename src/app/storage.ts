@@ -75,18 +75,59 @@ export function storedActiveTabMessages(): ChatMessage[] | null {
   }
 }
 
+/**
+ * localStorage.setItem that never throws. The conversation cache
+ * (`grok-desktop-tabs-v1`) can fill the 5MB origin quota; a later tiny write
+ * then throws QuotaExceededError and takes down the whole tree.
+ */
+export function safeLocalStorageSet(key: string, value: string): boolean {
+  try {
+    window.localStorage.setItem(key, value);
+    return true;
+  } catch {
+    // Drop the bulky tabs cache so small settings keys can still persist.
+    // Full transcripts live in Application Support/conversations.json.
+    if (key !== tabsStorageKey) {
+      try {
+        window.localStorage.removeItem(tabsStorageKey);
+      } catch {
+        /* ignore */
+      }
+      try {
+        window.localStorage.setItem(key, value);
+        return true;
+      } catch {
+        /* still full */
+      }
+    }
+    return false;
+  }
+}
+
+const LOCAL_TABS_BUDGET = 1_500_000;
+
 /** Write JSON to localStorage. On quota failure, retry with compacted traces
  *  so a full conversation list is not silently dropped on the next launch. */
 export function writeLocalStorageJson(key: string, value: unknown): boolean {
+  let raw: string;
   try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-    return true;
+    raw = JSON.stringify(value);
   } catch {
-    // quota
+    return false;
   }
+  // A 5MB tabs blob cannot live in WebView storage. Skip the cache write;
+  // conversations.json is the durable copy.
+  if (key === tabsStorageKey && raw.length > LOCAL_TABS_BUDGET) {
+    try {
+      window.localStorage.removeItem(tabsStorageKey);
+    } catch {
+      /* ignore */
+    }
+    return false;
+  }
+  if (safeLocalStorageSet(key, raw)) return true;
   try {
-    window.localStorage.setItem(key, JSON.stringify(compactPersistedValue(value)));
-    return true;
+    return safeLocalStorageSet(key, JSON.stringify(compactPersistedValue(value)));
   } catch {
     return false;
   }

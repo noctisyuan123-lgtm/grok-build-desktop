@@ -212,6 +212,19 @@ describe('Composer submit', () => {
     expect(getPendingSubmitCount()).toBe(0);
   });
 
+  it('blocks send while offline and keeps the draft', async () => {
+    mockIPC(() => {
+      throw new Error('should not enqueue');
+    });
+    const user = userEvent.setup();
+    const { onEnqueued, onError, textarea } = renderComposer({ offline: true });
+    await user.type(textarea, 'still here');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    expect(onEnqueued).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith('Disconnected — wait for the network, then send.');
+    expect(textarea.value).toBe('still here');
+  });
+
   it('seeds the initial value once on mount', () => {
     renderComposer({ initialValue: 'restored draft' });
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('restored draft');
@@ -291,7 +304,11 @@ describe('Composer submit', () => {
 
     await user.click(screen.getByRole('button', { name: 'Attach files or a folder' }));
 
-    await waitFor(() => expect(calls.find((call) => call.cmd === 'pick_attachments')?.payload).toEqual({ initial: '/repo' }));
+    await waitFor(() =>
+      expect(calls.find((call) => call.cmd === 'pick_attachments')?.payload).toEqual({
+        initial: '/repo',
+      }),
+    );
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
 

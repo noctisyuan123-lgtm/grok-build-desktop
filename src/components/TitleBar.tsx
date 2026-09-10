@@ -12,12 +12,7 @@ export interface TitleBarProps {
   openPanelMenu: (e: React.MouseEvent) => void;
 }
 
-export function TitleBar({
-  messages,
-  codingCwd,
-  anyPanelOpen,
-  openPanelMenu,
-}: TitleBarProps) {
+export function TitleBar({ messages, codingCwd, anyPanelOpen, openPanelMenu }: TitleBarProps) {
   return (
     <header className="window-titlebar minimal" data-tauri-drag-region>
       <div className="titlebar-spacer" data-tauri-drag-region />

@@ -99,6 +99,8 @@ interface Props {
    * the prompt was fully handled and must not be sent to grok.
    */
   onHostSlash?: (raw: string) => boolean | Promise<boolean>;
+  /** Device is offline — keep the draft, do not enqueue. */
+  offline?: boolean;
 }
 
 /**
@@ -146,6 +148,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     controls,
     onStop,
     onHostSlash,
+    offline = false,
   }: Props,
   outerRef,
 ) {
@@ -461,6 +464,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   };
 
   const submit = async (force = false) => {
+    if (offline) {
+      onError?.(t('composerSection.offline'));
+      return;
+    }
     if (submitting || (locked && !force)) return;
     const el = ref.current;
     if (!el) return;

@@ -100,6 +100,8 @@ export function installTauriAppMock(overrides: Record<string, CommandHandler> = 
   const handlers: Record<string, CommandHandler> = {
     load_session_state: () => null,
     save_session_state: () => null,
+    load_conversations: () => null,
+    save_conversations: () => null,
     get_tool_statuses: () => [
       { id: 'grok', label: 'Grok Build', command: 'grok', installed: true, detail: 'mocked' },
     ],

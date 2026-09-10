@@ -140,6 +140,158 @@ export function resolveSubagentPrompt(
   return '';
 }
 
+const GENERIC_TOOL_LABELS = new Set([
+  'tool',
+  'subagent',
+  'run_terminal_command',
+  'run command',
+  'bash',
+  'shell',
+  'zsh',
+  'execute',
+]);
+
+function isShortHumanLabel(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed.length > 0 && !trimmed.includes('\n') && trimmed.length <= 80;
+}
+
+export function isGenericToolLabel(label: string): boolean {
+  return GENERIC_TOOL_LABELS.has(label.trim().toLowerCase());
+}
+
+export function unwrapExecuteBody(title: string | undefined): string | undefined {
+  if (!title) return undefined;
+  const match = title.trim().match(/^(?:execute|run)\s+`([\s\S]*)`\s*$/i);
+  const body = match?.[1]?.trim();
+  return body || undefined;
+}
+
+/** ACP often wraps the full shell line as `Execute \`...\``. That is not a title. */
+export function isWrappedCommandTitle(title: string, command?: string): boolean {
+  const trimmed = title.trim();
+  if (command && trimmed === command) return true;
+  const body = unwrapExecuteBody(trimmed);
+  if (!body) return false;
+  if (command && (body === command || body.startsWith(command.slice(0, Math.min(48, command.length))))) {
+    return true;
+  }
+  return body.includes('\n') || body.length > 80;
+}
+
+function inputObjCommand(input: unknown): string | undefined {
+  if (typeof input === 'string' && input.trim()) return input;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
+  return readField(input as Record<string, unknown>, 'command', 'cmd', 'script');
+}
+
+export function firstCommandName(command?: string): string | undefined {
+  if (!command) return undefined;
+  const line = command.trim().split('\n')[0]?.trim() ?? '';
+  for (const token of line.split(/\s+/)) {
+    if (!token || token.includes('=') || token.startsWith('-')) continue;
+    const base = token.split('/').pop() ?? token;
+    if (base) return base;
+  }
+  return undefined;
+}
+
+export function compactCommandPreview(command: string, max = 56): string {
+  const line = command.trim().split('\n')[0]?.replace(/\s+/g, ' ').trim() ?? '';
+  if (!line) return command.trim().slice(0, max);
+  return line.length <= max ? line : `${line.slice(0, max - 1)}…`;
+}
+
+export function commandFromRaw(raw: unknown): string | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const obj = raw as Record<string, unknown>;
+  const input = obj.rawInput ?? obj.raw_input ?? obj.input ?? obj.arguments ?? obj.args ?? obj.params;
+  return inputObjCommand(input) ?? unwrapExecuteBody(readField(obj, 'title'));
+}
+
+/** HUD / row title: never a bare "Tool" when the command is known. */
+export function displayToolLabel(label: string, command?: string): string {
+  if (label && !isGenericToolLabel(label) && !isWrappedCommandTitle(label, command)) {
+    return label;
+  }
+  const source = command || unwrapExecuteBody(label);
+  if (source) return firstCommandName(source) ?? compactCommandPreview(source);
+  return label || 'Task';
+}
+
+function acpContentText(obj: Record<string, unknown>): string | undefined {
+  const content = obj.content;
+  if (typeof content === 'string' && isShortHumanLabel(content)) return content.trim();
+  if (!Array.isArray(content)) return undefined;
+  for (const item of content) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const rec = item as Record<string, unknown>;
+    const nested = rec.content;
+    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+      const text = readField(nested as Record<string, unknown>, 'text');
+      if (text && isShortHumanLabel(text)) return text.trim();
+    }
+    const text = readField(rec, 'text');
+    if (text && isShortHumanLabel(text)) return text.trim();
+  }
+  return undefined;
+}
+
+function metaToolLabel(obj: Record<string, unknown>): string | undefined {
+  const meta = readObj(obj, '_meta');
+  if (!meta) return undefined;
+  const tool = meta['x.ai/tool'];
+  if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return undefined;
+  return readField(tool as Record<string, unknown>, 'label');
+}
+
+function inputDescription(obj: Record<string, unknown>): string | undefined {
+  const input = obj.rawInput ?? obj.raw_input ?? obj.input ?? obj.arguments ?? obj.args ?? obj.params;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
+  return readField(input as Record<string, unknown>, 'description');
+}
+
+export function resolveToolLabel(
+  obj: Record<string, unknown>,
+  command?: string,
+): string | undefined {
+  const description = inputDescription(obj);
+  if (description && isShortHumanLabel(description)) return description.trim();
+  const fromContent = acpContentText(obj);
+  if (fromContent) return fromContent;
+  const title = readField(obj, 'title', 'toolName', 'tool_name', 'name', 'tool', 'function_name');
+  if (
+    title &&
+    isShortHumanLabel(title) &&
+    !isGenericToolLabel(title) &&
+    !isWrappedCommandTitle(title, command)
+  ) {
+    return title.trim();
+  }
+  const meta = metaToolLabel(obj);
+  if (meta && isShortHumanLabel(meta) && !isGenericToolLabel(meta)) return meta.trim();
+  if (command) return firstCommandName(command) ?? compactCommandPreview(command);
+  return undefined;
+}
+
+export function pickTraceLabel(previous: string, next: string, command?: string): string {
+  const previousUseful =
+    Boolean(previous) &&
+    !isGenericToolLabel(previous) &&
+    !isWrappedCommandTitle(previous, command);
+  if (previousUseful && command) {
+    const derived = firstCommandName(command) ?? compactCommandPreview(command);
+    if (next === derived) return previous;
+  }
+  const nextDump =
+    isWrappedCommandTitle(next, command) || isGenericToolLabel(next) || next === 'Tool' || next === 'Subagent';
+  if (nextDump) {
+    if (previousUseful) return previous;
+    return displayToolLabel(next, command);
+  }
+  return next;
+}
+
 function shorten(value: unknown, max = 180): string | undefined {
   if (value == null) return undefined;
   try {
@@ -308,9 +460,13 @@ export function classifyEvent(raw: unknown, now = Date.now()): TraceParseResult 
         'invocation_id',
         'id',
       );
+  const input =
+    obj.rawInput ?? obj.raw_input ?? obj.input ?? obj.arguments ?? obj.args ?? obj.params;
+  const title = readField(obj, 'title', 'toolName', 'tool_name', 'name', 'tool', 'function_name');
+  const command = inputObjCommand(input) ?? unwrapExecuteBody(title);
   const name = isSubagent
     ? readField(obj, 'description', 'title', 'name', 'role', 'subagent_type', 'subagent')
-    : readField(obj, 'title', 'toolName', 'tool_name', 'name', 'tool', 'function_name');
+    : resolveToolLabel(obj, command);
   // ID-less legacy pairs still share a deterministic key. Official events
   // always carry toolCallId/subagent_id, so concurrent calls remain distinct.
   const keyName = name ?? (isSubagent ? 'agent' : 'tool');
@@ -319,8 +475,6 @@ export function classifyEvent(raw: unknown, now = Date.now()): TraceParseResult 
     ? readField(obj, 'childSessionId', 'child_session_id', 'sessionId', 'session_id')
     : readField(obj, 'sessionId', 'session_id');
   const status = normaliseStatus(type, readField(obj, 'status'));
-  const input =
-    obj.rawInput ?? obj.raw_input ?? obj.input ?? obj.arguments ?? obj.args ?? obj.params;
   const output = obj.rawOutput ?? obj.raw_output ?? obj.output ?? obj.result ?? obj.response;
   const error = readField(obj, 'error', 'message', 'stderr');
   // ACP can emit bookkeeping-only tool updates without an id, title, input,
@@ -374,7 +528,7 @@ export function classifyEvent(raw: unknown, now = Date.now()): TraceParseResult 
       endedAt: status === 'running' ? null : now,
       sessionId,
       prompt,
-      command: inputObj ? readField(inputObj, 'command', 'cmd', 'script') : undefined,
+      command,
       detail,
       parentKey: parent ? `subagent:${parent}` : undefined,
       progress,

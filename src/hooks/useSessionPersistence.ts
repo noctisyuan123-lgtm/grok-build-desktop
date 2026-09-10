@@ -27,6 +27,7 @@ import {
   storedRunHistory,
 } from '../app/storage';
 import { coerceStreamingMessagesStopped } from '../lib/mergeStreamMessages';
+import { richerMessageList } from '../lib/conversationMerge';
 
 export interface SessionPersistenceDeps {
   setComposerValue: (value: string) => void;
@@ -168,9 +169,10 @@ export function useSessionPersistence({
             ? coerceStreamingMessagesStopped(restored.messages.filter(isChatMessage))
             : [];
           if (restoredMessages.length > 0) {
-            // Same staleness rule as codingCwd above: only adopt the file's
-            // conversation when nothing hydrated locally.
-            setMessages((current) => (current.length === 0 ? restoredMessages : current));
+            // localStorage tabs can be shorter than this file when the 5MB
+            // WebView quota drop a write. Prefer the longer overlapping
+            // transcript instead of "any local list wins".
+            setMessages((current) => richerMessageList(current, restoredMessages));
           }
 
           const effectiveMessageCount = Math.max(restoredMessages.length, storedMessages().length);

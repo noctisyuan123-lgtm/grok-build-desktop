@@ -15,6 +15,28 @@ import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { hasTauriRuntime } from './lib/runtime';
 
 const STORAGE_KEY_PREFIX = 'grok-desktop-';
+const TABS_CACHE_KEY = 'grok-desktop-tabs-v1';
+
+// WKWebView quota is ~5MB for the whole origin. The tabs cache can fill it,
+// after which any setItem (theme, cwd, …) throws and React shows the boot
+// error screen. Never let quota take down the tree.
+const nativeSetItem = Storage.prototype.setItem;
+Storage.prototype.setItem = function setItem(this: Storage, key: string, value: string) {
+  try {
+    nativeSetItem.call(this, key, value);
+  } catch {
+    if (key !== TABS_CACHE_KEY) {
+      try {
+        this.removeItem(TABS_CACHE_KEY);
+        nativeSetItem.call(this, key, value);
+        return;
+      } catch {
+        /* still full */
+      }
+    }
+    console.warn('[grok-desktop] localStorage.setItem failed', key);
+  }
+};
 
 // Tauri event listeners for the run queue + stream events are attached from
 // App's mount effect (with bounded retry + a visible notice on failure) — see

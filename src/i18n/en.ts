@@ -102,6 +102,7 @@ export const en = {
   'composerSection.autopilotSwitchTitle': 'Switch back to Default',
   'composerSection.autopilotSwitch': 'Switch to Default',
   'composerSection.sendFailed': 'Send failed: {message}',
+  'composerSection.offline': 'Disconnected — wait for the network, then send.',
   'composerSection.grokModel': 'Grok model',
   'composerSection.modelNotInCli': '{id} · not in CLI',
   'composerSection.customOption': 'Custom…',
@@ -278,7 +279,11 @@ export const en = {
   'statusBar.thinking': 'thinking…',
   'statusBar.writing': 'writing…',
   'statusBar.working': 'working…',
+  'statusBar.waitingForNetwork': 'Waiting for network…',
+  'statusBar.reconnecting': 'Reconnecting…',
+  'statusBar.disconnected': 'Disconnected',
   'statusBar.tokens': '≈{tokens} tokens',
+  'statusBar.tokenRate': '{rate} tok/s',
 
   // ── Queue dock ────────────────────────────────────────────────────────────
   'queue.bannerOne': '↻ Last session had {count} pending task',
@@ -297,9 +302,19 @@ export const en = {
   'message.runFailedWithError': 'Run failed: {error}',
   'message.stopped': 'Stopped by you.',
   'message.interrupted': 'Turn interrupted before a reply was saved.',
+  'message.disconnectedRetry': 'Disconnected. Retry to send again.',
+  'message.connectionLostIncomplete':
+    'Connection lost mid-response. The text above may be incomplete.',
+  'message.retryTurn': 'Retry',
+  'message.continueTurn': 'Continue',
+  'message.continuePrompt':
+    'Continue from the interrupted reply. Do not redo completed tool calls.',
   'message.traceAriaLabel': 'Tool and subagent activity',
   'message.workedFor': 'Worked for {duration}',
   'message.watchingFor': 'Watching for {duration}',
+  'message.watchingFallback': 'Background monitor',
+  'tasks.watching': 'Watching',
+  'tasks.monitorFallback': 'Monitor',
   'message.compacting': 'Compacting conversation',
   'message.compactingPercent': 'Auto-compacting conversation ({percent}% full)…',
   'message.compacted': 'Conversation compacted',
@@ -492,6 +507,7 @@ export const en = {
   'notices.folderPickerUnavailable': 'Folder picker is only available in the Tauri desktop window.',
   'notices.repoSet': 'Repo set to {path}.',
   'notices.folderPickerFailed': 'Folder picker failed: {error}',
+  'notices.disconnected': 'Disconnected. Sends are paused until the network returns.',
   'notices.liveUpdatesUnavailable':
     'Live run updates unavailable: {error}. Runs may not display output — restart the app to reconnect.',
   'notices.savedToLibrary': 'Saved to Prompt Library',

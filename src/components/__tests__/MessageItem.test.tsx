@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MessageItem } from '../MessageItem';
@@ -391,7 +391,8 @@ describe('MessageItem rendering states', () => {
     expect(screen.getByRole('button', { name: 'Thought for 1s' })).toBeInTheDocument();
     expect(screen.queryByText('First look.')).toBeNull();
     expect(screen.getByText("I'll inspect next.")).toBeInTheDocument();
-    expect(screen.getByText('Read src/App.tsx')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Read 1 file/i })).toBeInTheDocument();
+    expect(screen.queryByText('Read src/App.tsx')).toBeNull();
   });
 
   it('folds thought/tools between intermediate responds while the mid-respond stays readable (live)', async () => {
@@ -454,8 +455,9 @@ describe('MessageItem rendering states', () => {
     expect(screen.queryByText('First look.')).toBeNull();
     expect(screen.queryByText('Read src/App.tsx')).toBeNull();
     expect(screen.getByText('I will inspect next.')).toBeInTheDocument();
-    // Open tools after the mid-respond stay live.
-    expect(screen.getByText('Record usage')).toBeInTheDocument();
+    // Open tools after the mid-respond stay behind the group disclosure.
+    expect(screen.getByRole('button', { name: /Used 1 tool/i })).toBeInTheDocument();
+    expect(screen.queryByText('Record usage')).toBeNull();
 
     await userEvent.setup().click(phaseSummary);
     // Embedded tool rows appear; thought bodies stay behind nested Thought rows.
@@ -854,7 +856,7 @@ describe('MessageItem rendering states', () => {
 
     expect(container.querySelector('.markdown-streaming')).toBeNull();
     expect(container.querySelector('.transcript-response')).toHaveTextContent("I'll inspect it.");
-    expect(screen.getByText('Read 1 file')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Read 1 file/i })).toBeInTheDocument();
   });
 
   it('folds the preceding workflow as soon as the final response starts streaming', async () => {
@@ -1154,7 +1156,7 @@ describe('MessageItem rendering states', () => {
     render(
       <MessageItem runId="copy-while-watch" showCopy showFork canFork canUndo onUndo={() => {}} />,
     );
-    expect(screen.getByRole('button', { name: 'Undo response' })).not.toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Undo response' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Copy response' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Fork/i })).not.toBeInTheDocument();
   });
@@ -1206,7 +1208,63 @@ describe('MessageItem rendering states', () => {
       'data-label',
       expect.stringMatching(/Watching for/),
     );
-    expect(screen.getByRole('button', { name: 'Undo response' })).not.toBeDisabled();
+    expect(watching.querySelector('.message-watching-title')).toHaveTextContent(
+      'Background monitor',
+    );
+    expect(watching).toHaveClass('message-watching-rail');
+    expect(screen.queryByRole('button', { name: 'Undo response' })).not.toBeInTheDocument();
+  });
+
+  it('uses the monitor description as the Watching subtitle', () => {
+    applyRunEvent('r-watch-title', { type: 'text', data: '盯着了。' });
+    applyStateChange('r-watch-title', {
+      state: 'Done',
+      startedAt: Date.now() - 1000,
+      endedAt: Date.now(),
+    });
+    applyWatching('r-watch-title', {
+      active: true,
+      startedAt: Date.now(),
+      label: 'Wait for mlx-serve download',
+    });
+    render(<MessageItem runId="r-watch-title" fallbackText="盯着了。" canUndo onUndo={() => {}} />);
+    expect(screen.getByText('Wait for mlx-serve download')).toBeInTheDocument();
+  });
+
+  it('offers Retry on an empty network failure and Continue when partial text exists', async () => {
+    const onRetryTurn = vi.fn();
+    applyStateChange('r-net-empty', {
+      state: 'Failed',
+      error: 'Disconnected from the model',
+      startedAt: 1,
+      endedAt: 2,
+    });
+    const empty = render(<MessageItem runId="r-net-empty" onRetryTurn={onRetryTurn} />);
+    expect(screen.getByText('Disconnected. Retry to send again.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(onRetryTurn).toHaveBeenCalledTimes(1);
+    empty.unmount();
+
+    const onContinueTurn = vi.fn();
+    applyRunEvent('r-net-partial', { type: 'text', data: 'half a reply' });
+    applyStateChange('r-net-partial', {
+      state: 'Failed',
+      error: 'ECONNRESET',
+      startedAt: 1,
+      endedAt: 2,
+    });
+    render(
+      <MessageItem
+        runId="r-net-partial"
+        fallbackText="half a reply"
+        onContinueTurn={onContinueTurn}
+      />,
+    );
+    expect(
+      screen.getByText('Connection lost mid-response. The text above may be incomplete.'),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(onContinueTurn).toHaveBeenCalledTimes(1);
   });
 
   it('shows Working for immediately instead of a starting placeholder', () => {

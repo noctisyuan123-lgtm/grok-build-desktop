@@ -4,6 +4,7 @@ import {
   extractCompaction,
   extractRunError,
   extractUsage,
+  pickTraceLabel,
   type RunCompaction,
   type RunUsage,
   type TraceEvent,
@@ -43,6 +44,10 @@ export interface RunSnapshot {
   state: RunState;
   startedAt: number | null;
   endedAt: number | null;
+  /** Wall clock of the last thought/text/activity/state patch. Stall detection. */
+  lastEventAt: number | null;
+  /** First thought/text of this turn — tok/s excludes pre-stream wait. */
+  firstOutputAt: number | null;
   thoughtChars: number;
   textChars: number;
   lastEventType: 'thought' | 'text' | 'activity' | 'end' | null;
@@ -69,8 +74,9 @@ export interface RunSnapshot {
 }
 
 /** A watcher is attached after the visible turn has finished. It must not
- * keep the composer, history marker, or Undo controls in the ordinary live
- * state even if the terminal state event is still crossing the IPC boundary. */
+ * keep the composer or history marker in the ordinary live state even if the
+ * terminal state event is still crossing the IPC boundary. Undo still waits
+ * for watches to settle. */
 export function isRunInFlight(run: Pick<RunSnapshot, 'state' | 'watching'> | undefined): boolean {
   return Boolean(run && (run.state === 'queued' || run.state === 'running') && !run.watching);
 }
@@ -194,7 +200,11 @@ class StreamStore {
 
   patchRun = (id: string, patch: Partial<RunSnapshot>, options?: { notify?: boolean }): void => {
     const cur = this.runs.get(id) ?? this.makeEmpty(id);
-    this.runs.set(id, { ...cur, ...patch });
+    const next: RunSnapshot = { ...cur, ...patch };
+    if (patch.lastEventAt === undefined && isActivityPatch(patch)) {
+      next.lastEventAt = Date.now();
+    }
+    this.runs.set(id, next);
     if (options?.notify !== false) this.notifyNow();
   };
 
@@ -227,6 +237,8 @@ class StreamStore {
       state: 'queued',
       startedAt: null,
       endedAt: null,
+      lastEventAt: null,
+      firstOutputAt: null,
       thoughtChars: 0,
       textChars: 0,
       lastEventType: null,
@@ -258,6 +270,17 @@ class StreamStore {
     this.listeners.clear();
     this.completionListeners.clear();
   };
+}
+
+function isActivityPatch(patch: Partial<RunSnapshot>): boolean {
+  return (
+    patch.lastEventType != null ||
+    patch.text != null ||
+    patch.transcript != null ||
+    patch.traces != null ||
+    patch.state === 'queued' ||
+    patch.state === 'running'
+  );
 }
 
 export const streamStore = new StreamStore();
@@ -292,6 +315,7 @@ export function applyRunEvent(
         thoughtChars: (cur?.thoughtChars ?? 0) + data.length,
         transcript: appendThought(cur?.transcript ?? [], data, now),
         lastEventType: 'thought',
+        firstOutputAt: cur?.firstOutputAt ?? now,
         sessionId: cur?.sessionId ?? sessionId ?? null,
         rootSessionId: cur?.rootSessionId ?? sessionId ?? null,
         state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
@@ -329,6 +353,7 @@ export function applyRunEvent(
         textChars: (cur?.textChars ?? 0) + data.length,
         transcript: nextTranscript,
         lastEventType: 'text',
+        firstOutputAt: cur?.firstOutputAt ?? Date.now(),
         sessionId: cur?.sessionId ?? sessionId ?? null,
         rootSessionId: cur?.rootSessionId ?? sessionId ?? null,
         state: cur?.state === 'queued' ? 'running' : (cur?.state ?? 'running'),
@@ -446,12 +471,13 @@ export function applyRunEvent(
           // Updates should not reset elapsed time, and missing optional fields
           // must not erase useful data captured by the start event.
           startedAt: updated[idx]!.startedAt,
-          label:
-            normalizedEvent.label === 'Tool' || normalizedEvent.label === 'Subagent'
-              ? updated[idx]!.label
-              : normalizedEvent.label,
-          detail: normalizedEvent.detail ?? updated[idx]!.detail,
           command: normalizedEvent.command ?? updated[idx]!.command,
+          label: pickTraceLabel(
+            updated[idx]!.label,
+            normalizedEvent.label,
+            normalizedEvent.command ?? updated[idx]!.command,
+          ),
+          detail: normalizedEvent.detail ?? updated[idx]!.detail,
           prompt: updated[idx]!.prompt || normalizedEvent.prompt,
           parentKey: normalizedEvent.parentKey ?? updated[idx]!.parentKey,
           progress: normalizedEvent.progress ?? updated[idx]!.progress,
@@ -519,6 +545,18 @@ export function applyStateChange(
   if (state === 'done' || state === 'failed') {
     streamStore.markCompletion(runId, state, endedAt);
   }
+}
+
+/** Hide HUD tasks immediately when the user hits Stop, even if the run is idle. */
+export function cancelOpenWork(runId: string): void {
+  const current = streamStore.getRunSnapshot(runId);
+  if (!current) return;
+  streamStore.patchRun(runId, {
+    traces: reconcileOpenTraces(current.traces, 'cancelled'),
+    watching: false,
+    watchingStartedAt: null,
+    watchingLabel: null,
+  });
 }
 
 export function applyWatching(

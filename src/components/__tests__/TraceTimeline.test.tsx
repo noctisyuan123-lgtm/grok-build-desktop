@@ -26,7 +26,7 @@ function seed(traces: TraceEvent[], state: 'running' | 'done' | 'failed' = 'runn
 }
 
 describe('ActivityGroup stable tool row', () => {
-  it('exposes only the newest running tool while the group stays collapsed', () => {
+  it('hides tool rows while the group stays collapsed', () => {
     const { container } = render(
       <ActivityGroup
         traces={[
@@ -45,13 +45,10 @@ describe('ActivityGroup stable tool row', () => {
       />,
     );
 
-    expect(screen.getByText('Download dependencies')).toBeInTheDocument();
+    expect(screen.queryByText('Download dependencies')).toBeNull();
     expect(screen.queryByText('Read a.ts')).toBeNull();
-    expect(container.querySelectorAll('.activity-row')).toHaveLength(1);
-    expect(container.querySelector('.activity-motion-enter')).toBeNull();
-    expect(
-      container.querySelector('.activity-status-running .activity-row-label'),
-    ).toBeInTheDocument();
+    expect(container.querySelectorAll('.activity-row')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: /Read 1 file, used 1 tool/i })).toBeInTheDocument();
   });
 
   it('does not duplicate the active tool when the group is expanded', async () => {
@@ -80,14 +77,14 @@ describe('ActivityGroup stable tool row', () => {
     expect(container.querySelectorAll('.activity-row')).toHaveLength(2);
   });
 
-  it('keeps the completed call visible until the tool phase ends', () => {
+  it('keeps completed calls hidden until the group is expanded', () => {
     const { container, rerender } = render(
       <ActivityGroup
         traces={[makeTrace({ key: 'tool:1', label: 'Download dependencies', status: 'running' })]}
       />,
     );
-    const stableRow = container.querySelector('.activity-item');
-    expect(stableRow).toBeInTheDocument();
+    expect(container.querySelector('.activity-item')).toBeNull();
+    expect(screen.queryByText('Download dependencies')).toBeNull();
 
     rerender(
       <ActivityGroup
@@ -101,15 +98,15 @@ describe('ActivityGroup stable tool row', () => {
         ]}
       />,
     );
-    expect(container.querySelector('.activity-item')).toBe(stableRow);
-    expect(screen.getByText('Download dependencies')).toBeInTheDocument();
+    expect(container.querySelector('.activity-item')).toBeNull();
+    expect(screen.queryByText('Download dependencies')).toBeNull();
   });
 
-  it('reuses the same row when the next tool starts', () => {
-    const { container, rerender } = render(
+  it('lists each tool once after expand when the next tool starts', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
       <ActivityGroup traces={[makeTrace({ key: 'tool:1', label: 'Read a.ts' })]} />,
     );
-    const stableRow = container.querySelector('.activity-item');
     rerender(
       <ActivityGroup
         traces={[
@@ -118,11 +115,11 @@ describe('ActivityGroup stable tool row', () => {
         ]}
       />,
     );
-    expect(container.querySelector('.activity-item')).toBe(stableRow);
     expect(screen.queryByText('Read a.ts')).toBeNull();
+    expect(screen.queryByText('Download dependencies')).toBeNull();
+    await user.click(screen.getByRole('button', { name: /Read 1 file, used 1 tool/i }));
+    expect(screen.getByText('Read a.ts')).toBeInTheDocument();
     expect(screen.getByText('Download dependencies')).toBeInTheDocument();
-    expect(container.querySelector('.activity-motion-enter')).toBeNull();
-    expect(container.querySelector('.activity-motion-settle')).toBeNull();
   });
 
   it('keeps a single edit compact and opens its diff directly under the short summary', async () => {

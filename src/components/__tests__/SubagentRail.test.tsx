@@ -56,6 +56,7 @@ describe('SubagentRail', () => {
         <SubagentRail messages={messages} onStopTask={onStopTask} />
       </SubagentUiProvider>,
     );
+    expect(screen.getByText('Wait for build')).toBeInTheDocument();
     expect(screen.getByText('sleep 60')).toBeInTheDocument();
     expect(screen.getByText('Running')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Stop Wait for build' }));
@@ -67,6 +68,23 @@ describe('SubagentRail', () => {
     );
     expect(screen.getByRole('complementary', { name: 'Agents & Tasks' })).toBeInTheDocument();
     expect(screen.queryByText('Processes and long tasks appear here.')).toBeNull();
+  });
+
+  it('lists a watching monitor with its title in Tasks', () => {
+    const messages = [message('run-watch')];
+    streamStore.patchRun('run-watch', {
+      state: 'done',
+      watching: true,
+      watchingStartedAt: Date.now() - 8_000,
+      watchingLabel: 'Wait for mlx-serve download',
+    });
+    render(
+      <SubagentUiProvider messages={messages}>
+        <SubagentRail messages={messages} onStopTask={() => {}} />
+      </SubagentUiProvider>,
+    );
+    expect(screen.getAllByText('Wait for mlx-serve download').length).toBeGreaterThan(0);
+    expect(screen.getByText('Watching')).toBeInTheDocument();
   });
 
   it('lists session subagents and opens the inspector from a row', async () => {

@@ -54,6 +54,8 @@ interface Props {
   onForkAssistant?: (messageId: string) => void;
   onEditUser?: (messageId: string, text: string) => void;
   onAttachmentClick?: (attachment: ComposerAttachment) => void;
+  onRetryTurn?: (messageId: string, runId: string) => void;
+  onContinueTurn?: (messageId: string, runId: string) => void;
 }
 
 function scrollerAtBottom(el: HTMLElement): boolean {
@@ -69,6 +71,8 @@ export function MessageList({
   onForkAssistant,
   onEditUser,
   onAttachmentClick,
+  onRetryTurn,
+  onContinueTurn,
 }: Props) {
   const ref = useRef<VirtuosoHandle>(null);
   const scrollerElRef = useRef<HTMLElement | null>(null);
@@ -395,6 +399,16 @@ export function MessageList({
                 }
                 onFork={
                   assistantId && onForkAssistant ? () => onForkAssistant(assistantId) : undefined
+                }
+                onRetryTurn={
+                  assistantId && msg.runId && onRetryTurn
+                    ? () => onRetryTurn(assistantId, msg.runId!)
+                    : undefined
+                }
+                onContinueTurn={
+                  assistantId && msg.runId && onContinueTurn
+                    ? () => onContinueTurn(assistantId, msg.runId!)
+                    : undefined
                 }
               />
             </div>

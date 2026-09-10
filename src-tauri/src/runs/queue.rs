@@ -96,6 +96,8 @@ struct PrewarmedSession {
 struct IdleWatchHandle {
     stop: watch::Sender<bool>,
     join: JoinHandle<core::AcpHost>,
+    run_id: String,
+    config: core::CoreConfig,
 }
 
 pub struct RunQueue {
@@ -232,6 +234,8 @@ impl RunQueue {
         let (stop, stop_rx) = watch::channel(false);
         let tx = self.tx.clone();
         let lane_for_task = lane_id.clone();
+        let watch_run_id = parent_run_id.clone();
+        let watch_config = config.clone();
         let join = tokio::spawn(async move {
             host.begin_idle_watch(&parent_run_id, &tx);
             let result = host
@@ -243,11 +247,15 @@ impl RunQueue {
             }
             host
         });
-        if let Some(previous) = self
-            .idle_watches
-            .lock()
-            .await
-            .insert(lane_id, IdleWatchHandle { stop, join })
+        if let Some(previous) = self.idle_watches.lock().await.insert(
+            lane_id,
+            IdleWatchHandle {
+                stop,
+                join,
+                run_id: watch_run_id,
+                config: watch_config,
+            },
+        )
         {
             let _ = previous.stop.send(true);
             if let Ok(mut leftover) = previous.join.await {
@@ -393,7 +401,8 @@ impl RunQueue {
         }
         // If active on any lane: mark cancelled. ACP turns receive the
         // protocol-level session/cancel notification so the host/session can
-        // survive for the next turn; legacy runs retain process-group kill.
+        // survive for the next turn; a stuck shell still has to be SIGTERM'd
+        // as a descendant or Stop is a no-op. Legacy runs keep process-group kill.
         let active = inner
             .active_lanes
             .values()
@@ -404,12 +413,40 @@ impl RunQueue {
             drop(inner);
             if let Some(handle) = acp_cancel {
                 handle.cancel().await;
+                if let Some(p) = pgid {
+                    process::kill_descendants(p).await;
+                }
             } else if let Some(p) = pgid {
                 process::kill_group(p).await;
             }
             return Ok(true);
         }
+        drop(inner);
+        if self.cancel_idle_watch(run_id).await {
+            return Ok(true);
+        }
         Ok(false)
+    }
+
+    async fn cancel_idle_watch(&self, run_id: &str) -> bool {
+        let found = {
+            let watches = self.idle_watches.lock().await;
+            watches.iter().find_map(|(lane, handle)| {
+                (handle.run_id == run_id).then(|| (lane.clone(), handle.config.clone()))
+            })
+        };
+        let Some((lane, config)) = found else {
+            return false;
+        };
+        let Some(mut host) = self.take_lane_host(&lane).await else {
+            return false;
+        };
+        host.clear_background_for(run_id, &self.tx);
+        host.cancel_handle().cancel().await;
+        process::kill_descendants(host.pgid()).await;
+        self.park_lane_host(lane, host, config, run_id.to_string())
+            .await;
+        true
     }
 
     pub async fn clear_waiting(&self) -> Result<u64, sqlx::Error> {

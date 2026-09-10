@@ -20,6 +20,8 @@ function snap(partial: Partial<RunSnapshot> & Pick<RunSnapshot, 'id'>): RunSnaps
     state: 'running',
     startedAt: 10,
     endedAt: null,
+    lastEventAt: 10,
+    firstOutputAt: null,
     thoughtChars: 0,
     textChars: 0,
     lastEventType: null,

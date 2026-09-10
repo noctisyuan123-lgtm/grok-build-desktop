@@ -50,6 +50,7 @@ export interface ComposerSectionProps {
   stopRun: (runId: string) => void;
   /** Empty-session greeting and workspace context, kept on the composer column. */
   emptyState?: ReactNode;
+  offline?: boolean;
 }
 
 export function ComposerSection({
@@ -73,6 +74,7 @@ export function ComposerSection({
   laneId,
   stopRun,
   emptyState,
+  offline = false,
 }: ComposerSectionProps) {
   const {
     reasoningEffort,
@@ -152,6 +154,7 @@ export function ComposerSection({
           .filter((id): id is string => Boolean(id))}
         initialValue={drafts[mode] || defaultDrafts[mode]}
         locked={locked}
+        offline={offline}
         placeholder={modeCopy[mode].placeholder}
         onTextChange={(text) => {
           setDrafts((current) => ({ ...current, [mode]: text }));

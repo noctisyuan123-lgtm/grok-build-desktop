@@ -257,7 +257,7 @@ describe('composer submit → queued run → streamed reply', () => {
     expect(tauri.unknownCommands).toEqual([]);
   });
 
-  it('keeps the latest response undoable while its monitor is watching', async () => {
+  it('hides undo while its monitor is watching', async () => {
     const ctx = await bootApp();
     const { tauri } = ctx;
     const runId = await submitPrompt(ctx, 'Watch this until it finishes');
@@ -270,11 +270,14 @@ describe('composer submit → queued run → streamed reply', () => {
     });
 
     expect(await convo().findByText(/Watching for/)).toBeInTheDocument();
-    const undo = await convo().findByRole('button', { name: t('message.undoResponse') });
-    expect(undo).not.toBeDisabled();
-    // Copy/Fork wait until watches settle; Undo stays available.
+    expect(convo().queryByRole('button', { name: t('message.undoResponse') })).not.toBeInTheDocument();
     expect(convo().queryByRole('button', { name: t('message.copy') })).not.toBeInTheDocument();
     expect(convo().queryByRole('button', { name: t('message.fork') })).not.toBeInTheDocument();
+
+    await act(async () => {
+      await tauri.emitWatching(runId, false);
+    });
+    expect(await convo().findByRole('button', { name: t('message.undoResponse') })).not.toBeDisabled();
   });
 
   it('checkpoints partial assistant text into storage while the run is still live', async () => {
