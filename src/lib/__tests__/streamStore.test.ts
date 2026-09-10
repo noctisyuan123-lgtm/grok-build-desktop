@@ -120,6 +120,18 @@ describe('streamStore', () => {
     expect(streamStore.getRunSnapshot('stop-watch')?.traces[0]?.status).toBe('cancelled');
   });
 
+  it('ignores late ACP deltas after a run is cancelled', () => {
+    applyRunEvent('late-cancel', { type: 'text', data: 'first' });
+    applyStateChange('late-cancel', { state: 'Cancelled', endedAt: 2 });
+    applyRunEvent('late-cancel', { type: 'thought', data: 'should not resume' });
+    applyRunEvent('late-cancel', { type: 'text', data: 'should not resume' });
+    expect(streamStore.getRunSnapshot('late-cancel')).toMatchObject({
+      state: 'cancelled',
+      text: 'first',
+      thoughtChars: 0,
+    });
+  });
+
   it('replaces a generic Tool label with the executable from Execute wrapping', () => {
     applyRunEvent(
       'tool-label',

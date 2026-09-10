@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex as StdMutex,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -410,6 +410,11 @@ pub struct AcpCancelHandle {
     stdin: Arc<Mutex<ChildStdin>>,
     session_id: Arc<Mutex<Option<String>>>,
     cancelled: AtomicBool,
+    background_tasks: Arc<StdMutex<HashMap<String, String>>>,
+    /// Task ids explicitly cancelled by Desktop. ACP reports their eventual
+    /// `task_completed` notification with `will_wake: true`; that completion
+    /// is stale and must not start a new idle wakeup after the HUD Stop.
+    cancelled_background_tasks: Arc<StdMutex<HashSet<String>>>,
 }
 
 impl AcpCancelHandle {
@@ -432,6 +437,75 @@ impl AcpCancelHandle {
         if let Some(session_id) = self.session_id.lock().await.clone() {
             let _ = self.send_cancel(&session_id).await;
         }
+    }
+
+    /// Cancel a detached ACP background task (monitor / long-running command)
+    /// by its protocol task id. This is separate from `session/cancel`: the
+    /// latter stops the current model turn but does not necessarily terminate
+    /// tasks that were already detached from it.
+    pub async fn cancel_task(&self, task_id: &str) {
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": format!("grok-desktop-cancel-task-{task_id}"),
+            "method": "tasks/cancel",
+            "params": { "taskId": task_id },
+        });
+        let Ok(mut encoded) = serde_json::to_vec(&request) else {
+            return;
+        };
+        encoded.push(b'\n');
+        let mut stdin = self.stdin.lock().await;
+        let _ = stdin.write_all(&encoded).await;
+        let _ = stdin.flush().await;
+    }
+
+    pub fn register_background_task(&self, task_id: &str, owner_run_id: &str) {
+        if let Ok(mut tasks) = self.background_tasks.lock() {
+            tasks.insert(task_id.to_string(), owner_run_id.to_string());
+        }
+        if let Ok(mut cancelled) = self.cancelled_background_tasks.lock() {
+            cancelled.remove(task_id);
+        }
+    }
+
+    pub fn unregister_background_task(&self, task_id: &str) {
+        if let Ok(mut tasks) = self.background_tasks.lock() {
+            tasks.remove(task_id);
+        }
+    }
+
+    /// Cancel all detached tasks belonging to one run without cancelling the
+    /// current ACP turn. This is used when a newer prompt temporarily owns the
+    /// host but the user stops an older run's monitor from the HUD.
+    pub async fn cancel_tasks_for(&self, owner_run_id: &str) -> bool {
+        let ids = self
+            .background_tasks
+            .lock()
+            .ok()
+            .map(|tasks| {
+                tasks
+                    .iter()
+                    .filter_map(|(id, owner)| (owner == owner_run_id).then_some(id.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if ids.is_empty() {
+            return false;
+        }
+        if let Ok(mut cancelled) = self.cancelled_background_tasks.lock() {
+            cancelled.extend(ids.iter().cloned());
+        }
+        for task_id in ids {
+            self.cancel_task(&task_id).await;
+        }
+        true
+    }
+
+    pub fn was_cancelled_background_task(&self, task_id: &str) -> bool {
+        self.cancelled_background_tasks
+            .lock()
+            .ok()
+            .is_some_and(|cancelled| cancelled.contains(task_id))
     }
 
     async fn is_cancelled(&self) -> bool {
@@ -473,9 +547,18 @@ pub struct AcpHost {
     /// ownership must not be represented by one host-global boolean/set.
     pending_background: HashMap<String, String>,
     watch_labels: HashMap<String, String>,
+    /// Runs that currently have a visible Watching rail. This is separate
+    /// from `watching_run_id`: the ACP host can be handed to a newer user turn
+    /// while an older turn's background task is still pending.
+    watching_runs: HashSet<String>,
+    /// Preserve the original start time when the host is temporarily taken
+    /// for another prompt, so the UI timer does not reset or disappear.
+    watch_started_at: HashMap<String, i64>,
     watching_run_id: Option<String>,
-    watching_emitted: bool,
-    watch_started_at: Option<i64>,
+    /// ACP may follow a cancelled task completion with a hidden synthetic
+    /// user message. Consume that paired reminder without starting another
+    /// wakeup run.
+    suppressed_idle_wakeups: usize,
 }
 
 pub struct TurnResult {
@@ -541,6 +624,8 @@ impl AcpHost {
             stdin: stdin.clone(),
             session_id: Arc::new(Mutex::new(None)),
             cancelled: AtomicBool::new(false),
+            background_tasks: Arc::new(StdMutex::new(HashMap::new())),
+            cancelled_background_tasks: Arc::new(StdMutex::new(HashSet::new())),
         });
         let mut host = Self {
             child,
@@ -553,9 +638,10 @@ impl AcpHost {
             cancel_handle,
             pending_background: HashMap::new(),
             watch_labels: HashMap::new(),
+            watching_runs: HashSet::new(),
+            watch_started_at: HashMap::new(),
             watching_run_id: None,
-            watching_emitted: false,
-            watch_started_at: None,
+            suppressed_idle_wakeups: 0,
         };
         host.request(
             "initialize",
@@ -586,7 +672,11 @@ impl AcpHost {
     /// Create an empty session while the UI is idle so the first prompt does
     /// not pay the session/new round-trip. The caller only uses this for a
     /// lane that has no existing conversation head.
-    pub async fn prewarm_session(&mut self, cwd: &Path, config: &CoreConfig) -> Result<String, String> {
+    pub async fn prewarm_session(
+        &mut self,
+        cwd: &Path,
+        config: &CoreConfig,
+    ) -> Result<String, String> {
         let resolved_cwd = if cwd.is_absolute() && cwd.is_dir() {
             cwd.to_path_buf()
         } else {
@@ -594,7 +684,8 @@ impl AcpHost {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("/"))
         };
-        self.new_session(&resolved_cwd.to_string_lossy(), config).await
+        self.new_session(&resolved_cwd.to_string_lossy(), config)
+            .await
     }
 
     /// Stop this ACP client and wait for it to release/flush its session.
@@ -731,6 +822,9 @@ impl AcpHost {
         tx: &broadcast::Sender<QueueMessage>,
         prewarmed_session_id: Option<&str>,
     ) -> Result<TurnResult, String> {
+        // Any stale synthetic reminder from a prior cancellation belongs to
+        // the idle watch, never to this new foreground turn.
+        self.suppressed_idle_wakeups = 0;
         // The chat surface is allowed to enqueue with an empty repository
         // path. ACP requires an absolute cwd for every session operation, so
         // use the same safe fallback as process startup instead of forwarding
@@ -921,23 +1015,50 @@ impl AcpHost {
 
     pub fn begin_idle_watch(&mut self, run_id: &str, tx: &broadcast::Sender<QueueMessage>) {
         self.watching_run_id = Some(run_id.to_string());
-        self.watching_emitted = false;
-        self.watch_started_at = None;
         self.sync_watching(tx, false);
     }
 
-    pub fn end_idle_watch(&mut self, tx: &broadcast::Sender<QueueMessage>) {
-        self.emit_watch_state(tx, false);
+    pub fn end_idle_watch(
+        &mut self,
+        tx: &broadcast::Sender<QueueMessage>,
+        preserve_background: bool,
+    ) {
+        // A normal stop means the host is being handed to a new prompt. Keep
+        // the old run's Watching rail alive; the background task was not
+        // cancelled. Only clear it when the ACP transport itself died.
+        if !preserve_background {
+            let active = self.watching_runs.iter().cloned().collect::<Vec<_>>();
+            for run_id in active {
+                self.emit_watch_state_for(tx, &run_id, false);
+                self.watch_started_at.remove(&run_id);
+            }
+        }
         self.watching_run_id = None;
-        self.watch_started_at = None;
     }
 
     pub fn clear_background_for(&mut self, run_id: &str, tx: &broadcast::Sender<QueueMessage>) {
+        let removed = self
+            .pending_background
+            .iter()
+            .filter_map(|(task_id, owner)| (owner == run_id).then_some(task_id.clone()))
+            .collect::<Vec<_>>();
         self.pending_background.retain(|_, owner| owner != run_id);
-        self.watch_labels.remove(run_id);
-        if self.watching_run_id.as_deref() == Some(run_id) {
-            self.emit_watch_state(tx, false);
+        for task_id in removed {
+            self.cancel_handle.unregister_background_task(&task_id);
         }
+        self.watch_labels.remove(run_id);
+        self.watch_started_at.remove(run_id);
+        self.emit_watch_state_for(tx, run_id, false);
+    }
+
+    /// Return protocol task ids owned by a run before its monitor rail is
+    /// cleared. The queue uses these ids to send `tasks/cancel`, ensuring the
+    /// detached work is stopped rather than merely hidden in the UI.
+    pub fn background_task_ids_for(&self, run_id: &str) -> Vec<String> {
+        self.pending_background
+            .iter()
+            .filter_map(|(task_id, owner)| (owner == run_id).then_some(task_id.clone()))
+            .collect()
     }
 
     fn track_background(
@@ -952,22 +1073,25 @@ impl AcpHost {
                     return;
                 };
                 self.pending_background
-                    .insert(id, owner_run_id.to_string());
+                    .insert(id.clone(), owner_run_id.to_string());
+                self.cancel_handle
+                    .register_background_task(&id, owner_run_id);
                 if let Some(label) = label.filter(|value| !value.is_empty()) {
-                    self.watch_labels
-                        .insert(owner_run_id.to_string(), label);
+                    self.watch_labels.insert(owner_run_id.to_string(), label);
                 }
             }
             Some(BackgroundDelta::Finished { id }) => {
                 let Some(owner_run_id) = self.pending_background.remove(&id) else {
                     return;
                 };
+                self.cancel_handle.unregister_background_task(&id);
                 if !self.has_pending_background(&owner_run_id) {
                     self.watch_labels.remove(&owner_run_id);
-                    if self.watching_run_id.as_deref() == Some(owner_run_id.as_str()) {
-                        if let Some(tx) = tx {
-                            self.emit_watch_state(tx, false);
-                        }
+                    self.watch_started_at.remove(&owner_run_id);
+                    if let Some(tx) = tx {
+                        // The owner may be an older completed run while a
+                        // newer prompt currently owns the ACP host.
+                        self.emit_watch_state_for(tx, &owner_run_id, false);
                     }
                 }
             }
@@ -979,38 +1103,57 @@ impl AcpHost {
         has_pending_background_for(&self.pending_background, run_id)
     }
 
-    fn emit_watch_state(&mut self, tx: &broadcast::Sender<QueueMessage>, active: bool) {
-        let Some(run_id) = self.watching_run_id.clone() else {
-            return;
-        };
-        if self.watching_emitted == active {
-            return;
-        }
-        self.watching_emitted = active;
+    fn emit_watch_state_for(
+        &mut self,
+        tx: &broadcast::Sender<QueueMessage>,
+        run_id: &str,
+        active: bool,
+    ) {
         if active {
-            if self.watch_started_at.is_none() {
-                self.watch_started_at = Some(Utc::now().timestamp_millis());
+            if !self.watching_runs.insert(run_id.to_string()) {
+                return;
             }
+            let started_at = *self
+                .watch_started_at
+                .entry(run_id.to_string())
+                .or_insert_with(|| Utc::now().timestamp_millis());
+            let label = self.watch_labels.get(run_id).cloned();
+            let _ = tx.send(QueueMessage {
+                run_id: run_id.to_string(),
+                kind: QueueMessageKind::Watching {
+                    active: true,
+                    started_at: Some(started_at),
+                    label,
+                },
+            });
         } else {
-            self.watch_started_at = None;
+            if !self.watching_runs.remove(run_id) {
+                return;
+            }
+            let _ = tx.send(QueueMessage {
+                run_id: run_id.to_string(),
+                kind: QueueMessageKind::Watching {
+                    active: false,
+                    started_at: None,
+                    label: None,
+                },
+            });
         }
-        let label = self.watch_labels.get(&run_id).cloned();
-        let _ = tx.send(QueueMessage {
-            run_id,
-            kind: QueueMessageKind::Watching {
-                active,
-                started_at: self.watch_started_at,
-                label,
-            },
-        });
     }
 
     fn sync_watching(&mut self, tx: &broadcast::Sender<QueueMessage>, wakeup_active: bool) {
-        let active = self
-            .watching_run_id
-            .as_deref()
-            .is_some_and(|run_id| !wakeup_active && self.has_pending_background(run_id));
-        self.emit_watch_state(tx, active);
+        let desired = desired_watch_runs(&self.pending_background, wakeup_active);
+        let currently_visible = self.watching_runs.iter().cloned().collect::<Vec<_>>();
+        for run_id in currently_visible {
+            if !desired.contains(&run_id) {
+                self.emit_watch_state_for(tx, &run_id, false);
+            }
+        }
+        let mut desired = desired.into_iter().collect::<Vec<_>>();
+        desired.sort();
+        for run_id in desired {
+            self.emit_watch_state_for(tx, &run_id, true);
+        }
     }
 
     /// Keep draining ACP stdout after `session/prompt` returns so monitor /
@@ -1022,6 +1165,7 @@ impl AcpHost {
         mut stop: watch::Receiver<bool>,
         config: &CoreConfig,
         lane_id: &str,
+        wakeup_run_id: Arc<Mutex<Option<String>>>,
     ) -> Result<(), String> {
         let mut wakeup_run: Option<String> = None;
         let mut wakeup_session: Option<String> = None;
@@ -1032,7 +1176,13 @@ impl AcpHost {
             // by the next `session/prompt` under the new runId.
             if idle_watch_yields_on_stop(*stop.borrow()) {
                 return self
-                    .release_idle_watch(tx, config, &mut wakeup_run, &mut wakeup_session)
+                    .release_idle_watch(
+                        tx,
+                        config,
+                        &mut wakeup_run,
+                        &mut wakeup_session,
+                        &wakeup_run_id,
+                    )
                     .await;
             }
             tokio::select! {
@@ -1040,7 +1190,13 @@ impl AcpHost {
                 changed = stop.changed() => {
                     if changed.is_err() {
                         return self
-                            .release_idle_watch(tx, config, &mut wakeup_run, &mut wakeup_session)
+                            .release_idle_watch(
+                                tx,
+                                config,
+                                &mut wakeup_run,
+                                &mut wakeup_session,
+                                &wakeup_run_id,
+                            )
                             .await;
                     }
                 }
@@ -1055,6 +1211,7 @@ impl AcpHost {
                         lane_id,
                         &mut wakeup_run,
                         &mut wakeup_session,
+                        &wakeup_run_id,
                     )
                     .await?;
                 }
@@ -1071,13 +1228,14 @@ impl AcpHost {
         config: &CoreConfig,
         wakeup_run: &mut Option<String>,
         wakeup_session: &mut Option<String>,
+        wakeup_run_id: &Arc<Mutex<Option<String>>>,
     ) -> Result<(), String> {
         if let Some(run_id) = wakeup_run.take() {
             emit_interrupted_wakeup(tx, &run_id, wakeup_session.as_deref());
             *wakeup_session = None;
         }
+        *wakeup_run_id.lock().await = None;
         self.discard_idle_buffered(config).await?;
-        self.sync_watching(tx, false);
         Ok(())
     }
 
@@ -1117,6 +1275,7 @@ impl AcpHost {
         lane_id: &str,
         wakeup_run: &mut Option<String>,
         wakeup_session: &mut Option<String>,
+        wakeup_run_id: &Arc<Mutex<Option<String>>>,
     ) -> Result<(), String> {
         let message: Value = match serde_json::from_str(line) {
             Ok(message) => message,
@@ -1133,7 +1292,24 @@ impl AcpHost {
             .map(str::to_string)
             .or_else(|| self.watching_run_id.clone());
         self.track_background(&message, owner_run_id.as_deref(), Some(tx));
-        let action = idle_notification_action(&message);
+        // A task cancelled from the HUD still produces an ACP completion
+        // notification. It commonly carries `will_wake: true`, but that wake
+        // belongs to the cancelled task and must not recreate a wakeup run.
+        if background_task_id(notification_update(&message))
+            .is_some_and(|task_id| self.cancel_handle.was_cancelled_background_task(&task_id))
+        {
+            self.suppressed_idle_wakeups = self.suppressed_idle_wakeups.saturating_add(1);
+            self.sync_watching(tx, wakeup_run.is_some());
+            return Ok(());
+        }
+        let action = if self.suppressed_idle_wakeups > 0
+            && hidden_synthetic_user(notification_update(&message))
+        {
+            self.suppressed_idle_wakeups -= 1;
+            IdleNotificationAction::Ignore
+        } else {
+            idle_notification_action(&message)
+        };
         match action {
             IdleNotificationAction::Ignore => {
                 if let Some(run_id) = wakeup_run.as_deref() {
@@ -1152,6 +1328,7 @@ impl AcpHost {
                     None => {
                         let id = Uuid::now_v7().to_string();
                         let now = Utc::now().timestamp_millis();
+                        *wakeup_run_id.lock().await = Some(id.clone());
                         let _ = tx.send(QueueMessage {
                             run_id: id.clone(),
                             kind: QueueMessageKind::WakeupRun {
@@ -1178,10 +1355,11 @@ impl AcpHost {
             }
             IdleNotificationAction::EndRun => {
                 if let Some(run_id) = wakeup_run.take() {
-                    let session_id = notification_session_id(&message)
-                        .or_else(|| wakeup_session.clone());
+                    let session_id =
+                        notification_session_id(&message).or_else(|| wakeup_session.clone());
                     emit_interrupted_wakeup(tx, &run_id, session_id.as_deref());
                 }
+                *wakeup_run_id.lock().await = None;
             }
         }
         self.sync_watching(tx, wakeup_run.is_some());
@@ -1191,6 +1369,14 @@ impl AcpHost {
 
 fn has_pending_background_for(pending: &HashMap<String, String>, run_id: &str) -> bool {
     pending.values().any(|owner| owner == run_id)
+}
+
+fn desired_watch_runs(pending: &HashMap<String, String>, wakeup_active: bool) -> HashSet<String> {
+    if wakeup_active {
+        HashSet::new()
+    } else {
+        pending.values().cloned().collect()
+    }
 }
 
 /// Stop yields the host regardless of an in-flight wakeup. The previous
@@ -1570,6 +1756,18 @@ mod tests {
     }
 
     #[test]
+    fn watching_reconnects_to_original_runs_after_a_new_prompt() {
+        let pending = HashMap::from([(String::from("task-a"), String::from("run-a"))]);
+
+        // The ACP host may now be parked under run-b, but the monitor still
+        // belongs to run-a and must be rendered on that original message.
+        let desired = desired_watch_runs(&pending, false);
+        assert!(desired.contains("run-a"));
+        assert!(!desired.contains("run-b"));
+        assert!(desired_watch_runs(&pending, true).is_empty());
+    }
+
+    #[test]
     fn converts_legacy_run_flags_to_core_config() {
         let args = vec![
             "--model".into(),
@@ -1916,7 +2114,10 @@ mod tests {
                 "update": { "sessionUpdate": "turn_completed", "stop_reason": "end_turn" }
             }
         });
-        assert_eq!(idle_notification_action(&done), IdleNotificationAction::EndRun);
+        assert_eq!(
+            idle_notification_action(&done),
+            IdleNotificationAction::EndRun
+        );
 
         let visible_user = json!({
             "method": "session/update",

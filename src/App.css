@@ -2511,8 +2511,15 @@ button.status-cluster.status-action:disabled {
 }
 
 .message-error.message-cancelled {
-  background: var(--bg-3);
-  color: var(--text-2);
+  background: transparent;
+  border-left: 2px solid color-mix(in srgb, var(--text-muted) 72%, transparent);
+  border-radius: 0;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  margin-top: 10px;
+  padding: 2px 0 2px 9px;
 }
 
 .message-network-actions {

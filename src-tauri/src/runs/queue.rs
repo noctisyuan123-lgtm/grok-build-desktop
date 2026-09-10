@@ -98,6 +98,10 @@ struct IdleWatchHandle {
     join: JoinHandle<core::AcpHost>,
     run_id: String,
     config: core::CoreConfig,
+    cancel: Arc<AcpCancelHandle>,
+    /// Temporary run created when an idle monitor wakes Grok. This is not an
+    /// ordinary queue row, but the UI still needs to be able to cancel it.
+    wakeup_run_id: Arc<Mutex<Option<String>>>,
 }
 
 pub struct RunQueue {
@@ -195,7 +199,10 @@ impl RunQueue {
     pub async fn evict_acp_hosts(&self) {
         let watches = {
             let mut watches = self.idle_watches.lock().await;
-            watches.drain().map(|(_, handle)| handle).collect::<Vec<_>>()
+            watches
+                .drain()
+                .map(|(_, handle)| handle)
+                .collect::<Vec<_>>()
         };
         let mut hosts = Vec::new();
         for watch in watches {
@@ -232,6 +239,9 @@ impl RunQueue {
         parent_run_id: String,
     ) {
         let (stop, stop_rx) = watch::channel(false);
+        let cancel = host.cancel_handle();
+        let wakeup_run_id = Arc::new(Mutex::new(None));
+        let task_wakeup_run_id = wakeup_run_id.clone();
         let tx = self.tx.clone();
         let lane_for_task = lane_id.clone();
         let watch_run_id = parent_run_id.clone();
@@ -239,9 +249,9 @@ impl RunQueue {
         let join = tokio::spawn(async move {
             host.begin_idle_watch(&parent_run_id, &tx);
             let result = host
-                .watch_idle(&tx, stop_rx, &config, &lane_for_task)
+                .watch_idle(&tx, stop_rx, &config, &lane_for_task, task_wakeup_run_id)
                 .await;
-            host.end_idle_watch(&tx);
+            host.end_idle_watch(&tx, result.is_ok());
             if let Err(error) = result {
                 eprintln!("[grok core] idle ACP watch ended: {error}");
             }
@@ -254,9 +264,10 @@ impl RunQueue {
                 join,
                 run_id: watch_run_id,
                 config: watch_config,
+                cancel,
+                wakeup_run_id,
             },
-        )
-        {
+        ) {
             let _ = previous.stop.send(true);
             if let Ok(mut leftover) = previous.join.await {
                 leftover.shutdown().await;
@@ -412,6 +423,7 @@ impl RunQueue {
             inner.cancelled.insert(run_id.into());
             drop(inner);
             if let Some(handle) = acp_cancel {
+                let _ = handle.cancel_tasks_for(run_id).await;
                 handle.cancel().await;
                 if let Some(p) = pgid {
                     process::kill_descendants(p).await;
@@ -425,27 +437,66 @@ impl RunQueue {
         if self.cancel_idle_watch(run_id).await {
             return Ok(true);
         }
+        // The host may be temporarily owned by a newer prompt while this
+        // older run's monitor remains visible. Its shared ACP cancel handle
+        // still indexes the detached task ids, so cancel only those tasks and
+        // leave the newer foreground turn intact.
+        let active_handles = {
+            let inner = self.inner.lock().await;
+            inner
+                .active_acp_cancels
+                .values()
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        for handle in active_handles {
+            if handle.cancel_tasks_for(run_id).await {
+                return Ok(true);
+            }
+        }
         Ok(false)
     }
 
     async fn cancel_idle_watch(&self, run_id: &str) -> bool {
         let found = {
             let watches = self.idle_watches.lock().await;
-            watches.iter().find_map(|(lane, handle)| {
-                (handle.run_id == run_id).then(|| (lane.clone(), handle.config.clone()))
-            })
+            let mut found = None;
+            for (lane, handle) in watches.iter() {
+                let is_owner = handle.run_id == run_id;
+                let is_wakeup = handle.wakeup_run_id.lock().await.as_deref() == Some(run_id);
+                if is_owner || is_wakeup {
+                    found = Some((lane.clone(), handle.config.clone(), is_wakeup));
+                    break;
+                }
+            }
+            found
         };
-        let Some((lane, config)) = found else {
+        let Some((lane, config, is_wakeup)) = found else {
             return false;
         };
-        let Some(mut host) = self.take_lane_host(&lane).await else {
+        let Some(watch) = self.idle_watches.lock().await.remove(&lane) else {
             return false;
         };
-        host.clear_background_for(run_id, &self.tx);
-        host.cancel_handle().cancel().await;
+        let owner_run_id = watch.run_id.clone();
+        // Cancel the ACP session before asking the idle reader to return. If
+        // this was a wakeup run, waiting for `join` first would let the
+        // discard path consume the response while the model keeps running.
+        watch.cancel.cancel().await;
+        let _ = watch.stop.send(true);
+        let Some(mut host) = watch.join.await.ok() else {
+            return false;
+        };
+        if !is_wakeup {
+            let task_ids = host.background_task_ids_for(run_id);
+            for task_id in task_ids {
+                host.cancel_handle().cancel_task(&task_id).await;
+            }
+            host.clear_background_for(run_id, &self.tx);
+        }
         process::kill_descendants(host.pgid()).await;
-        self.park_lane_host(lane, host, config, run_id.to_string())
-            .await;
+        // A cancelled ACP session must not poison the next idle wakeup.
+        host.cancel_handle().prepare_for_turn().await;
+        self.park_lane_host(lane, host, config, owner_run_id).await;
         true
     }
 

@@ -463,13 +463,22 @@ function App() {
   // backend rejections (queue lock, run already gone, IPC error) as unhandled
   // promise rejections — Stop could silently do nothing while the run kept
   // streaming.
-  function stopRun(runId: string) {
-    cancelOpenWork(runId);
-    cancelRun(runId).catch((error) => {
+  async function stopRun(runId: string) {
+    try {
+      const cancelled = await cancelRun(runId);
+      // Do not hide a HUD item when the backend could not locate/cancel the
+      // underlying run. Keeping it visible makes a failed cancellation
+      // actionable instead of creating the illusion that work stopped.
+      if (cancelled === false) {
+        setSessionNotice(t('notices.stopFailed', { error: 'task is no longer active' }));
+        return;
+      }
+      cancelOpenWork(runId);
+    } catch (error) {
       setSessionNotice(
         t('notices.stopFailed', { error: error instanceof Error ? error.message : String(error) }),
       );
-    });
+    }
   }
 
   function retryNetworkTurn(_messageId: string, runId: string) {

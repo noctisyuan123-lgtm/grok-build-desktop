@@ -292,6 +292,18 @@ export function applyRunEvent(
   protocolSessionId?: string,
 ): void {
   const cur = streamStore.getRunSnapshot(runId);
+  // A cancellation is terminal from the renderer's point of view. ACP can
+  // still flush a few thought/text/tool notifications after session/cancel;
+  // accepting those late deltas makes a stopped reply appear to resume (and
+  // can even bring the Stop control back). Keep the terminal marker stable;
+  // the matching end event may still refine stopReason below.
+  if (
+    cur &&
+    (cur.state === 'cancelled' || cur.state === 'done' || cur.state === 'failed') &&
+    event.type !== 'end'
+  ) {
+    return;
+  }
   const sessionId = protocolSessionId ?? readSessionId(raw);
   const usage = extractUsage(raw);
   if (event.type === 'thought') {
