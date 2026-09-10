@@ -11,6 +11,7 @@ const emptyQueue = {
     state: 'Queued' | 'Running' | 'Done' | 'Cancelled' | 'Failed';
     enqueuedAt: number;
     laneId?: string;
+    delivery?: 'queue' | 'interrupt';
   }>,
 };
 

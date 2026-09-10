@@ -32,7 +32,7 @@ pub mod prompts;
 pub mod runs;
 
 use crate::runs::billing::{remaining_percent_i32, CliUsageView};
-use crate::runs::db::{Db, RunState};
+use crate::runs::db::{Db, RunDelivery, RunState};
 use crate::runs::queue::{QueueMessage, QueueMessageKind, RunQueue};
 #[cfg(target_os = "macos")]
 use block2::{Block, RcBlock};
@@ -3704,9 +3704,23 @@ async fn enqueue_run(
     // UI session / tab id. Independent lanes run concurrently; same lane
     // stays serial. Omit only for legacy callers (shared default lane).
     lane_id: Option<String>,
+    // `queue` (default) waits for the current turn. `interrupt` cancels the
+    // supplied parent first, then sends the new turn. Legacy `steer` input is
+    // accepted by the parser and normalized to `queue` for compatibility.
+    delivery: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let (run_id, position) = queue
-        .enqueue(prompt, cwd, args, parent_run_id, lane_id)
+        .enqueue_with_delivery(
+            prompt,
+            cwd,
+            args,
+            parent_run_id,
+            lane_id,
+            delivery
+                .as_deref()
+                .map(RunDelivery::parse)
+                .unwrap_or(RunDelivery::Queue),
+        )
         .await
         .map_err(|e| e.to_string())?;
     Ok(serde_json::json!({ "runId": run_id, "position": position }))
@@ -3743,6 +3757,7 @@ async fn get_queue(
             "id": r.id, "prompt": r.prompt, "cwd": r.cwd,
             "state": r.state, "enqueuedAt": r.enqueued_at,
             "laneId": r.lane_id,
+            "delivery": r.delivery.as_str(),
         })).collect::<Vec<_>>(),
     }))
 }
@@ -4185,6 +4200,7 @@ fn forward_queue_message(app: &tauri::AppHandle, msg: &QueueMessage) {
                             "id": r.id, "prompt": r.prompt, "cwd": r.cwd,
                             "state": r.state, "enqueuedAt": r.enqueued_at,
                             "laneId": r.lane_id,
+                            "delivery": r.delivery.as_str(),
                         })).collect::<Vec<_>>(),
                     }),
                 );
@@ -4820,6 +4836,7 @@ pub fn run() {
                                         error: None,
                                         lane_id: String::new(),
                                         parent_run_id: None,
+                                        delivery: crate::runs::db::RunDelivery::Queue,
                                     };
                                     let _ = db.insert_run(&rec).await;
                                 }

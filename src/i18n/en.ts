@@ -296,6 +296,8 @@ export const en = {
   'queue.collapse': '⤒ collapse',
   'queue.expand': '⤓ expand',
   'queue.cancelQueuedRun': 'Cancel this queued run',
+  'queue.interrupt': 'Interrupt',
+  'queue.followUp': 'Follow-up',
 
   // ── Message rendering ─────────────────────────────────────────────────────
   'message.runFailed': 'Run failed',

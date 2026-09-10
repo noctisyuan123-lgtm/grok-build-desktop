@@ -1,5 +1,5 @@
 use super::core::{self, AcpCancelHandle, AcpHost, CoreConfig};
-use super::db::{Db, RunRecord, RunState};
+use super::db::{Db, RunDelivery, RunRecord, RunState};
 use super::event::GrokEvent;
 use super::parser::parse_line;
 use super::process;
@@ -334,6 +334,35 @@ impl RunQueue {
         parent_run_id: Option<String>,
         lane_id: Option<String>,
     ) -> Result<(String, usize), sqlx::Error> {
+        self.enqueue_with_delivery(
+            prompt,
+            cwd,
+            args,
+            parent_run_id,
+            lane_id,
+            RunDelivery::Queue,
+        )
+        .await
+    }
+
+    /// Enqueue a prompt with queue or cancel-and-send delivery semantics.
+    pub async fn enqueue_with_delivery(
+        &self,
+        prompt: String,
+        cwd: String,
+        args: Vec<String>,
+        parent_run_id: Option<String>,
+        lane_id: Option<String>,
+        delivery: RunDelivery,
+    ) -> Result<(String, usize), sqlx::Error> {
+        // Pi-style interrupt: stop the active parent first, then let the new
+        // prompt take the lane ahead of ordinary follow-ups. A cancelled ACP
+        // host is rebuilt so a blocked tool cannot hold the lane.
+        if delivery == RunDelivery::Interrupt {
+            if let Some(parent_id) = parent_run_id.as_deref() {
+                let _ = self.interrupt(parent_id).await;
+            }
+        }
         let id = uuid::Uuid::now_v7().to_string();
         let args_json = serde_json::to_string(&args).unwrap_or_else(|_| "[]".into());
         let now = chrono::Utc::now().timestamp_millis();
@@ -351,6 +380,7 @@ impl RunQueue {
             error: None,
             lane_id: lane.clone(),
             parent_run_id: parent_run_id.clone(),
+            delivery,
         };
         self.db.insert_run(&rec).await?;
 
@@ -362,8 +392,19 @@ impl RunQueue {
             // "you're next" for this session.
             let ahead_waiting = inner.waiting.iter().filter(|r| r.lane_id == lane).count();
             let lane_busy = inner.active_lanes.contains_key(&lane);
-            position = ahead_waiting + usize::from(lane_busy);
-            inner.waiting.push_back(rec);
+            position = match delivery {
+                RunDelivery::Interrupt => usize::from(lane_busy),
+                RunDelivery::Queue => ahead_waiting + usize::from(lane_busy),
+            };
+            if delivery == RunDelivery::Interrupt {
+                if let Some(idx) = inner.waiting.iter().position(|r| r.lane_id == lane) {
+                    inner.waiting.insert(idx, rec);
+                } else {
+                    inner.waiting.push_back(rec);
+                }
+            } else {
+                inner.waiting.push_back(rec);
+            }
             if let Some(parent_id) = parent_run_id {
                 inner.parent_runs.insert(id.clone(), parent_id);
             }
@@ -378,6 +419,22 @@ impl RunQueue {
     }
 
     pub async fn cancel(&self, run_id: &str) -> Result<bool, sqlx::Error> {
+        self.cancel_inner(run_id, false).await
+    }
+
+    /// Cancel a run and tear down its ACP process group. ACP's
+    /// `session/cancel` is cooperative and can remain queued behind a
+    /// long-running tool; interrupt-and-send must release the lane promptly,
+    /// so the host is deliberately rebuilt for the replacement turn.
+    pub async fn interrupt(&self, run_id: &str) -> Result<bool, sqlx::Error> {
+        self.cancel_inner(run_id, true).await
+    }
+
+    async fn cancel_inner(
+        &self,
+        run_id: &str,
+        terminate_acp_host: bool,
+    ) -> Result<bool, sqlx::Error> {
         let mut inner = self.inner.lock().await;
         // If in waiting queue: remove. (No `cancelled` mark needed — once out
         // of `waiting` the worker can never pop it, and stale marks would
@@ -426,7 +483,11 @@ impl RunQueue {
                 let _ = handle.cancel_tasks_for(run_id).await;
                 handle.cancel().await;
                 if let Some(p) = pgid {
-                    process::kill_descendants(p).await;
+                    if terminate_acp_host {
+                        process::kill_group(p).await;
+                    } else {
+                        process::kill_descendants(p).await;
+                    }
                 }
             } else if let Some(p) = pgid {
                 process::kill_group(p).await;

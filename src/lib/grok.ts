@@ -46,6 +46,8 @@ export async function enqueueRun(opts: {
    * serial. Never inferred from cwd.
    */
   laneId?: string;
+  /** Follow-up delivery: queue waits for the turn; interrupt cancels it. */
+  delivery?: 'queue' | 'interrupt';
 }): Promise<{ runId: string; position: number }> {
   return invoke('enqueue_run', opts);
 }
@@ -75,6 +77,7 @@ export async function getQueue(): Promise<{
     state: string;
     enqueuedAt: number;
     laneId?: string;
+    delivery?: 'queue' | 'interrupt';
   }>;
 }> {
   return invoke('get_queue');

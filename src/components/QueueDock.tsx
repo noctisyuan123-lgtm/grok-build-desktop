@@ -120,8 +120,19 @@ export function QueueDock({ onError }: Props) {
       {expanded && queue.items.length > 0 ? (
         <ul className="queue-list">
           {queue.items.map((item) => (
-            <li key={item.id} className="queue-item">
-              <span className="queue-item-state">⏸</span>
+            <li
+              key={item.id}
+              className={`queue-item ${item.delivery === 'interrupt' ? 'is-interrupt' : ''}`}
+            >
+              <span
+                className={`queue-item-delivery ${item.delivery === 'interrupt' ? 'is-interrupt' : ''}`}
+              >
+                {t(
+                  item.delivery === 'interrupt'
+                    ? 'queue.interrupt'
+                    : 'queue.followUp',
+                )}
+              </span>
               <span className="queue-item-prompt">{item.prompt.slice(0, 80)}</span>
               <button
                 onClick={() => void cancelRun(item.id).catch(surfaceError)}

@@ -69,7 +69,7 @@ describe('Composer submit', () => {
     expect(onStop).toHaveBeenCalledTimes(1);
   });
 
-  it('submits (enqueues) on Enter while Stop occupies the send slot', async () => {
+  it('queues and sends on Enter while a run is active', async () => {
     const calls: Array<{ cmd: string; payload: unknown }> = [];
     mockIPC((cmd, payload) => {
       calls.push({ cmd, payload });
@@ -83,6 +83,7 @@ describe('Composer submit', () => {
       onStop,
       parentRunId: 'parent-run',
       laneId: 'tab-session-1',
+      sessionRunIds: ['active-run'],
     });
 
     await user.type(textarea, 'follow-up after long script');
@@ -90,6 +91,7 @@ describe('Composer submit', () => {
     await waitFor(() => expect(onEnqueued).toHaveBeenCalledTimes(1));
     expect(onEnqueued.mock.calls[0][0].prompt).toBe('follow-up after long script');
     expect(calls.find((call) => call.cmd === 'enqueue_run')?.payload).toMatchObject({
+      delivery: 'queue',
       parentRunId: 'parent-run',
       laneId: 'tab-session-1',
     });
@@ -153,6 +155,46 @@ describe('Composer submit', () => {
     await user.keyboard('{Enter}');
     await waitFor(() => expect(onEnqueued).toHaveBeenCalledTimes(1));
     expect(onEnqueued.mock.calls[0][0].prompt).toBe('line one');
+  });
+
+  it('queues Alt+Enter like a regular follow-up', async () => {
+    const calls: Array<{ cmd: string; payload: unknown }> = [];
+    mockIPC((cmd, payload) => {
+      calls.push({ cmd, payload });
+      return cmd === 'enqueue_run' ? { runId: 'queue-1', position: 0 } : undefined;
+    });
+    const user = userEvent.setup();
+    const { textarea } = renderComposer({ parentRunId: 'parent-run', laneId: 'lane-1' });
+
+    await user.type(textarea, 'focus on this now');
+    await user.keyboard('{Alt>}{Enter}{/Alt}');
+
+    await waitFor(() => expect(calls.some((call) => call.cmd === 'enqueue_run')).toBe(true));
+    expect(calls.find((call) => call.cmd === 'enqueue_run')?.payload).toMatchObject({
+      delivery: 'queue',
+      parentRunId: 'parent-run',
+      laneId: 'lane-1',
+    });
+  });
+
+  it('uses interrupt delivery for Cmd+Enter', async () => {
+    const calls: Array<{ cmd: string; payload: unknown }> = [];
+    mockIPC((cmd, payload) => {
+      calls.push({ cmd, payload });
+      return cmd === 'enqueue_run' ? { runId: 'interrupt-1', position: 0 } : undefined;
+    });
+    const user = userEvent.setup();
+    const { textarea } = renderComposer({ parentRunId: 'parent-run', laneId: 'lane-1' });
+
+    await user.type(textarea, 'stop and send this');
+    await user.keyboard('{Meta>}{Enter}{/Meta}');
+
+    await waitFor(() => expect(calls.some((call) => call.cmd === 'enqueue_run')).toBe(true));
+    expect(calls.find((call) => call.cmd === 'enqueue_run')?.payload).toMatchObject({
+      delivery: 'interrupt',
+      parentRunId: 'parent-run',
+      laneId: 'lane-1',
+    });
   });
 
   it('does nothing for a blank prompt', async () => {

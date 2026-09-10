@@ -12,6 +12,34 @@ pub enum RunState {
     Failed,
 }
 
+/// Delivery policy for a prompt submitted while another turn is active.
+///
+/// `Queue` waits until the current turn is completely finished. `Interrupt`
+/// cancels the supplied parent turn before taking the lane. The external ACP
+/// integration does not expose a reliable mid-turn steering primitive, so
+/// legacy `steer` values are normalized to `Queue` when loaded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RunDelivery {
+    Queue,
+    Interrupt,
+}
+
+impl RunDelivery {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RunDelivery::Queue => "queue",
+            RunDelivery::Interrupt => "interrupt",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "interrupt" => Self::Interrupt,
+            _ => Self::Queue,
+        }
+    }
+}
+
 impl RunState {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -73,6 +101,8 @@ pub struct RunRecord {
     pub lane_id: String,
     /// Exact parent run whose ACP session this follow-up should resume.
     pub parent_run_id: Option<String>,
+    /// Follow-up delivery policy for this prompt.
+    pub delivery: RunDelivery,
 }
 
 #[derive(Clone)]
@@ -94,10 +124,12 @@ type RunRow = (
     Option<String>, // error
     String,         // lane_id
     Option<String>, // parent_run_id
+    String,         // delivery
 );
 
 fn run_record(row: RunRow) -> RunRecord {
-    let (id, prompt, cwd, args_json, state, eq, st, en, sr, err, lane_id, parent_run_id) = row;
+    let (id, prompt, cwd, args_json, state, eq, st, en, sr, err, lane_id, parent_run_id, delivery) =
+        row;
     RunRecord {
         id,
         prompt,
@@ -111,6 +143,7 @@ fn run_record(row: RunRow) -> RunRecord {
         error: err,
         lane_id,
         parent_run_id,
+        delivery: RunDelivery::parse(&delivery),
     }
 }
 
@@ -127,7 +160,8 @@ CREATE TABLE IF NOT EXISTS runs (
     stop_reason TEXT,
     error TEXT,
     lane_id TEXT NOT NULL DEFAULT '',
-    parent_run_id TEXT
+    parent_run_id TEXT,
+    delivery TEXT NOT NULL DEFAULT 'queue'
 );
 CREATE INDEX IF NOT EXISTS idx_runs_state ON runs(state);
 CREATE INDEX IF NOT EXISTS idx_runs_enqueued_at ON runs(enqueued_at);
@@ -148,6 +182,7 @@ CREATE INDEX IF NOT EXISTS idx_billing_snapshots_period
 const MIGRATIONS: &[&str] = &[
     "ALTER TABLE runs ADD COLUMN lane_id TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE runs ADD COLUMN parent_run_id TEXT",
+    "ALTER TABLE runs ADD COLUMN delivery TEXT NOT NULL DEFAULT 'queue'",
 ];
 
 /// Execute every `;`-delimited DDL statement in `schema` against the given
@@ -210,14 +245,14 @@ impl Db {
 
     pub async fn insert_run(&self, r: &RunRecord) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO runs (id, prompt, cwd, args_json, state, enqueued_at, started_at, ended_at, stop_reason, error, lane_id, parent_run_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO runs (id, prompt, cwd, args_json, state, enqueued_at, started_at, ended_at, stop_reason, error, lane_id, parent_run_id, delivery)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&r.id).bind(&r.prompt).bind(&r.cwd).bind(&r.args_json)
         .bind(r.state.as_str())
         .bind(r.enqueued_at).bind(r.started_at).bind(r.ended_at)
         .bind(&r.stop_reason).bind(&r.error)
-        .bind(&r.lane_id).bind(&r.parent_run_id)
+        .bind(&r.lane_id).bind(&r.parent_run_id).bind(r.delivery.as_str())
         .execute(&self.pool).await?;
         Ok(())
     }
@@ -250,7 +285,7 @@ impl Db {
     pub async fn fetch_run(&self, id: &str) -> Result<Option<RunRecord>, sqlx::Error> {
         let row: Option<RunRow> =
             sqlx::query_as(
-                "SELECT id, prompt, cwd, args_json, state, enqueued_at, started_at, ended_at, stop_reason, error, lane_id, parent_run_id FROM runs WHERE id = ?"
+                "SELECT id, prompt, cwd, args_json, state, enqueued_at, started_at, ended_at, stop_reason, error, lane_id, parent_run_id, delivery FROM runs WHERE id = ?"
             )
             .bind(id)
             .fetch_optional(&self.pool).await?;
@@ -260,7 +295,7 @@ impl Db {
     pub async fn list_by_state(&self, state: RunState) -> Result<Vec<RunRecord>, sqlx::Error> {
         let rows: Vec<RunRow> =
             sqlx::query_as(
-                "SELECT id, prompt, cwd, args_json, state, enqueued_at, started_at, ended_at, stop_reason, error, lane_id, parent_run_id
+                "SELECT id, prompt, cwd, args_json, state, enqueued_at, started_at, ended_at, stop_reason, error, lane_id, parent_run_id, delivery
                  FROM runs WHERE state = ? ORDER BY enqueued_at ASC"
             )
             .bind(state.as_str())

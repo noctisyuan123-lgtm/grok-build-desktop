@@ -16,9 +16,13 @@ fallback.
   queue).
 - A Grok Core run flows:
   1. The frontend builds the argument list (`buildGrokArgs` in `src/App.tsx`)
-     and calls `invoke('enqueue_run', { prompt, cwd, args })`.
-  2. `RunQueue` (`src-tauri/src/runs/queue.rs`) persists the run to
-     `runs.sqlite` (FIFO, survives restart). `runs/core.rs` starts or reuses a
+     and calls `invoke('enqueue_run', { prompt, cwd, args, delivery })`.
+     `delivery` defaults to `queue` (follow-up after the current turn);
+     `interrupt` cancels the supplied parent first, then starts the new turn.
+     The external ACP integration has no stable mid-turn steering primitive,
+     so legacy `steer` inputs are normalized to `queue`.
+  2. `RunQueue` (`src-tauri/src/runs/queue.rs`) persists the run and delivery
+     policy to `runs.sqlite` (FIFO, survives restart). `runs/core.rs` starts or reuses a
      process-group-isolated `grok agent stdio` Core host, performs ACP
      `initialize`, then uses `session/load` or `session/new` followed by
      `session/prompt`.

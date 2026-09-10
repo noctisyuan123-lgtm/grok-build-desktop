@@ -4423,7 +4423,7 @@ body[data-completion-popup='true'] {
 }
 
 .queue-dock {
-  background: var(--grok-bg-2);
+  background: transparent;
   border-bottom: 1px solid var(--grok-border-1);
   display: flex;
   flex-direction: column;
@@ -4498,12 +4498,24 @@ body[data-completion-popup='true'] {
   color: var(--grok-text-3);
 }
 .queue-count {
-  color: var(--grok-accent);
-  font-weight: 700;
-  background: rgba(255, 122, 69, 0.1);
-  border-radius: 10px;
-  padding: 1px 8px;
-  font-size: 11px;
+  position: relative;
+  background: transparent;
+  border-radius: 0;
+  color: var(--grok-text-4);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  padding: 1px 0 1px 8px;
+}
+.queue-count::before {
+  background: var(--grok-text-4);
+  border-radius: 1px;
+  content: '';
+  inset: 1px auto 1px 0;
+  opacity: 0.7;
+  position: absolute;
+  width: 1px;
 }
 .queue-expand {
   color: var(--grok-text-4);
@@ -4513,26 +4525,58 @@ body[data-completion-popup='true'] {
 .queue-list {
   list-style: none;
   margin: 0;
-  padding: 4px 0;
-  border-top: 1px solid var(--grok-border-1);
-  background: var(--grok-bg-1);
+  padding: 2px 0 4px;
+  border-top: 1px solid color-mix(in srgb, var(--grok-border-1) 45%, transparent);
+  background: transparent;
 }
 .queue-item {
   align-items: center;
   display: flex;
-  font-size: 12px;
-  gap: 10px;
-  padding: 5px 14px;
+  font-size: 10px;
+  gap: 7px;
+  min-height: 24px;
+  padding: 3px 14px 3px 22px;
+  position: relative;
   transition: background 120ms ease;
 }
+.queue-item::before {
+  background: var(--grok-text-4);
+  content: '';
+  height: 14px;
+  left: 14px;
+  opacity: 0.65;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1px;
+}
+.queue-item.is-interrupt::before {
+  background: var(--accent);
+  opacity: 0.85;
+}
 .queue-item:hover {
-  background: var(--grok-bg-3);
+  background: color-mix(in srgb, var(--grok-bg-3) 35%, transparent);
 }
-.queue-item-state {
-  color: var(--grok-warning);
+
+.queue-item-delivery {
+  flex: 0 0 auto;
+  background: transparent;
+  color: var(--grok-text-4);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  padding: 0;
 }
+
+.queue-item-delivery.is-interrupt {
+  color: var(--grok-text-3);
+}
+
 .queue-item-prompt {
-  color: var(--grok-text-1);
+  color: var(--grok-text-3);
+  font-size: 10px;
+  font-weight: 400;
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;

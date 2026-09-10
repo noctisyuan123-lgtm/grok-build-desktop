@@ -11,6 +11,7 @@ Grok Desktop is an integration shell. It does not vendor or copy the source code
 | scrcpy-mcp                                 | Optional Android MCP server detected for future phone-control workflows                      | MIT                                                       | https://github.com/JuanCF/scrcpy-mcp       |
 | Grok Build CLI                             | Optional user-installed CLI invoked by subprocess                                            | License/terms depend on the user's installed CLI provider | User installation                          |
 | Grok-compatible skills/plugins/MCP servers | Discovered from user/project configuration through `grok inspect`; not copied into this repo | Depends on each installed item                            | User/project installation                  |
+| Pi Coding Agent                          | Queue/cancel-and-send delivery semantics adapted for the desktop run queue    | MIT                                                       | https://github.com/earendil-works/pi      |
 
 ## Application Framework Dependencies
 

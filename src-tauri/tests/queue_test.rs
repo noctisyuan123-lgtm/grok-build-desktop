@@ -1,4 +1,4 @@
-use grok_desktop_lib::runs::db::{Db, RunState};
+use grok_desktop_lib::runs::db::{Db, RunDelivery, RunState};
 use grok_desktop_lib::runs::event::GrokEvent;
 use grok_desktop_lib::runs::queue::{
     keep_utf8_tail, QueueMessageKind, RunQueue, STDERR_TAIL_MAX_BYTES,
@@ -92,6 +92,48 @@ async fn enqueue_runs_serial_and_emits_events() {
         done_count,
         events.len()
     );
+}
+
+#[tokio::test]
+async fn queued_follow_ups_remain_fifo_on_same_lane() {
+    let db = Db::open_memory().await.unwrap();
+    let (q, _rx) = RunQueue::new(db, fake_grok_path()).await;
+
+    q.enqueue(
+        "first".into(),
+        "/tmp".into(),
+        vec![],
+        None,
+        Some("lane".into()),
+    )
+    .await
+    .unwrap();
+    q.enqueue(
+        "later".into(),
+        "/tmp".into(),
+        vec![],
+        None,
+        Some("lane".into()),
+    )
+    .await
+    .unwrap();
+    let (queued_id, position) = q
+        .enqueue_with_delivery(
+            "latest".into(),
+            "/tmp".into(),
+            vec![],
+            None,
+            Some("lane".into()),
+            RunDelivery::Queue,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(position, 2);
+    let (_, waiting) = q.snapshot().await;
+    assert_eq!(waiting[0].prompt, "first");
+    assert_eq!(waiting[1].prompt, "later");
+    assert_eq!(waiting[2].id, queued_id);
 }
 
 /// Independent UI sessions (lanes) must start concurrently: a long run on

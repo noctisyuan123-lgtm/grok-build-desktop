@@ -168,8 +168,34 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const [attachmentPickerBusy, setAttachmentPickerBusy] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // WebKit/Tauri can report the Enter keydown without metaKey even though the
+  // preceding Command keydown was delivered normally. Keep a tiny native
+  // modifier latch so Cmd+Enter still selects the interrupt path in that case.
+  const heldModifierRef = useRef({ meta: false, ctrl: false });
   const onTextChangeRef = useRef(onTextChange);
   onTextChangeRef.current = onTextChange;
+
+  useEffect(() => {
+    const onModifierKey = (event: KeyboardEvent) => {
+      const isMeta =
+        event.key === 'Meta' || event.key === 'OS' || event.key === 'Command' || event.keyCode === 91;
+      const isControl = event.key === 'Control' || event.keyCode === 17;
+      if (isMeta) heldModifierRef.current.meta = event.type === 'keydown';
+      if (isControl) heldModifierRef.current.ctrl = event.type === 'keydown';
+    };
+    const clearModifiers = () => {
+      heldModifierRef.current.meta = false;
+      heldModifierRef.current.ctrl = false;
+    };
+    window.addEventListener('keydown', onModifierKey, true);
+    window.addEventListener('keyup', onModifierKey, true);
+    window.addEventListener('blur', clearModifiers);
+    return () => {
+      window.removeEventListener('keydown', onModifierKey, true);
+      window.removeEventListener('keyup', onModifierKey, true);
+      window.removeEventListener('blur', clearModifiers);
+    };
+  }, []);
   // Local draft undo/redo (textarea-scoped). Native undo stacks are cleared by
   // programmatic value writes (setValue / submit clear / IME edge cases) and
   // are unreliable in WebView/jsdom — keep a small stack so Cmd/Ctrl+Z restores
@@ -463,7 +489,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     return `${raw}\n\n---\nReferenced files (from @ mentions):${blocks.join('\n')}`;
   };
 
-  const submit = async (force = false) => {
+  const submit = async (force = false, delivery: 'queue' | 'interrupt' = 'queue') => {
     if (offline) {
       onError?.(t('composerSection.offline'));
       return;
@@ -505,7 +531,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       } else {
         args.push('-p', prompt);
       }
-      const result = await enqueueRun({ prompt, cwd, args, parentRunId, laneId });
+      const result = await enqueueRun({ prompt, cwd, args, parentRunId, laneId, delivery });
       el.value = '';
       recordDraftHistory('');
       resizeTextarea(el);
@@ -536,6 +562,45 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       requestAnimationFrame(() => ref.current?.focus());
     }
   };
+
+  // Handle modifier+Enter at the native capture phase as well as on the
+  // textarea. Plain Enter always follows the normal send/queue path; when a
+  // session is already running, Command/Ctrl+Enter is the explicit interrupt
+  // gesture. Capturing the modifier path here keeps it reliable when a
+  // macOS input method/WebView drops the modifier from React's event.
+  const submitRef = useRef(submit);
+  submitRef.current = submit;
+  const mentionRef = useRef(mention);
+  mentionRef.current = mention;
+  useEffect(() => {
+    const onNativeKeyDown = (event: KeyboardEvent) => {
+      if (event.target !== ref.current) return;
+      if ((event.key !== 'Enter' && event.code !== 'NumpadEnter') || event.shiftKey) return;
+      if (event.altKey) return;
+      if (mentionRef.current && cwd.trim()) return;
+      if (
+        composingRef.current ||
+        isComposing ||
+        event.isComposing ||
+        event.keyCode === 229
+      ) {
+        return;
+      }
+      const modifier =
+        event.metaKey ||
+        event.ctrlKey ||
+        event.getModifierState?.('Meta') ||
+        event.getModifierState?.('Control') ||
+        heldModifierRef.current.meta ||
+        heldModifierRef.current.ctrl;
+      if (!modifier) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void submitRef.current(true, 'interrupt');
+    };
+    window.addEventListener('keydown', onNativeKeyDown, true);
+    return () => window.removeEventListener('keydown', onNativeKeyDown, true);
+  }, [cwd, isComposing]);
 
   useImperativeHandle(
     outerRef,
@@ -747,7 +812,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               }
               return;
             }
-            if (e.key !== 'Enter' || e.shiftKey) return;
+            if ((e.key !== 'Enter' && e.code !== 'NumpadEnter') || e.shiftKey) return;
             // Four-layer guard against accidental Enter-during-IME auto-submit:
             //   1. composingRef.current — sync ref, set synchronously by
             //      onCompositionStart even when React is busy
@@ -765,7 +830,19 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               return;
             }
             e.preventDefault();
-            void submit();
+            // Plain Enter follows the normal send/queue path, including while
+            // a session is active. Command/Ctrl+Enter is the explicit
+            // interrupt-and-send gesture; Alt+Enter remains a queue alias.
+            const nativeModifier =
+              native.metaKey ||
+              native.ctrlKey ||
+              native.getModifierState?.('Meta') ||
+              native.getModifierState?.('Control') ||
+              heldModifierRef.current.meta ||
+              heldModifierRef.current.ctrl;
+            const interrupt = nativeModifier;
+            const delivery = interrupt ? 'interrupt' : 'queue';
+            void submit(delivery === 'interrupt', delivery);
           }}
         />
         <div className="composer-inline-bar">
