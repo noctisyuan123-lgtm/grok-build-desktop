@@ -1423,6 +1423,16 @@ function App() {
     clearRunHistory,
     focusComposer: () => composerRef.current?.focus(),
     stopRun,
+    getActiveRunId: () => {
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (message?.role !== 'assistant' || !message.runId) continue;
+        if (isRunInFlight(streamStore.getRunSnapshot(message.runId))) {
+          return message.runId;
+        }
+      }
+      return null;
+    },
     switchMode,
     busyRunner,
     drafts,

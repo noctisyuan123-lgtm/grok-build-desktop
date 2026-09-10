@@ -1,6 +1,6 @@
 // The command-palette catalogue and global keyboard shortcuts (⌘K palette,
 // ⌘B sidebar, ⌘, settings, ⌘N new session, ⌘F search,
-// "/" composer focus, Esc panel dismissal, ⌘1/⌘2 mode switch). Extracted
+// "/" composer focus, Esc interrupt/dismissal, ⌘1/⌘2 mode switch). Extracted
 // from App.tsx unchanged; DOM focus targets arrive as callbacks.
 import { useEffect, useMemo, useRef } from 'react';
 import type { PaletteAction } from '../components/CommandPalette';
@@ -29,6 +29,8 @@ export interface AppShortcutsDeps {
   clearRunHistory: () => void;
   focusComposer: () => void;
   stopRun: (runId: string) => void;
+  /** Resolve the current window/session's active run at keypress time. */
+  getActiveRunId: () => string | null;
   switchMode: (mode: Mode) => void;
   busyRunner: string | null;
   drafts: Record<Mode, string>;
@@ -57,6 +59,7 @@ export function useAppShortcuts(deps: AppShortcutsDeps) {
     clearRunHistory,
     focusComposer,
     stopRun,
+    getActiveRunId,
     switchMode,
     busyRunner,
     drafts,
@@ -71,6 +74,10 @@ export function useAppShortcuts(deps: AppShortcutsDeps) {
   // sessionStateRef, cancel-run via streamStore).
   const clearRunHistoryRef = useRef(clearRunHistory);
   clearRunHistoryRef.current = clearRunHistory;
+  const stopRunRef = useRef(stopRun);
+  stopRunRef.current = stopRun;
+  const getActiveRunIdRef = useRef(getActiveRunId);
+  getActiveRunIdRef.current = getActiveRunId;
 
   // ── Command palette catalogue ────────────────────────────────────────────
   // Every action here is reachable both through ⌘K and (where applicable) a
@@ -158,13 +165,14 @@ export function useAppShortcuts(deps: AppShortcutsDeps) {
       {
         id: 'cancel-run',
         label: t('palette.action.cancelRun'),
+        shortcut: 'Esc',
         group: t('palette.group.run'),
         run: () => {
           // Read activeRunId via streamStore at action-fire time — the value
           // declared further down the component isn't in scope here yet, and
           // listing it as a dep would create a TDZ error during render.
           const snap = streamStore.getActiveRunSnapshot();
-          if (snap?.id) stopRun(snap.id);
+          if (snap?.id) stopRunRef.current(snap.id);
         },
       },
     ];
@@ -208,10 +216,19 @@ export function useAppShortcuts(deps: AppShortcutsDeps) {
           focusComposer();
         }
       } else if (e.key === 'Escape') {
-        // Esc closes whatever transient surface is open: palette first, then
-        // any open dock panel (Preview / Context / Terminal / Tools). Without
-        // this, Esc did nothing for the panels — they could only be closed by
-        // toggling them off again.
+        // Modal surfaces install a capture-phase Escape handler and take
+        // priority here. Otherwise Escape is the model interruption key when
+        // this window/session has a live run; this must work even while the
+        // composer or a dock panel has focus.
+        if (e.isComposing || e.keyCode === 229) return;
+        const activeRunId = getActiveRunIdRef.current();
+        if (activeRunId) {
+          e.preventDefault();
+          stopRunRef.current(activeRunId);
+          return;
+        }
+        // With no live run, close whatever transient surface is open:
+        // palette first, then any open dock panel.
         if (paletteOpen) {
           setPaletteOpen(false);
         } else if (previewOpen || contextOpen || terminalOpen || toolsOpen) {

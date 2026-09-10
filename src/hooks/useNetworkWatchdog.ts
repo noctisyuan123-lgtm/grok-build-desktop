@@ -30,6 +30,20 @@ export function useNetworkWatchdog(
           continue;
         }
         if (firedRef.current.has(id)) continue;
+        // A run that has already emitted model/tool activity is not safe to
+        // classify as a dead connection from renderer silence alone. ACP can
+        // spend several minutes inside inference or a tool while the actual
+        // task is still progressing (and may already have changed files).
+        // Keep the run stoppable via Escape/Stop and let the backend's own
+        // transport watchdog decide when an active request is truly dead.
+        if (
+          snap.firstOutputAt != null ||
+          snap.thoughtChars > 0 ||
+          snap.textChars > 0 ||
+          snap.traces.length > 0
+        ) {
+          continue;
+        }
         if (
           !shouldGiveUp({
             now,

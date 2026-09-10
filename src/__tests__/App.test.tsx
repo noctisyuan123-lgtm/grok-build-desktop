@@ -643,6 +643,23 @@ describe('composer submit → queued run → streamed reply', () => {
     expect(await screen.findByText(t('message.stopped'))).toBeInTheDocument();
   });
 
+  it('stops the current session run when Escape is pressed', async () => {
+    const ctx = await bootApp();
+    const { tauri, user } = ctx;
+    const runId = await submitPrompt(ctx, 'Interrupt this run');
+
+    await act(async () => {
+      await tauri.emitQueue(runId, []);
+      await tauri.emitRunState(runId, 'Running', { startedAt: Date.now() });
+      await tauri.emitRunEvent(runId, { type: 'text', data: 'partial output' });
+    });
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(tauri.calls.find((call) => call.cmd === 'cancel_run')?.args).toEqual({ runId });
+    });
+  });
+
   it('enqueues a same-session follow-up against the exact active parent run', async () => {
     const ctx = await bootApp();
     const { tauri } = ctx;

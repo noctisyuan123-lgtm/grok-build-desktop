@@ -28,4 +28,23 @@ describe('useNetworkWatchdog', () => {
     expect(streamStore.getRunSnapshot('hung')?.error).toMatch(/Disconnected/);
     expect(cancelRun).toHaveBeenCalledWith('hung');
   });
+
+  it('does not convert a run with model or tool activity into a network failure', () => {
+    applyStateChange('active', { state: 'Running', startedAt: 1_000_000 });
+    streamStore.patchRun('active', {
+      text: 'A file was changed.',
+      textChars: 19,
+      firstOutputAt: 1_000_001,
+      lastEventType: 'text',
+    });
+    streamStore.setQueue({ active: 'active', activeIds: ['active'], items: [] });
+    const cancelRun = vi.fn(async () => true);
+    renderHook(() => useNetworkWatchdog(true, cancelRun));
+    act(() => {
+      vi.setSystemTime(1_000_000 + GIVE_UP_MS);
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(streamStore.getRunSnapshot('active')?.state).toBe('running');
+    expect(cancelRun).not.toHaveBeenCalled();
+  });
 });
