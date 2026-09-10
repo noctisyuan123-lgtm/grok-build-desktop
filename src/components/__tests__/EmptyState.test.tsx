@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { greetingCandidates } from '../../lib/emptyGreeting';
 import { EmptyState } from '../EmptyState';
 
 describe('EmptyState', () => {
@@ -16,7 +17,9 @@ describe('EmptyState', () => {
         onPickWorkspace={() => {}}
       />,
     );
-    expect(screen.getByRole('heading', { name: 'Happy Wednesday, Noctis' })).toBeInTheDocument();
+    expect(greetingCandidates(new Date(2026, 8, 9, 12))).toContain(
+      screen.getByRole('heading').textContent,
+    );
     expect(screen.getByRole('button', { name: 'Choose workspace folder' })).toHaveTextContent(
       'grodex',
     );
@@ -34,9 +37,13 @@ describe('EmptyState', () => {
         onPickWorkspace={() => {}}
       />,
     );
-    expect(screen.getByRole('heading', { name: 'Happy Wednesday, Noctis' })).toBeInTheDocument();
+    expect(greetingCandidates(new Date(2026, 8, 9, 23, 59, 59, 500))).toContain(
+      screen.getByRole('heading').textContent,
+    );
     act(() => vi.advanceTimersByTime(500));
-    expect(screen.getByRole('heading', { name: 'Happy Thursday, Noctis' })).toBeInTheDocument();
+    expect(greetingCandidates(new Date(2026, 8, 10, 0, 0, 0, 0))).toContain(
+      screen.getByRole('heading').textContent,
+    );
   });
 
   it('opens the native workspace picker from the project control', async () => {

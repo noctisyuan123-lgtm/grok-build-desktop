@@ -3981,15 +3981,10 @@ body[data-completion-popup='true'] {
 }
 .customize-markdown-preview {
   flex: 1;
+  margin-top: 0;
   min-height: 0;
   overflow: auto;
   padding: 18px 20px 28px;
-}
-.customize-markdown-preview.markdown-body {
-  color: var(--conversation-text);
-  font-size: 13px;
-  line-height: 1.65;
-  max-width: none;
 }
 .customize-rendering {
   align-items: center;
@@ -4596,8 +4591,9 @@ body[data-completion-popup='true'] {
 }
 
 /* VS Code Agent Pane parity. The parser uses markdown-it (as VS Code does);
-   keep this scoped so the rest of the desktop UI retains its theme. */
-.message.message-assistant .message-body.markdown-body {
+   keep this scoped so the rest of the desktop UI retains its theme.
+   Customize Markdown previews share the same rules via :is(). */
+:is(.message.message-assistant .message-body.markdown-body, .customize-markdown-preview.markdown-body) {
   --vscode-editor-foreground: var(--grok-text-1);
   --vscode-textCodeBlock-background: var(--grok-bg-1);
   --vscode-widget-border: var(--grok-border-1);
@@ -4610,65 +4606,65 @@ body[data-completion-popup='true'] {
   white-space: normal;
   word-break: normal;
 }
-.message.message-assistant .markdown-body h1,
-.message.message-assistant .markdown-body h2,
-.message.message-assistant .markdown-body h3,
-.message.message-assistant .markdown-body h4,
-.message.message-assistant .markdown-body h5,
-.message.message-assistant .markdown-body h6 {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h1,
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h2,
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h3,
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h4,
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h5,
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h6 {
   color: inherit;
   font-weight: 600;
   line-height: 1.25;
   margin-top: 24px;
   margin-bottom: 16px;
 }
-.message.message-assistant .markdown-body > :first-child {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) > :first-child {
   margin-top: 0;
 }
-.message.message-assistant .markdown-body > :last-child {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) > :last-child {
   margin-bottom: 0;
 }
-.message.message-assistant .markdown-body h1 {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h1 {
   font-size: 2em;
   padding-bottom: 0.3em;
   border-bottom: 1px solid rgba(255, 255, 255, 0.18);
 }
-.message.message-assistant .markdown-body h2 {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h2 {
   font-size: 1.5em;
   padding-bottom: 0.3em;
   border-bottom: 1px solid rgba(255, 255, 255, 0.18);
 }
-.message.message-assistant .markdown-body h3 {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h3 {
   font-size: 1.25em;
 }
-.message.message-assistant .markdown-body h4 {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h4 {
   font-size: 1em;
 }
-.message.message-assistant .markdown-body h5 {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h5 {
   font-size: 0.875em;
 }
-.message.message-assistant .markdown-body h6 {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h6 {
   font-size: 0.85em;
 }
-.message.message-assistant .markdown-body p {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) p {
   margin: 0 0 16px;
   white-space: normal;
 }
-.message.message-assistant .markdown-body ul {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) ul {
   margin: 0 0 0.7em;
   padding-inline-start: 24px;
 }
-.message.message-assistant .markdown-body ol {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) ol {
   margin: 0 0 0.7em;
   padding-inline-start: 28px;
 }
-.message.message-assistant .markdown-body li {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) li {
   margin: 4px 0;
 }
-.message.message-assistant .markdown-body li p {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) li p {
   margin: 0;
 }
-.message.message-assistant .markdown-body blockquote {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) blockquote {
   background: transparent;
   border-left: 3.5px solid rgba(255, 255, 255, 0.18);
   border-radius: 2px;
@@ -4676,12 +4672,12 @@ body[data-completion-popup='true'] {
   margin: 0 0 16px;
   padding: 0 16px 0 14px;
 }
-.message.message-assistant .markdown-body hr {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) hr {
   border: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.18);
   margin: 16px 0;
 }
-.message.message-assistant .markdown-body .md-table-wrap {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .md-table-wrap {
   margin: 0 0 0.7em;
   max-width: 100%;
   min-width: 0;
@@ -4689,7 +4685,7 @@ body[data-completion-popup='true'] {
   overflow-y: hidden;
   overscroll-behavior-x: contain;
 }
-.message.message-assistant .markdown-body table:not(.vlist-t) {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) {
   border: 0;
   border-collapse: collapse;
   border-radius: 0;
@@ -4700,8 +4696,8 @@ body[data-completion-popup='true'] {
   table-layout: auto;
   width: max-content;
 }
-.message.message-assistant .markdown-body table:not(.vlist-t) > thead > tr > th,
-.message.message-assistant .markdown-body table:not(.vlist-t) > tbody > tr > td {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > thead > tr > th,
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > tbody > tr > td {
   background: transparent;
   border: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.035);
@@ -4713,35 +4709,35 @@ body[data-completion-popup='true'] {
   text-align: left;
   word-break: keep-all;
 }
-.message.message-assistant .markdown-body table:not(.vlist-t) > thead > tr > th {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > thead > tr > th {
   border-bottom-color: rgba(255, 255, 255, 0.09);
   font-weight: 600;
   white-space: nowrap;
 }
-.message.message-assistant .markdown-body table:not(.vlist-t) > thead > tr > th:first-child,
-.message.message-assistant .markdown-body table:not(.vlist-t) > tbody > tr > td:first-child {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > thead > tr > th:first-child,
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > tbody > tr > td:first-child {
   padding-left: 0;
 }
-.message.message-assistant .markdown-body table:not(.vlist-t) > thead > tr > th:last-child,
-.message.message-assistant .markdown-body table:not(.vlist-t) > tbody > tr > td:last-child {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > thead > tr > th:last-child,
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > tbody > tr > td:last-child {
   padding-right: 0;
 }
-.message.message-assistant .markdown-body table:not(.vlist-t) > tbody > tr:last-child > td {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > tbody > tr:last-child > td {
   border-bottom: 0;
 }
-.message.message-assistant .markdown-body table:not(.vlist-t) > tbody > tr:nth-child(even) > td {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > tbody > tr:nth-child(even) > td {
   background: transparent;
 }
-.message.message-assistant .markdown-body ul.task-list-container {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) ul.task-list-container {
   list-style: none;
   padding-inline-start: 2px;
 }
-.message.message-assistant .markdown-body .task-list-item {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .task-list-item {
   align-items: flex-start;
   display: flex;
   gap: 8px;
 }
-.message.message-assistant .markdown-body .task-list-item-checkbox {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .task-list-item-checkbox {
   appearance: none;
   background: transparent;
   border: 1px solid var(--grok-text-3);
@@ -4753,11 +4749,11 @@ body[data-completion-popup='true'] {
   position: relative;
   width: 11px;
 }
-.message.message-assistant .markdown-body .task-list-item-checkbox:checked {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .task-list-item-checkbox:checked {
   background: var(--grok-text-1);
   border-color: var(--grok-text-1);
 }
-.message.message-assistant .markdown-body .task-list-item-checkbox:checked::after {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .task-list-item-checkbox:checked::after {
   border: solid var(--grok-bg-0);
   border-width: 0 1.5px 1.5px 0;
   content: '';
@@ -4768,48 +4764,48 @@ body[data-completion-popup='true'] {
   transform: rotate(45deg);
   width: 2px;
 }
-.message.message-assistant .markdown-body .footnote-ref a,
-.message.message-assistant .markdown-body .footnote-backref {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .footnote-ref a,
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .footnote-backref {
   color: var(--accent);
 }
-.message.message-assistant .markdown-body .footnotes-sep {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .footnotes-sep {
   border-bottom-color: rgba(255, 255, 255, 0.1);
   margin: 24px 0 12px;
 }
-.message.message-assistant .markdown-body .footnotes {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .footnotes {
   color: var(--grok-text-2);
   font-size: 0.86em;
 }
-.message.message-assistant .markdown-body .footnotes ol {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .footnotes ol {
   margin-bottom: 0;
   padding-inline-start: 24px;
 }
-.message.message-assistant .markdown-body .footnotes li {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .footnotes li {
   margin: 3px 0;
 }
-.message.message-assistant .markdown-body .katex-display,
-.message.message-assistant .markdown-body .katex-block {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .katex-display,
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .katex-block {
   margin: 16px 0;
   overflow: visible;
   padding: 6px 0;
   text-align: center;
 }
-.message.message-assistant .markdown-body .katex math {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .katex math {
   color: inherit;
   font-family: 'STIX Two Math', 'STIXGeneral', 'Times New Roman', serif;
   font-size: 1em;
 }
-.message.message-assistant .markdown-body .katex-block math[display='block'] {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .katex-block math[display='block'] {
   display: block;
   margin-inline: auto;
 }
-.message.message-assistant .markdown-body .katex-display > .katex,
-.message.message-assistant .markdown-body .katex-block > .katex {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .katex-display > .katex,
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .katex-block > .katex {
   overflow-x: auto;
   overflow-y: hidden;
   padding-block: 0.15em;
 }
-.message.message-assistant .markdown-body code {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) code {
   background: transparent;
   border-radius: 0;
   color: inherit;
@@ -4829,8 +4825,8 @@ body[data-completion-popup='true'] {
   line-height: 1.357em;
   padding: 0;
 }
-.message.message-assistant .markdown-body pre,
-.message.message-assistant .markdown-body .code-block {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) pre,
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .code-block {
   background: var(--vscode-textCodeBlock-background);
   border: 1px solid var(--vscode-widget-border);
   border-radius: 3px;
@@ -4839,7 +4835,7 @@ body[data-completion-popup='true'] {
   padding: 11px 16px;
   position: relative;
 }
-.message.message-assistant .markdown-body pre code {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) pre code {
   color: inherit;
   display: inline-block;
   font-size: 1.1rem;
@@ -4892,14 +4888,14 @@ body[data-completion-popup='true'] {
 .markdown-body .code-block-copy-button.copied .code-block-check-icon {
   display: block;
 }
-.message.message-assistant .markdown-body a {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) a {
   color: var(--accent) !important;
   text-decoration: none;
 }
-.message.message-assistant .markdown-body a:hover {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) a:hover {
   text-decoration: underline;
 }
-.message.message-assistant .markdown-body img {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) img {
   max-width: 100%;
   max-height: 100%;
 }
@@ -9578,8 +9574,8 @@ body,
   z-index: 30;
 }
 
-.theme-dark .message.message-assistant .markdown-body pre,
-.theme-dark .message.message-assistant .markdown-body .code-block {
+.theme-dark :is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) pre,
+.theme-dark :is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .code-block {
   background: #1d1d1d;
   border-color: #303030;
 }
@@ -9770,7 +9766,7 @@ body,
   max-width: min(74%, 920px);
   width: auto;
 }
-.message.message-assistant .message-body.markdown-body {
+:is(.message.message-assistant .message-body.markdown-body, .customize-markdown-preview.markdown-body) {
   font-size: 14px;
   line-height: 22px;
   max-width: 100%;
@@ -9847,12 +9843,12 @@ body,
   box-shadow: none;
 }
 /* The table remains the one intentional post-VS-Code customization. */
-.message.message-assistant .markdown-body table:not(.vlist-t) {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) {
   color: var(--conversation-text);
   font-size: 13px;
   line-height: 20px;
 }
-.message.message-assistant .markdown-body table:not(.vlist-t) > thead > tr > th {
+:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > thead > tr > th {
   color: inherit;
   font-size: inherit;
   font-weight: 600;
@@ -10279,24 +10275,24 @@ body,
    blockquote bar, hr, table rules, footnote separator) vanish on the
    parchment canvas. Ink-based equivalents keep the same visual weight; the
    dark rules above are untouched. */
-.theme-light .message.message-assistant .markdown-body h1,
-.theme-light .message.message-assistant .markdown-body h2 {
+.theme-light :is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h1,
+.theme-light :is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h2 {
   border-bottom-color: rgba(31, 29, 25, 0.14);
 }
-.theme-light .message.message-assistant .markdown-body blockquote {
+.theme-light :is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) blockquote {
   border-left-color: rgba(31, 29, 25, 0.22);
 }
-.theme-light .message.message-assistant .markdown-body hr {
+.theme-light :is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) hr {
   border-bottom-color: rgba(31, 29, 25, 0.14);
 }
-.theme-light .message.message-assistant .markdown-body table:not(.vlist-t) > thead > tr > th,
-.theme-light .message.message-assistant .markdown-body table:not(.vlist-t) > tbody > tr > td {
+.theme-light :is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > thead > tr > th,
+.theme-light :is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > tbody > tr > td {
   border-bottom-color: rgba(31, 29, 25, 0.08);
 }
-.theme-light .message.message-assistant .markdown-body table:not(.vlist-t) > thead > tr > th {
+.theme-light :is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > thead > tr > th {
   border-bottom-color: rgba(31, 29, 25, 0.18);
 }
-.theme-light .message.message-assistant .markdown-body .footnotes-sep {
+.theme-light :is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .footnotes-sep {
   border-bottom-color: rgba(31, 29, 25, 0.12);
 }
 

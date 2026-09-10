@@ -273,14 +273,6 @@ export const en = {
   'emptyState.promptChat': 'What can I help you with today?',
   'emptyState.promptCoding': 'What would you like to work on?',
   'emptyState.promptWorkspace': 'What would you like to build in {workspace}?',
-  'emptyState.greetingEarlyBird': 'Early bird',
-  'emptyState.greetingMorning': 'Good morning',
-  'emptyState.greetingAfternoon': 'Afternoon',
-  'emptyState.greetingEvening': 'Good evening',
-  'emptyState.greetingNightOwl': 'Night owl',
-  'emptyState.greetingFriday': 'Happy Friday',
-  'emptyState.greetingWeekend': 'Weekend',
-  'emptyState.greetingSunday': 'Lazy Sunday',
 
   // ── Status bar (Claude-Code-style) ────────────────────────────────────────
   'statusBar.thinking': 'thinking…',
@@ -522,8 +514,7 @@ export const en = {
     'Ask Grok for product thinking, research, or an engineering explanation...',
   'mode.coding.title': 'Grok Code',
   'mode.coding.subtitle': 'repository, terminal, reviews, implementation',
-  'mode.coding.placeholder':
-    'Review this repo, implement a narrow fix, debug a test, refactor a module...',
+  'mode.coding.placeholder': 'Do anything',
   'preset.analyze': 'Analyze',
   'preset.analyzeDesc': 'Architecture, risks, next moves',
   'preset.implement': 'Implement',

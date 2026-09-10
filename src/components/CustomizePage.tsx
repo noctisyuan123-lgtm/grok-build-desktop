@@ -35,6 +35,7 @@ import {
 } from '../lib/customize';
 import { addMcpServer, listMcpServers, removeMcpServer } from '../lib/mcp';
 import { sanitizeHtml } from '../lib/sanitizeHtml';
+import { MarkdownHtml } from './MarkdownHtml';
 
 type CustomizeTab = CustomizeKind | 'mcp' | 'plugin';
 
@@ -166,9 +167,10 @@ function MarkdownPreview({ source }: { source: string }) {
     return <div className="customize-empty-preview">Preview could not be rendered. The source is still safe to edit.</div>;
   }
   return html ? (
-    <div
+    <MarkdownHtml
+      html={html}
+      owner="customize-preview"
       className="customize-markdown-preview markdown-body"
-      dangerouslySetInnerHTML={{ __html: html }}
     />
   ) : (
     <div className="customize-rendering">

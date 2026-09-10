@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { Bot, ChevronDown, FolderGit2, Laptop, Loader2 } from 'lucide-react';
 import { t } from '../i18n';
-import { emptyGreeting, millisecondsUntilNextLocalDay } from '../lib/emptyGreeting';
+import { emptyGreeting, millisecondsUntilNextGreetingChange } from '../lib/emptyGreeting';
 
 export interface EmptyStateProps {
   codingCwd: string;
@@ -22,7 +22,10 @@ function useDailyGreeting(): string {
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setNow(new Date()), millisecondsUntilNextLocalDay(now));
+    const timer = window.setTimeout(
+      () => setNow(new Date()),
+      millisecondsUntilNextGreetingChange(now),
+    );
     return () => window.clearTimeout(timer);
   }, [now]);
 

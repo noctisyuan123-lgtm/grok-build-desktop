@@ -198,7 +198,8 @@ describe('Customize control plane', () => {
     await user.click(screen.getByRole('button', { name: /Customize/i }));
     const dialog = await screen.findByRole('dialog', { name: 'Customize Grok' });
     const customize = within(dialog);
-    expect(await customize.findByRole('heading', { name: 'Preview rule' })).toBeInTheDocument();
+    const heading = await customize.findByRole('heading', { name: 'Preview rule' });
+    expect(heading.closest('.customize-markdown-preview.markdown-body')).not.toBeNull();
     expect(customize.queryByRole('textbox', { name: 'rule content' })).not.toBeInTheDocument();
 
     await user.click(customize.getByRole('button', { name: 'Edit' }));

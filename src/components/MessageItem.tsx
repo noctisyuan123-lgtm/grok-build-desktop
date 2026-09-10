@@ -1,17 +1,9 @@
-import {
-  memo,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type MouseEvent,
-  type ReactNode,
-} from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useRunHtml, useRunSnapshot } from '../hooks/useRunSnapshot';
 import { sanitizeHtml } from '../lib/sanitizeHtml';
 import { ActivityGroup, TraceTimeline } from './TraceTimeline';
+import { MarkdownHtml } from './MarkdownHtml';
 import { MessageActions } from './MessageActions';
 import { t } from '../i18n';
 import { useElapsed } from '../hooks/useElapsed';
@@ -19,7 +11,6 @@ import { sumEditStats, type EditStats } from '../lib/editStats';
 import type { RunCompaction, TraceEvent } from '../lib/traceParser';
 import { exteriorMarkdownKey, isRunInFlight, type TranscriptSegment } from '../lib/streamStore';
 import type { ChatMessageStatus } from '../app/types';
-import { attachTableScroll } from '../lib/tableScroll';
 
 interface Props {
   runId: string;
@@ -787,33 +778,6 @@ function MarkdownSegment({
   );
 }
 
-function MarkdownHtml({
-  html,
-  owner,
-  className,
-}: {
-  html: string;
-  owner: string;
-  className?: string;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useLayoutEffect(() => {
-    const root = ref.current;
-    if (!root) return;
-    return attachTableScroll(owner, root);
-  }, [html, owner]);
-
-  return (
-    <div
-      ref={ref}
-      className={className}
-      dangerouslySetInnerHTML={{ __html: html }}
-      onClick={handleMarkdownClick}
-    />
-  );
-}
-
 function compactionLabel(compaction: RunCompaction): string | null {
   if (compaction.status === 'cancelled') return null;
   if (compaction.status === 'failed') return t('message.compactFailed');
@@ -859,38 +823,4 @@ function formatWorkedDuration(ms: number): string {
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   return `${minutes}m ${seconds % 60}s`;
-}
-
-function handleMarkdownClick(event: MouseEvent<HTMLDivElement>): void {
-  const target = event.target;
-  if (!(target instanceof Element)) return;
-  const button = target.closest<HTMLButtonElement>('.code-block-copy-button');
-  if (!button) return;
-  event.preventDefault();
-  event.stopPropagation();
-  const code = button.parentElement?.querySelector('code');
-  if (!code) return;
-  void copyCodeBlock(button, code.textContent ?? '');
-}
-
-async function copyCodeBlock(button: HTMLButtonElement, text: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    const code = button.parentElement?.querySelector('code');
-    const selection = window.getSelection();
-    if (!code || !selection) return;
-    selection.removeAllRanges();
-    const range = document.createRange();
-    range.selectNodeContents(code);
-    selection.addRange(range);
-    document.execCommand('copy');
-    selection.removeAllRanges();
-  }
-  button.classList.add('copied');
-  button.setAttribute('aria-label', 'Copied');
-  window.setTimeout(() => {
-    button.classList.remove('copied');
-    button.setAttribute('aria-label', 'Copy code block');
-  }, 2_000);
 }
