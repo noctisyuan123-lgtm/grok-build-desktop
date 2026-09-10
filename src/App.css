@@ -24,6 +24,7 @@
   --bg-4: #282b2f;
   --bg-5: #34383d;
   --bg-overlay: rgba(0, 0, 0, 0.6);
+  --glass-surface: color-mix(in srgb, var(--bg-4) 90%, transparent);
 
   /* Text — warm off-white, never pure. --text-4 is the faintest tier that
      still renders words (placeholders, path hints, shortcut hints): it must
@@ -1808,7 +1809,7 @@ pre {
 .app-shell.theme-dark .app-sidebar {
   position: relative;
   isolation: isolate;
-  background: linear-gradient(180deg, rgba(32, 22, 16, 0.56), rgba(14, 10, 8, 0.4));
+  background: var(--glass-surface);
   -webkit-backdrop-filter: blur(36px) saturate(140%);
   backdrop-filter: blur(36px) saturate(140%);
   border-right: 1px solid rgba(255, 255, 255, 0.07);
@@ -5879,7 +5880,7 @@ body[data-theme='light'] .hljs-comment {
 
 .subagent-rail {
   animation: subagent-float-in 180ms ease-out;
-  background: color-mix(in srgb, var(--bg-4, #242424) 94%, transparent);
+  background: var(--glass-surface, color-mix(in srgb, var(--bg-4, #242424) 90%, transparent));
   border: 1px solid color-mix(in srgb, var(--conversation-text) 12%, transparent);
   border-radius: 16px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
@@ -5898,7 +5899,7 @@ body[data-theme='light'] .hljs-comment {
 }
 
 .theme-light .subagent-rail {
-  background: var(--bg-4, #f3f1ec);
+  background: var(--glass-surface, var(--bg-4, #f3f1ec));
   border-color: var(--border-2);
   box-shadow: 0 16px 40px rgba(20, 18, 16, 0.12);
 }
@@ -9268,7 +9269,7 @@ body,
 /* Dark glass wash over native sidebar vibrancy — restrained fill, top/edge
    specular, soft depth. Opacity stays high enough for text/icon contrast. */
 .app-shell.theme-dark .app-sidebar {
-  background: linear-gradient(180deg, rgba(30, 20, 14, 0.44) 0%, rgba(16, 11, 8, 0.36) 100%);
+  background: var(--glass-surface);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   border-right: 1px solid rgba(255, 255, 255, 0.055);
@@ -9291,7 +9292,7 @@ body,
 .app-shell.theme-light .app-sidebar {
   position: relative;
   isolation: isolate;
-  background: linear-gradient(180deg, rgba(252, 252, 250, 0.5) 0%, rgba(246, 246, 243, 0.38) 100%);
+  background: var(--glass-surface);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   border-right-color: rgba(43, 43, 38, 0.1);
