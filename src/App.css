@@ -2497,22 +2497,8 @@ button.status-cluster.status-action:disabled {
 }
 
 .message-error {
-  background: rgba(255, 170, 95, 0.16);
-  border-radius: 6px;
-  color: #ffd6ac;
-  font-size: 0.76rem;
-  margin-top: 8px;
-  padding: 6px 10px;
-}
-
-.theme-light .message-error {
-  background: rgba(155, 79, 28, 0.1);
-  color: #9b4f1c;
-}
-
-.message-error.message-cancelled {
   background: transparent;
-  border-left: 2px solid color-mix(in srgb, var(--text-muted) 72%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--text-muted) 55%, transparent);
   border-radius: 0;
   color: var(--text-muted);
   font-size: 0.72rem;
@@ -2522,25 +2508,39 @@ button.status-cluster.status-action:disabled {
   padding: 2px 0 2px 9px;
 }
 
+.theme-light .message-error {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.message-error.message-cancelled {
+  /* Same quiet treatment as other turn failures. */
+  border-left-color: color-mix(in srgb, var(--text-muted) 72%, transparent);
+}
+
 .message-network-actions {
   display: flex;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .message-network-actions button {
-  background: color-mix(in srgb, var(--conversation-text) 8%, transparent);
-  border: 1px solid var(--border);
-  border-radius: 7px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
   color: var(--conversation-text);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
-  padding: 4px 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .message-network-actions button:hover {
-  background: color-mix(in srgb, var(--conversation-text) 12%, transparent);
+  background: transparent;
+  opacity: 0.8;
 }
 
 /* Session-level notices (folder pick, restore/save failures, send errors)
