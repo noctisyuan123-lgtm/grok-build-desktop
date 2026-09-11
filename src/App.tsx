@@ -1877,6 +1877,9 @@ function App() {
         editResumeSessionInPlaceRef.current =
           options.resumeInPlace && !rebased ? nextSessionId : null;
         if (rebased) {
+          // Monitor/CLI may have advanced the head past the undone turn
+          // (NewerPrompts). Rebase keeps retained context on a fresh identity.
+          setSessionNotice(t('notices.undoRebasedAfterAdvance'));
           // The fallback creates a fresh session containing only the retained
           // context. Point the visible head and live owner at it immediately;
           // its export may still be empty until the next real prompt.
@@ -1915,11 +1918,10 @@ function App() {
           if (wasLive) linkLiveSession(nextSessionId);
           else linkLiveSession(null);
         } else {
-          try {
-            await rehydrateFromGrokSession(nextSessionId);
-          } catch {
-            liveExportFingerprintRef.current = '';
-          }
+          // In-place rewind: commitRevert already tightened the Desktop
+          // transcript (with runId / Worked-for / workflow). Skip export
+          // rehydrate here — it would rebuild bubbles without those fields.
+          liveExportFingerprintRef.current = '';
         }
         if (wasLive) {
           // A second ACP session/load during rewind can leave the existing

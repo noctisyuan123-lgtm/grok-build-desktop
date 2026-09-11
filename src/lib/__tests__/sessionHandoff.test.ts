@@ -106,6 +106,7 @@ describe('mergeImportedMessages', () => {
         role: 'assistant' as const,
         content: 'Final answer',
         ts: 2,
+        runId: 'run-desktop-1',
         status: 'done' as const,
         meta: {
           durationMs: 4200,

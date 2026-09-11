@@ -228,6 +228,10 @@ export function mergeImportedMessages(
       ...incoming,
       id: existing.id,
       ts: existing.ts,
+      // Keep Desktop-only enrichment. Export rehydrate has no runId,
+      // and wiping it drops "Worked for" + workflow after Undo commit.
+      // durationMs lives on meta and is already merged above.
+      ...((existing.runId ?? incoming.runId) ? { runId: existing.runId ?? incoming.runId } : {}),
       ...((existing.status ?? incoming.status)
         ? { status: existing.status ?? incoming.status }
         : {}),

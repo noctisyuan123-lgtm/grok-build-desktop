@@ -314,6 +314,95 @@ fn reject_unloaded_shared_session(
     Ok(())
 }
 
+
+/// Restore workspace files captured on a grok rewind point.
+///
+/// `file_snapshots` maps relative paths to `{ path, content }` (or a bare
+/// string). Only paths that stay inside `cwd` are written — never `..` escapes.
+pub fn apply_file_snapshots(cwd: &Path, snapshots: &Value) -> Result<usize, String> {
+    let Some(map) = snapshots.as_object() else {
+        return Ok(0);
+    };
+    if map.is_empty() {
+        return Ok(0);
+    }
+    let root = cwd
+        .canonicalize()
+        .map_err(|error| format!("cannot resolve cwd for file restore: {error}"))?;
+    let mut restored = 0usize;
+    for (key, entry) in map {
+        let rel = entry
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or(key.as_str())
+            .trim();
+        if rel.is_empty() {
+            continue;
+        }
+        let content = entry
+            .get("content")
+            .and_then(Value::as_str)
+            .or_else(|| entry.as_str())
+            .ok_or_else(|| format!("file snapshot for {rel} has no content"))?;
+        let candidate = root.join(rel);
+        let parent = candidate
+            .parent()
+            .ok_or_else(|| format!("invalid snapshot path {rel}"))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create parent for {rel}: {error}"))?;
+        // Resolve after create for new files: ensure final path stays in root.
+        let parent_canon = parent
+            .canonicalize()
+            .map_err(|error| format!("cannot resolve parent for {rel}: {error}"))?;
+        if !parent_canon.starts_with(&root) {
+            return Err(format!("refusing to restore snapshot outside cwd: {rel}"));
+        }
+        let name = candidate
+            .file_name()
+            .ok_or_else(|| format!("invalid snapshot path {rel}"))?;
+        let final_path = parent_canon.join(name);
+        if !final_path.starts_with(&root) {
+            return Err(format!("refusing to restore snapshot outside cwd: {rel}"));
+        }
+        std::fs::write(&final_path, content)
+            .map_err(|error| format!("cannot restore {rel}: {error}"))?;
+        restored += 1;
+    }
+    Ok(restored)
+}
+
+fn file_snapshots_for_dropped_point(points: &Value, undone_preview: Option<&str>) -> Option<Value> {
+    let points = points.get("rewind_points")?.as_array()?;
+    if points.is_empty() {
+        return None;
+    }
+    let drop_at = match undone_preview.map(str::trim).filter(|text| !text.is_empty()) {
+        None => points.len() - 1,
+        Some(undone) => {
+            let matches = points
+                .iter()
+                .enumerate()
+                .filter_map(|(index, point)| {
+                    point
+                        .get("prompt_preview")
+                        .and_then(Value::as_str)
+                        .filter(|preview| previews_match(preview, undone))
+                        .map(|_| index)
+                })
+                .collect::<Vec<_>>();
+            match matches.as_slice() {
+                [index] => *index,
+                _ => return None,
+            }
+        }
+    };
+    points
+        .get(drop_at)?
+        .get("file_snapshots")
+        .cloned()
+}
+
+
 /// Truncate the grok session to drop the undone user turn (conversation only).
 pub async fn rewind_last_user_turn(
     binary: &Path,
@@ -806,6 +895,19 @@ impl AcpHost {
                 .and_then(Value::as_str)
                 .unwrap_or("rewind failed");
             return Err(detail.to_string());
+        }
+        // ACP execute is conversation-only today; restore workspace files from
+        // the dropped rewind point when grok recorded snapshots (OpenCode-like).
+        if let Some(snapshots) = file_snapshots_for_dropped_point(&points, undone_preview) {
+            match apply_file_snapshots(Path::new(cwd.as_ref()), &snapshots) {
+                Ok(count) if count > 0 => {
+                    eprintln!("[grok undo] restored {count} file snapshot(s) after rewind");
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    eprintln!("[grok undo] file snapshot restore failed: {error}");
+                }
+            }
         }
         Ok(RewindResult {
             rewound: true,
@@ -1865,6 +1967,51 @@ mod tests {
             kept_prompt_index_for_undo(&labeled, Some("from desktop")),
             Err(RewindTargetError::NewerPrompts { count: 1 })
         );
+    }
+
+    #[test]
+    fn apply_file_snapshots_writes_relative_files_inside_cwd() {
+        let dir = std::env::temp_dir().join(format!(
+            "grok-snap-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let snapshots = json!({
+            "notes/a.txt": { "path": "notes/a.txt", "content": "hello-a" },
+            "b.txt": { "content": "hello-b" }
+        });
+        let restored = apply_file_snapshots(&dir, &snapshots).expect("restore");
+        assert_eq!(restored, 2);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("notes/a.txt")).unwrap(),
+            "hello-a"
+        );
+        assert_eq!(std::fs::read_to_string(dir.join("b.txt")).unwrap(), "hello-b");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn apply_file_snapshots_rejects_path_escape() {
+        let dir = std::env::temp_dir().join(format!(
+            "grok-snap-escape-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let snapshots = json!({
+            "evil": { "path": "../outside.txt", "content": "nope" }
+        });
+        assert!(apply_file_snapshots(&dir, &snapshots).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

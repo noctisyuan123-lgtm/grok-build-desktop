@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildConversationReplayBlock,
+  REPLAY_FULL_TAIL_MESSAGES,
+  REPLAY_MAX_TOTAL_CHARS,
+  REPLAY_OLDER_CONTENT_CHARS,
   buildGrokArgs,
   buildGrokRules,
   type GrokRunConfig,
@@ -218,5 +221,32 @@ describe('buildConversationReplayBlock', () => {
     expect(block).toContain('Assistant:\nVisible reply');
     expect(block).not.toContain('Undo');
     expect(block).not.toContain('Fork');
+  });
+
+  it('compresses older turns while keeping the recent tail verbatim', () => {
+    const longOlder = 'O'.repeat(REPLAY_OLDER_CONTENT_CHARS + 80);
+    const recent = 'Keep this recent answer intact without clipping.';
+    const messages = [
+      { role: 'user' as const, content: 'old user' },
+      { role: 'assistant' as const, content: longOlder },
+      ...Array.from({ length: REPLAY_FULL_TAIL_MESSAGES }, (_, index) => ({
+        role: (index % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+        content: index === REPLAY_FULL_TAIL_MESSAGES - 1 ? recent : `tail-${index}`,
+      })),
+    ];
+    const block = buildConversationReplayBlock(messages)!;
+    expect(block).toContain(recent);
+    expect(block).not.toContain(longOlder);
+    expect(block).toContain('…');
+  });
+
+  it('enforces a total size budget on very long replays', () => {
+    const messages = Array.from({ length: 40 }, (_, index) => ({
+      role: (index % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+      content: `turn-${index} ` + 'X'.repeat(2000),
+    }));
+    const block = buildConversationReplayBlock(messages)!;
+    expect(block.length).toBeLessThanOrEqual(REPLAY_MAX_TOTAL_CHARS);
+    expect(block).toMatch(/omitted for size|…/);
   });
 });

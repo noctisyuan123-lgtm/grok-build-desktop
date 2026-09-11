@@ -1,6 +1,10 @@
 # 会话续接与 Undo/Redo 改造设计（评审稿 · 修订）
 
-状态：**待评审** · 2026-09-11（修订：对齐 OpenCode「同 session 追加」，不以 CLI resume/fork 为续接主路径）
+状态：**Phase 0+1 已落地**（`157db4b`）· Phase 2 进行中 · 2026-09-11
+
+> 实现对照（忽略文中过时「现状」表）：Phase 0 止血与 Phase 1 同 session / 指针 Undo 已合并；
+> Phase 2a replay 截断、2b rebase 提示、2c 成功 rewind 后还原 `file_snapshots` 已在本分支后续改动中推进；
+> 热路径仍为 `--resume` 不 fork + prewarm（尚未纯 ACP `session/prompt`）。
 作者：基于 2026-09-11 上下文丢失事故根因 + OpenCode / 主流 Agent 对照 + 本仓库代码核对（`feat/settings-usage-quota`）
 
 ---
@@ -226,12 +230,15 @@ Phase 0 已部分朝 OpenCode「响亮失败」对齐；为 Phase 1 热路径改
 5. **测试**：`src/__tests__/App.test.tsx` 既有 undo 用例改为指针语义；新增
    同 session 连续跟进、undo→redo、undo 后直接发、undo 窗口内 monitor 四组。
 
-### Phase 2 — 打磨（后续）
+### Phase 2 — 打磨
 
-1. Rewind 失败分支的 `--rules` replay 截断 / 摘要。
-2. 文件级回滚：评估 `~/.grok/sessions/**/rewind_points.jsonl` 的 `file_snapshots`；
-   不足再考虑影子 git（对齐 OpenCode snapshot）。
-3. Monitor 在 undo 窗口内的归属策略细化。
+1. ✅ Rewind 失败 / rebase 的 `--rules` replay 截断与体量上限（`buildConversationReplayBlock`）。
+2. ✅ 文件级回滚（首版）：ACP rewind 仍为 conversation-only，成功后由 Desktop 应用被撤销
+   turn 的 `file_snapshots`（路径限制在 cwd 内）。快照为空时为 no-op；影子 git 仍未做。
+3. ✅ Undo 窗口内 head 被 monitor/CLI 推走：引擎 `NewerPrompts` → 自动 rebase，并 toast
+   `undoRebasedAfterAdvance`。更细的归属策略仍可继续打磨。
+4. ⏳ 热路径：今日为同 session `--resume`（不 fork）+ lane prewarm；尚未改为纯 ACP
+   `session/prompt` 热路径。
 
 ---
 

@@ -42,9 +42,23 @@ export interface GrokRunConfig {
   resumeSessionInPlace?: boolean;
 }
 
+/** Soft caps so Undo/rebase `--rules` replay cannot blow the system prompt. */
+export const REPLAY_FULL_TAIL_MESSAGES = 12;
+export const REPLAY_OLDER_CONTENT_CHARS = 280;
+export const REPLAY_MAX_TOTAL_CHARS = 24_000;
+
+function truncateReplayContent(content: string, maxChars: number): string {
+  if (content.length <= maxChars) return content;
+  const cut = content.slice(0, Math.max(0, maxChars - 1)).trimEnd();
+  return `${cut}…`;
+}
+
 /**
  * Visible conversation context carried via `--rules` so the Composer prompt
  * stays an exact mirror of what the user typed.
+ *
+ * Phase 2: keep the recent tail verbatim; compress older turns and enforce a
+ * total size budget so rewind-failure rebase stays usable on long chats.
  */
 export function buildConversationReplayBlock(messages: readonly ReplayMessage[]): string | null {
   const usable = messages
@@ -54,12 +68,35 @@ export function buildConversationReplayBlock(messages: readonly ReplayMessage[])
     }))
     .filter((message) => message.content.length > 0);
   if (usable.length === 0) return null;
-  const body = usable
-    .map((message) => {
-      const label = message.role === 'user' ? 'User' : 'Assistant';
-      return `${label}:\n${message.content}`;
-    })
-    .join('\n\n');
+
+  const tailStart = Math.max(0, usable.length - REPLAY_FULL_TAIL_MESSAGES);
+  const compressed = usable.map((message, index) => {
+    const content =
+      index < tailStart
+        ? truncateReplayContent(message.content, REPLAY_OLDER_CONTENT_CHARS)
+        : message.content;
+    return { ...message, content };
+  });
+
+  const format = (rows: typeof compressed) =>
+    rows
+      .map((message) => {
+        const label = message.role === 'user' ? 'User' : 'Assistant';
+        return `${label}:\n${message.content}`;
+      })
+      .join('\n\n');
+
+  let body = format(compressed);
+  let omitted = 0;
+  while (body.length > REPLAY_MAX_TOTAL_CHARS && omitted < compressed.length - 2) {
+    omitted += 1;
+    const kept = compressed.slice(omitted);
+    const note = `Earlier turns omitted for size (${omitted} hidden). Recent context follows.`;
+    body = `${note}\n\n${format(kept)}`;
+  }
+  if (body.length > REPLAY_MAX_TOTAL_CHARS) {
+    body = truncateReplayContent(body, REPLAY_MAX_TOTAL_CHARS);
+  }
   return body;
 }
 
