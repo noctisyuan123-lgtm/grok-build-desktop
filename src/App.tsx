@@ -48,10 +48,7 @@ import { SubagentRail, SubagentUiProvider } from './components/SubagentRail';
 import { SettingsHost } from './components/SettingsHost';
 import type { SettingsSection } from './components/SettingsPage';
 import { UndoToast } from './components/UndoToast';
-import {
-  messagesBeforeRevert,
-  type TabRevertPointer,
-} from './lib/sessionRevert';
+import { messagesBeforeRevert } from './lib/sessionRevert';
 import { useActiveRunKey } from './hooks/useActiveRun';
 import { useGrokRunners } from './hooks/useGrokRunners';
 import { useUndoToast } from './hooks/useUndoToast';
@@ -159,9 +156,10 @@ function App() {
   // The textarea lives inside Composer (uncontrolled ref). We hold a
   // ComposerHandle so starter cards / history clicks / drafts can seed it.
   const composerRef = useRef<ComposerHandle | null>(null);
-  // After Undo, ACP cannot rewind the loaded session (session/load keeps the
-  // undone turn). The next submit starts a fresh session and re-seeds only
-  // the still-visible pre-undo messages as model context.
+  // After Undo, if engine rewind fails we keep a force-new plan: the next
+  // submit starts a fresh session and re-seeds only the still-visible
+  // pre-undo messages as model context. Successful Grok-native rewind clears
+  // this and stays on the same sessionHead.
   const undoSessionPlanRef = useRef<{
     replayMessages: Array<{ role: 'user' | 'assistant'; content: string }>;
   } | null>(null);
@@ -192,6 +190,11 @@ function App() {
   const [desktopHandoff, setDesktopHandoff] = useState<DesktopHandoff | null>(null);
   const suppressLiveRehydrateRef = useRef(false);
   const undoneUserContentRef = useRef<string | null>(null);
+  /** AFTER-state file stash from eager shadow-git restore; toast Redo re-applies. */
+  const undoWorkspaceRedoRef = useRef<Promise<{
+    restored: number;
+    redoFiles: { path: string; content: string | null }[];
+  } | null> | null>(null);
   // During the async rewind/export handoff, never let a partial export replace
   // the visible pre-Undo history. Some session backends briefly expose only
   // the newest retained turn while their transcript catches up.
@@ -1602,14 +1605,20 @@ function App() {
   // pair. Both the user-prompt and response controls enter here, so UI,
   // persisted transcript, and the ACP session are always rewound together.
   // Removing an older pair would leave later answers backed by context that is
-  // no longer visible. The prompt is restored verbatim to the composer, and
-  // the existing undo toast makes this destructive operation recoverable.
+  // no longer visible. Matches Grok Build native `/rewind`: truncate the same
+  // session immediately on click, restore the prompt to the composer, and toast
+  // without pretending conversation Redo can un-rewind the engine.
 
+  // Safety net: Undo normally commits (engine rewind + physical tighten) on
+  // click. If a legacy revert pointer is somehow still set (e.g. older
+  // persisted tab state), finish the commit before the next enqueue.
   async function commitRevertIfNeeded(forTabId?: string): Promise<void> {
     const targetTabId = forTabId || activeTabId;
     const targetTab = tabs.find((tab) => tab.id === targetTabId);
     const revert = targetTab?.revert ?? null;
     if (!revert) return;
+    // Commit closes the redo window for workspace files too.
+    undoWorkspaceRedoRef.current = null;
     const sourceMessages =
       targetTabId === activeTabId
         ? messages
@@ -1628,9 +1637,16 @@ function App() {
     if (targetTabId === activeTabId) {
       messagesRef.current = preserved;
       setMessages(preserved);
-      updateActiveTabMeta({ revert: null });
+      updateActiveTabMeta({
+        revert: null,
+        ...(grokSessionId ? { sessionHead: grokSessionId } : {}),
+      });
     } else {
-      updateTabMeta(targetTabId, { revert: null, messages: preserved });
+      updateTabMeta(targetTabId, {
+        revert: null,
+        messages: preserved,
+        ...(grokSessionId ? { sessionHead: grokSessionId } : {}),
+      });
     }
     if (!hasTauriRuntime() || !grokSessionId) {
       undoSessionPlanRef.current = {
@@ -1655,8 +1671,8 @@ function App() {
     }
   }
 
-  function undoLatestTurn(messageId: string) {
-    if (activeSessionIsRunning) return;
+  async function undoLatestTurn(messageId: string) {
+    if (activeSessionIsRunning || turnMutationBusy) return;
     if (activeRevert) return;
     const selectedIndex = messages.findIndex((message) => message.id === messageId);
     if (selectedIndex < 0) return;
@@ -1685,14 +1701,12 @@ function App() {
     const previousFolder = composerRef.current?.getAttachedFolder() ?? null;
     const restoredFolder = messageFolders[user.id] ?? null;
     const preserved = messages.slice(0, assistant ? assistantIndex - 1 : selectedIndex);
-    const anchor = preserved[preserved.length - 1] ?? null;
     const grokSessionId =
       assistant?.meta?.sessionId ?? currentSessionId() ?? tabSessionHead ?? liveSessionId;
-    if (!grokSessionId && hasTauriRuntime()) {
-      // Without an engine head we can still hide UI turns; commit will rebase.
-    }
 
-    // OpenCode pointer: keep messages, hide via revert; engine rewind waits for commit.
+    // Grok-native eager rewind: truncate the engine session on click (same
+    // session id), then physically tighten the UI. No OpenCode-style pointer
+    // that waits until the next send — that lost the head across restarts.
     undoSessionPlanRef.current = {
       replayMessages: preserved
         .filter((message) => message.role === 'user' || message.role === 'assistant')
@@ -1702,38 +1716,77 @@ function App() {
         })),
     };
     undoneUserContentRef.current = user.content;
-    const pointer: TabRevertPointer | null = anchor
-      ? {
-          messageId: anchor.id,
-          grokSessionId: grokSessionId ?? '',
-          undoneRunId: assistant?.runId,
-        }
-      : {
-          // Undoing the only turn: empty visible transcript.
-          messageId: '',
-          grokSessionId: grokSessionId ?? '',
-          undoneRunId: assistant?.runId,
-        };
-    // Empty messageId => hide everything (messagesBeforeRevert finds no anchor).
+
+    messagesRef.current = preserved;
+    setMessages(preserved);
     updateActiveTabMeta({
-      revert:
-        pointer.messageId === ''
-          ? { ...pointer, messageId: '__empty__' }
-          : pointer,
+      revert: null,
+      ...(grokSessionId ? { sessionHead: grokSessionId } : {}),
     });
-    // Sentinel: messagesBeforeRevert must treat __empty__ as hide-all.
     updatePrompt(user.content);
     composerRef.current?.setAttachedFolder(restoredFolder);
     composerRef.current?.focus();
+
+    // Capture AFTER bytes before restores so toast can re-apply file stash.
+    // Engine prefers RewindMode::All; shadow-git remains the ConversationOnly
+    // / local-truncate fallback (idempotent when All already restored files).
+    const cwdForRestore = codingCwd.trim();
+    if (hasTauriRuntime() && cwdForRestore && grokSessionId) {
+      undoWorkspaceRedoRef.current = invoke<{
+        restored: number;
+        redoFiles: { path: string; content: string | null }[];
+      }>('restore_workspace_on_undo', {
+        cwd: cwdForRestore,
+        sessionId: grokSessionId,
+        undonePrompt: user.content,
+      }).catch((error) => {
+        console.warn('[undo] workspace restore failed', error);
+        return null;
+      });
+    } else {
+      undoWorkspaceRedoRef.current = null;
+    }
+
+    setTurnMutationBusy(true);
+    let _rewoundOk = false;
+    try {
+      if (hasTauriRuntime() && grokSessionId) {
+        pendingUndoVisibleMessagesRef.current = {
+          sessionId: grokSessionId,
+          messages: preserved,
+        };
+        suppressLiveRehydrateRef.current = true;
+        _rewoundOk = await persistUndoToGrokSession(grokSessionId);
+        if (!_rewoundOk) {
+          // Keep undoSessionPlanRef so the next send force-news + replays.
+          setSessionNotice(t('notices.undoRewindFailed'));
+        }
+      }
+    } finally {
+      setTurnMutationBusy(false);
+    }
+
     showUndoToast({
       text: t('message.turnUndone'),
       undo: () => {
-        // Redo / unrevert: pure UI, engine untouched.
-        undoSessionPlanRef.current = null;
-        undoneUserContentRef.current = null;
-        updateActiveTabMeta({ revert: null });
+        // Conversation is already truncated in the engine — toast "Undo" only
+        // restores the prior composer draft and optional AFTER file stash.
+        const pendingWorkspace = undoWorkspaceRedoRef.current;
+        undoWorkspaceRedoRef.current = null;
         updatePrompt(previousDraft);
         composerRef.current?.setAttachedFolder(previousFolder);
+        if (pendingWorkspace && cwdForRestore) {
+          void pendingWorkspace.then((result) => {
+            const files = result?.redoFiles;
+            if (!files?.length) return;
+            void invoke('apply_workspace_file_stash', {
+              cwd: cwdForRestore,
+              files,
+            }).catch((error) => {
+              console.warn('[undo] workspace redo stash failed', error);
+            });
+          });
+        }
       },
     });
   }

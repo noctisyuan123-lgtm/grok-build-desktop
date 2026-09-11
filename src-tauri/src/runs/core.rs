@@ -403,7 +403,7 @@ fn file_snapshots_for_dropped_point(points: &Value, undone_preview: Option<&str>
 }
 
 
-/// Truncate the grok session to drop the undone user turn (conversation only).
+/// Truncate the grok session to drop the undone user turn (prefer All, then ConversationOnly).
 pub async fn rewind_last_user_turn(
     binary: &Path,
     cwd: &Path,
@@ -909,14 +909,23 @@ impl AcpHost {
                 kept_prompt_index: None,
             });
         };
-        let execute_params = json!({
+        // Grok-native default: omit mode so ACP uses RewindMode::All (conversation
+        // + files when snapshots exist). Fall back to ConversationOnly + Desktop
+        // file restore (ACP file_snapshots, then shadow-git).
+        let execute_all = json!({
+            "sessionId": session_id,
+            "targetPromptIndex": target,
+        });
+        let execute_conversation_only = json!({
             "sessionId": session_id,
             "targetPromptIndex": target,
             "conversationOnly": true,
             "conversation_only": true
         });
+
+        let mut conversation_only = false;
         let mut result = self
-            .request("_x.ai/rewind/execute", execute_params.clone(), None)
+            .request("_x.ai/rewind/execute", execute_all.clone(), None)
             .await?;
         // A second client on the leader can list points without load, but
         // execute then returns success:false and the TUI context is unchanged.
@@ -931,10 +940,34 @@ impl AcpHost {
             {
                 Ok(_) => {
                     result = self
-                        .request("_x.ai/rewind/execute", execute_params, None)
+                        .request("_x.ai/rewind/execute", execute_all.clone(), None)
                         .await?;
                 }
                 Err(error) => return Err(error),
+            }
+        }
+        if result.get("success").and_then(Value::as_bool) == Some(false) {
+            // All rejected — retry ConversationOnly and restore files ourselves.
+            conversation_only = true;
+            result = self
+                .request("_x.ai/rewind/execute", execute_conversation_only.clone(), None)
+                .await?;
+            if result.get("success").and_then(Value::as_bool) == Some(false) {
+                match self
+                    .request(
+                        "session/load",
+                        session_open_params(&cwd, config, Some(session_id)),
+                        None,
+                    )
+                    .await
+                {
+                    Ok(_) => {
+                        result = self
+                            .request("_x.ai/rewind/execute", execute_conversation_only, None)
+                            .await?;
+                    }
+                    Err(error) => return Err(error),
+                }
             }
         }
         if result.get("success").and_then(Value::as_bool) == Some(false) {
@@ -944,18 +977,34 @@ impl AcpHost {
                 .unwrap_or("rewind failed");
             return Err(detail.to_string());
         }
-        // ACP execute is conversation-only today; restore workspace files from
-        // the dropped rewind point when grok recorded snapshots (OpenCode-like).
-        if let Some(snapshots) = file_snapshots_for_dropped_point(&points, undone_preview) {
-            match apply_file_snapshots(Path::new(cwd.as_ref()), &snapshots) {
-                Ok(count) if count > 0 => {
-                    eprintln!("[grok undo] restored {count} file snapshot(s) after rewind");
-                }
-                Ok(_) => {}
-                Err(error) => {
-                    eprintln!("[grok undo] file snapshot restore failed: {error}");
+        // When All succeeded the engine already restored files from snapshots.
+        // ConversationOnly (or empty engine snapshots) needs Desktop restore.
+        if conversation_only {
+            if let Some(snapshots) = file_snapshots_for_dropped_point(&points, undone_preview) {
+                match apply_file_snapshots(Path::new(cwd.as_ref()), &snapshots) {
+                    Ok(count) if count > 0 => {
+                        eprintln!("[grok undo] restored {count} file snapshot(s) after rewind");
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        eprintln!("[grok undo] file snapshot restore failed: {error}");
+                    }
                 }
             }
+        }
+        // Shadow-git fallback (also covers All with empty snapshots). Idempotent.
+        {
+            let snap_cwd = PathBuf::from(cwd.as_ref());
+            let snap_session = session_id.to_string();
+            let snap_preview = undone_preview.map(str::to_string);
+            let _ = tokio::task::spawn_blocking(move || {
+                super::shadow_git::restore_undone_turn_best_effort(
+                    &snap_cwd,
+                    &snap_session,
+                    snap_preview.as_deref(),
+                );
+            })
+            .await;
         }
         Ok(RewindResult {
             rewound: true,
@@ -1026,6 +1075,24 @@ impl AcpHost {
         self.cancel_handle.set_session_id(session_id.clone()).await;
         if self.cancel_handle.is_cancelled().await {
             return Err("user cancelled".into());
+        }
+
+        // OpenCode-style shadow-git: snapshot worktree before the agent can mutate it.
+        // Best-effort — never block the turn if git/snapshot fails.
+        {
+            let snap_cwd = PathBuf::from(cwd.as_ref());
+            let snap_session = session_id.clone();
+            let snap_run = run_id.to_string();
+            let snap_prompt = prompt.to_string();
+            let _ = tokio::task::spawn_blocking(move || {
+                super::shadow_git::capture_before_turn_best_effort(
+                    &snap_cwd,
+                    &snap_session,
+                    &snap_run,
+                    &snap_prompt,
+                );
+            })
+            .await;
         }
 
         let prompt_blocks = content_blocks(prompt, config);

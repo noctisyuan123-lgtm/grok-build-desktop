@@ -5,3 +5,4 @@ pub mod event;
 pub mod parser;
 pub mod process;
 pub mod queue;
+pub mod shadow_git;

@@ -2,8 +2,9 @@
 
 状态：**Phase 0+1 已落地**（`157db4b`）· Phase 2 热路径已落地 · 2026-09-11
 
-> 实现对照（忽略文中过时「现状」表）：Phase 0 止血与 Phase 1 同 session / 指针 Undo 已合并；
-> Phase 2a replay 截断、2b rebase 提示、2c 成功 rewind 后还原 `file_snapshots` 已在本分支后续改动中推进；
+> 实现对照（忽略文中过时「现状」表）：Phase 0 止血与 Phase 1 同 session 已合并；
+> Phase 2a replay 截断、2b rebase 提示、2c ACP `file_snapshots` 还原、2d shadow-git 工作区快照已落地；
+> **Undo 已对齐 Grok Build native eager rewind**（点击即 `_x.ai/rewind/execute` / 同 session 截断，不再 OpenCode 式 pointer-until-send）；
 > Phase 2 item 4 热路径：活 ACP host / prewarm 已挂载同 session 时走直接 `session/prompt`；
 > 冷启动仍 `session/load(sessionHead)`（CLI 层可表现为 `--resume` 且不 fork）。
 作者：基于 2026-09-11 上下文丢失事故根因 + OpenCode / 主流 Agent 对照 + 本仓库代码核对（`feat/settings-usage-quota`）
@@ -45,7 +46,7 @@ OpenCode 的实现要点（本设计直接参照）：
 | 「resume」一词 | API 里表示「是否唤醒执行循环」，**不是** CLI 式 resume/fork | **禁止**把日常续接叙述成 `--resume` / `--fork-session` |
 | 忙时跟进 | 排队进同一 session；或 `SessionBusyError` 响亮失败 | `delivery: queue` 进同一 lane/session；解析失败 → Failed + toast |
 | 分支 | 显式 `fork` API | 仅 `forkAssistantResponse` / rewind 失败 rebase |
-| Undo | `revert` 指针，消息不删；下次 prompt 前 `cleanup()` | 同构指针模型 + cleanup-on-commit |
+| Undo | `revert` 指针，消息不删；下次 prompt 前 `cleanup()` | **已改为 Grok native**：点击即引擎 rewind（非 deferred cleanup） |
 
 本仓库现状是 **每 turn 倾向 `--resume` + `--fork-session`，再用 `parent_run_id` 跨进程拼接**。
 这与 OpenCode 模型相反，也是事故的结构性温床。
@@ -58,7 +59,7 @@ OpenCode 的实现要点（本设计直接参照）：
 
 - **G1** 消灭「静默空会话」：跟进要么进入既有 session，要么响亮失败。
 - **G2** 空闲 / 排队跟进默认 **同 session 追加**（OpenCode 语义），不再 per-turn fork。
-- **G3** Undo/Redo 对齐 OpenCode：指针模型、消息不删、redo 窗口、cleanup-on-commit。
+- **G3** Undo 对齐 **Grok Build native**：点击即同 session rewind；composer 回填 undone prompt；无引擎级 Redo（toast 至多还原草稿 / 文件 stash）。
 - **G4** fork 仅两个显式场景：用户主动分支（`forkAssistantResponse`）；rewind 失败时的 rebase 回退。
 
 ### 非目标
@@ -227,15 +228,21 @@ Phase 0 已部分朝 OpenCode「响亮失败」对齐；为 Phase 1 热路径改
    「inflight 就丢弃身份、只靠 parent 拼 resume」的主逻辑。
 3. **冷启动**：仅此时挂载 `sessionHead`（不 fork）；失败则 Failed，不裸建空会话
    （除非用户显式 New Session）。
-4. **指针 Undo/Redo** + cleanup-on-commit；扩展现有 `showUndoToast` 为 undo/redo。
-5. **测试**：`src/__tests__/App.test.tsx` 既有 undo 用例改为指针语义；新增
-   同 session 连续跟进、undo→redo、undo 后直接发、undo 窗口内 monitor 四组。
+4. **Undo** 已从 OpenCode 指针模型改为 **Grok-native eager rewind**（见 Phase 2）。
+5. **测试**：`src/__tests__/App.test.tsx` undo 用例对齐 eager rewind；同 session 连续跟进等。
 
 ### Phase 2 — 打磨
 
 1. ✅ Rewind 失败 / rebase 的 `--rules` replay 截断与体量上限（`buildConversationReplayBlock`）。
-2. ✅ 文件级回滚（首版）：ACP rewind 仍为 conversation-only，成功后由 Desktop 应用被撤销
-   turn 的 `file_snapshots`（路径限制在 cwd 内）。快照为空时为 no-op；影子 git 仍未做。
+2. ✅ **Undo = Grok-native eager rewind**（`undoLatestTurn` → 立即
+   `persistUndoToGrokSession` / `rewind_grok_session`，同 `sessionHead` 截断；
+   UI 物理收紧消息，**不再**依赖 `tab.revert` pointer-until-send）。
+   引擎优先省略 `conversationOnly`（ACP 默认 `RewindMode::All`）；失败则
+   `ConversationOnly` + `file_snapshots` + **shadow-git** 兜底
+   （`restore_workspace_on_undo` / `~/.grok-desktop/workspace-snapshots/`）。
+   Toast 回填 undone prompt；toast「Undo」仅还原草稿 / AFTER 文件 stash，
+   **不**假装对话可 Redo。`commitRevertIfNeeded` 仅作遗留 pointer 安全网。
+   见 `src/App.tsx`、`src-tauri/src/runs/{core,shadow_git}.rs`。
 3. ✅ Undo 窗口内 head 被 monitor/CLI 推走：引擎 `NewerPrompts` → 自动 rebase，并 toast
    `undoRebasedAfterAdvance`。更细的归属策略仍可继续打磨。
 4. ✅ 热路径：活 ACP host 已持有 `sessionHead`（或 prewarm 已 `session/load`）时，
@@ -252,8 +259,8 @@ Phase 0 已部分朝 OpenCode「响亮失败」对齐；为 Phase 1 热路径改
    「一次 rewind 到最早点 + rebased 新 session」。Phase 1 前用 `scripts/fake-grok.sh`
    做双级 rewind 实验。
 2. **`--rules` replay 体积**：仅留在 rebase 失败分支；Phase 2 加截断。
-3. **undo 窗口内 monitor wakeup**：head 前进会导致 rewind 倒错 turn。commit 前比对
-   head 与 `revert.grokSessionId` 记录；不一致则 rebase 并提示。
+3. **eager rewind 与 monitor 竞态**：Undo 点击时若 head 已被推走，引擎
+   `NewerPrompts` → rebase + `undoRebasedAfterAdvance` toast（已落地）。
 4. **同 session 追加与 Undo 的张力**：去掉 per-turn fork 后，undo 完全依赖 rewind /
    rebase。可接受，但集成测试必须覆盖两条路径。
 5. **ACP host 复用边界**：prewarm key 今日含完整 args；同 session 模型下应按
@@ -283,8 +290,9 @@ Phase 0 已部分朝 OpenCode「响亮失败」对齐；为 Phase 1 热路径改
 | Claude Code | 项目 jsonl | 同 id 追加；`--fork-session` 显式 | 排队同一会话 |
 | Cursor | bubble SQLite | 客户端重放历史（无 CLI resume 叙事） | followup 队列 |
 
-OpenCode undo：`revert{messageID, partID?, …}`；消息不删；下次 prompt 前 `cleanup()`；
-undo 与 fork 严格分离。
+OpenCode undo：`revert{messageID, partID?, …}`；消息不删；下次 prompt 前 `cleanup()`。
+**Desktop 已不再跟 OpenCode deferred cleanup**——对齐 xai-org/grok-build `/rewind`：
+点击即同 session truncate；文件优先 All / 否则 ConversationOnly+shadow-git。
 
 ## 附录 B：参考
 

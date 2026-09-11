@@ -2963,6 +2963,18 @@ async fn rewind_grok_session(
     if let Some(prompt) = undone.as_deref() {
         match truncate_local_grok_session(&session_id, prompt) {
             Ok(true) => {
+                // Conversation-only local truncate — restore workspace via shadow-git.
+                let snap_cwd = PathBuf::from(&cwd);
+                let snap_session = session_id.clone();
+                let snap_preview = Some(prompt.to_string());
+                let _ = tauri::async_runtime::spawn_blocking(move || {
+                    crate::runs::shadow_git::restore_undone_turn_best_effort(
+                        &snap_cwd,
+                        &snap_session,
+                        snap_preview.as_deref(),
+                    );
+                })
+                .await;
                 return Ok(UndoSessionResult {
                     rewound: true,
                     session_id,
@@ -2978,6 +2990,21 @@ async fn rewind_grok_session(
     // or the old session may be gone. Only in that case create a replacement
     // seeded with the replay context supplied by the renderer.
     let rewind_error = rewind.err();
+    // Even when conversation is rebased onto a new session, restore files from
+    // the shadow-git snapshot of the undone turn (OpenCode-style).
+    {
+        let snap_cwd = PathBuf::from(&cwd);
+        let snap_session = session_id.clone();
+        let snap_preview = undone.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            crate::runs::shadow_git::restore_undone_turn_best_effort(
+                &snap_cwd,
+                &snap_session,
+                snap_preview.as_deref(),
+            );
+        })
+        .await;
+    }
     let replacement = crate::runs::core::create_rebased_session(
         Path::new(&program),
         &cwd,
@@ -3024,6 +3051,82 @@ async fn run_blocking_tool(
             stderr: error.to_string(),
         },
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceFileStashEntry {
+    path: String,
+    content: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RestoreWorkspaceOnUndoResult {
+    restored: usize,
+    redo_files: Vec<WorkspaceFileStashEntry>,
+}
+
+/// Workspace restore helper used on Undo click (AFTER stash + shadow-git).
+/// Engine rewind now also runs eagerly on click; this remains the file-level
+/// fallback / redo-stash capture when RewindMode::All is unavailable.
+#[tauri::command]
+async fn restore_workspace_on_undo(
+    cwd: Option<String>,
+    session_id: String,
+    undone_prompt: Option<String>,
+) -> Result<RestoreWorkspaceOnUndoResult, String> {
+    let session_id = session_id.trim().to_string();
+    if session_id.is_empty() {
+        return Err("session id required".into());
+    }
+    let cwd = normalized_cwd(cwd);
+    let preview = undone_prompt
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    tauri::async_runtime::spawn_blocking(move || {
+        let (restored, stash) =
+            crate::runs::shadow_git::restore_undone_turn_with_redo_stash(
+                &cwd,
+                &session_id,
+                preview.as_deref(),
+            )?;
+        Ok(RestoreWorkspaceOnUndoResult {
+            restored,
+            redo_files: stash
+                .into_iter()
+                .map(|file| WorkspaceFileStashEntry {
+                    path: file.path,
+                    content: file.content,
+                })
+                .collect(),
+        })
+    })
+    .await
+    .map_err(|error| format!("restore_workspace_on_undo join failed: {error}"))?
+}
+
+/// Re-apply AFTER-state files captured during `restore_workspace_on_undo` (toast Redo).
+#[tauri::command]
+async fn apply_workspace_file_stash(
+    cwd: Option<String>,
+    files: Vec<WorkspaceFileStashEntry>,
+) -> Result<usize, String> {
+    let cwd = normalized_cwd(cwd);
+    tauri::async_runtime::spawn_blocking(move || {
+        let stash: Vec<crate::runs::shadow_git::StashedFile> = files
+            .into_iter()
+            .map(|file| crate::runs::shadow_git::StashedFile {
+                path: file.path,
+                content: file.content,
+            })
+            .collect();
+        crate::runs::shadow_git::apply_file_stash(&cwd, &stash)
+    })
+    .await
+    .map_err(|error| format!("apply_workspace_file_stash join failed: {error}"))?
 }
 
 #[tauri::command]
@@ -4930,6 +5033,8 @@ pub fn run() {
             open_grok_desktop,
             export_grok_session,
             rewind_grok_session,
+            restore_workspace_on_undo,
+            apply_workspace_file_stash,
             run_grok_task,
             run_shell_command,
             start_terminal_session,
