@@ -140,7 +140,12 @@ function isChatHeading(heading: string): 'user' | 'assistant' | null {
 
 /** Parse `grok export <id>` markdown into desktop chat bubbles (chat-only). */
 export function messagesFromGrokExport(markdown: string, sessionId: string): ChatMessage[] {
-  const chunks = markdown.split(/^## /m).filter((chunk) => chunk.trim().length > 0);
+  // Only protocol section headings delimit turns. A plain `^## ` split also
+  // matches Markdown H2 headings inside an assistant response and silently
+  // drops everything after the first such heading during rehydration.
+  const chunks = markdown
+    .split(/^## (?=(?:User|Human|Assistant|Grok|Model|Tools|System)[ \t]*$)/gim)
+    .filter((chunk) => chunk.trim().length > 0);
   const messages: ChatMessage[] = [];
   let ts = Date.now() - chunks.length * 1000;
   let userIndex = 0;
@@ -188,6 +193,90 @@ export function messagesFromGrokExport(markdown: string, sessionId: string): Cha
     }
   }
   return messages;
+}
+
+/**
+ * Reconcile a CLI export with the richer Desktop rows already in memory.
+ * `grok export` intentionally contains only chat text, while Desktop keeps
+ * workflow transcript/traces in message metadata. Matching by the exported
+ * synthetic ids would therefore discard that metadata on every /desktop poll.
+ */
+export function mergeImportedMessages(
+  current: ChatMessage[],
+  imported: ChatMessage[],
+): { messages: ChatMessage[]; changed: boolean } {
+  if (current.length === 0) return { messages: imported, changed: imported.length > 0 };
+  if (imported.length === 0) return { messages: current, changed: false };
+
+  const used = new Set<number>();
+  let searchFrom = 0;
+  const next = imported.map((incoming) => {
+    const matchIndex = findImportedMessageMatch(current, incoming, used, searchFrom);
+    if (matchIndex < 0) return incoming;
+    used.add(matchIndex);
+    searchFrom = matchIndex + 1;
+
+    const existing = current[matchIndex]!;
+    const meta = {
+      ...incoming.meta,
+      ...existing.meta,
+      ...(incoming.meta?.sessionId || existing.meta?.sessionId
+        ? { sessionId: incoming.meta?.sessionId ?? existing.meta?.sessionId }
+        : {}),
+    };
+    return {
+      ...incoming,
+      id: existing.id,
+      ts: existing.ts,
+      ...((existing.status ?? incoming.status)
+        ? { status: existing.status ?? incoming.status }
+        : {}),
+      ...((existing.attachments ?? incoming.attachments)
+        ? { attachments: existing.attachments ?? incoming.attachments }
+        : {}),
+      ...(Object.keys(meta).length > 0 ? { meta } : {}),
+    } satisfies ChatMessage;
+  });
+
+  return {
+    messages: next,
+    changed: stableJson(next) !== stableJson(current),
+  };
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  const object = value as Record<string, unknown>;
+  return `{${Object.keys(object)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(object[key])}`)
+    .join(',')}}`;
+}
+
+function findImportedMessageMatch(
+  current: ChatMessage[],
+  incoming: ChatMessage,
+  used: Set<number>,
+  searchFrom: number,
+): number {
+  const incomingText = incoming.content.trim();
+  for (const allowPartial of [false, true]) {
+    for (let index = searchFrom; index < current.length; index += 1) {
+      if (used.has(index) || current[index]?.role !== incoming.role) continue;
+      const currentText = current[index]!.content.trim();
+      if (
+        currentText === incomingText ||
+        (allowPartial &&
+          currentText.length > 0 &&
+          incomingText.length > 0 &&
+          (currentText.startsWith(incomingText) || incomingText.startsWith(currentText)))
+      ) {
+        return index;
+      }
+    }
+  }
+  return -1;
 }
 
 /** Prefer the export when it contains turns the local UI is missing (CLI). */

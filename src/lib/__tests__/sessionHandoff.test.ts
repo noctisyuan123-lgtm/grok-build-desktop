@@ -3,6 +3,7 @@ import {
   dropUndoneUserTurn,
   exportFingerprint,
   importedHasNewTurns,
+  mergeImportedMessages,
   isHarnessUserContent,
   messagesFromGrokExport,
   stripDesktopTurnInstructions,
@@ -88,6 +89,117 @@ describe('messagesFromGrokExport', () => {
     const a = messagesFromGrokExport(md, 's');
     const b = messagesFromGrokExport(md, 's');
     expect(a.map((m) => m.id)).toEqual(b.map((m) => m.id));
+  });
+});
+
+describe('mergeImportedMessages', () => {
+  it('keeps Desktop workflow metadata when an export refreshes chat text', () => {
+    const current = [
+      {
+        id: 'desktop-user',
+        role: 'user' as const,
+        content: 'inspect the app',
+        ts: 1,
+      },
+      {
+        id: 'desktop-assistant',
+        role: 'assistant' as const,
+        content: 'Final answer',
+        ts: 2,
+        status: 'done' as const,
+        meta: {
+          durationMs: 4200,
+          sessionId: 'cli-session',
+          transcript: [
+            {
+              key: 'thought:1',
+              kind: 'thought' as const,
+              text: 'Thinking',
+              startedAt: 1,
+              endedAt: 2,
+            },
+          ],
+          traces: [
+            {
+              key: 'tool:1',
+              kind: 'tool' as const,
+              label: 'Read app',
+              status: 'done' as const,
+              startedAt: 2,
+              endedAt: 3,
+            },
+          ],
+        },
+      },
+    ];
+    const imported = messagesFromGrokExport(
+      ['## User', '', 'inspect the app', '', '## Assistant', '', 'Final answer'].join('\n'),
+      'cli-session',
+    );
+
+    const result = mergeImportedMessages(current, imported);
+
+    expect(result.changed).toBe(false);
+    expect(result.messages[1]).toMatchObject({
+      id: 'desktop-assistant',
+      meta: {
+        durationMs: 4200,
+        transcript: [{ key: 'thought:1' }],
+        traces: [{ key: 'tool:1' }],
+        sessionId: 'cli-session',
+      },
+    });
+  });
+
+  it('updates exported text without dropping matched local metadata', () => {
+    const current = [
+      {
+        id: 'assistant-1',
+        role: 'assistant' as const,
+        content: 'partial',
+        ts: 1,
+        meta: {
+          transcript: [
+            { key: 'thought:1', kind: 'thought' as const, text: 'work', startedAt: 1, endedAt: 2 },
+          ],
+        },
+      },
+    ];
+    const imported = [
+      { id: 'export:a:1', role: 'assistant' as const, content: 'partial plus final', ts: 2 },
+    ];
+
+    const result = mergeImportedMessages(current, imported);
+
+    expect(result.changed).toBe(true);
+    expect(result.messages[0]).toMatchObject({
+      id: 'assistant-1',
+      content: 'partial plus final',
+      meta: { transcript: [{ key: 'thought:1' }] },
+    });
+  });
+
+  it('keeps Markdown H2 headings inside an assistant response', () => {
+    const messages = messagesFromGrokExport(
+      [
+        '## User',
+        '',
+        'Explain the result',
+        '',
+        '## Assistant',
+        '',
+        'The short answer.',
+        '',
+        '## Details',
+        '',
+        'The long explanation must remain visible.',
+      ].join('\n'),
+      'sess-headings',
+    );
+
+    expect(messages).toHaveLength(2);
+    expect(messages[1]?.content).toContain('## Details');
+    expect(messages[1]?.content).toContain('The long explanation must remain visible.');
   });
 });
 

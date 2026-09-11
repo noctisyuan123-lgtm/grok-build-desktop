@@ -83,7 +83,9 @@ export function MessageList({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
   const editInputRef = useRef<HTMLTextAreaElement | null>(null);
-  const editCaretInitializedForRef = useRef<string | null>(null);
+  const editFocusInitializedForRef = useRef<string | null>(null);
+  const editingIdRef = useRef<string | null>(null);
+  editingIdRef.current = editingId;
   // Whether the viewport is pinned to the bottom. We only auto-follow
   // streaming text while this is true, so a user who scrolls up to read
   // history is never yanked back down.
@@ -108,32 +110,33 @@ export function MessageList({
 
   const startEditing = useCallback((message: MessageRef) => {
     if (!message.id || !message.canEdit) return;
-    editCaretInitializedForRef.current = null;
+    editFocusInitializedForRef.current = null;
     setEditingId(message.id);
     setEditingText(message.userText ?? '');
   }, []);
 
   const cancelEditing = useCallback(() => {
-    editCaretInitializedForRef.current = null;
+    editFocusInitializedForRef.current = null;
     setEditingId(null);
     setEditingText('');
   }, []);
 
-  const focusEditInput = useCallback(
-    (input: HTMLTextAreaElement | null) => {
-      editInputRef.current = input;
-      if (!input || !editingId) return;
+  const registerEditInput = useCallback((input: HTMLTextAreaElement | null) => {
+    editInputRef.current = input;
+    const id = editingIdRef.current;
+    if (!input || !id || editFocusInitializedForRef.current === id) return;
+    editFocusInitializedForRef.current = id;
+    // The callback can run after Virtuoso attaches the row. Defer one
+    // microtask so the initial edit still focuses, but never overwrite a
+    // selection if the user has already clicked inside the textarea.
+    queueMicrotask(() => {
+      if (editingIdRef.current !== id || editInputRef.current !== input) return;
+      if (document.activeElement === input) return;
       input.focus();
-      // Virtuoso can re-attach this row after the first paint. Only the first
-      // attach of a given edit should place the caret at the end; later
-      // attaches must leave the user's click/drag selection alone.
-      if (editCaretInitializedForRef.current === editingId) return;
-      editCaretInitializedForRef.current = editingId;
       const end = input.value.length;
       input.setSelectionRange(end, end);
-    },
-    [editingId],
-  );
+    });
+  }, []);
 
   const submitEditing = useCallback(() => {
     const text = editingText.trim();
@@ -298,7 +301,7 @@ export function MessageList({
                 {isEditing ? (
                   <div className="message-edit-box">
                     <textarea
-                      ref={focusEditInput}
+                      ref={registerEditInput}
                       aria-label={t('message.editPromptInput')}
                       className="message-edit-input"
                       value={editingText}
@@ -393,7 +396,7 @@ export function MessageList({
                 showUndo={Boolean(msg.showUndo)}
                 canFork={Boolean(msg.canFork)}
                 showFork={Boolean(msg.showFork)}
-                showCopy={Boolean(msg.showCopy)}
+                showCopy={msg.showCopy !== false}
                 onUndo={
                   assistantId && onUndoAssistant ? () => onUndoAssistant(assistantId) : undefined
                 }

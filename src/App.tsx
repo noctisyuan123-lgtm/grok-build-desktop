@@ -74,6 +74,7 @@ import {
   dropUndoneUserTurn,
   exportFingerprint,
   importedHasNewTurns,
+  mergeImportedMessages,
   messagesFromGrokExport,
   noteCliHandoff,
   noteLiveSession,
@@ -814,15 +815,18 @@ function App() {
     // baseline; otherwise one incomplete poll looks like a full `/clear`.
     if (pendingUndo && !rebasedBase && imported.length < pendingUndo.length) return false;
     if (imported.length === 0) return false;
+    const reconciled = mergeImportedMessages(messagesRef.current, imported);
     const sameExport = fingerprint === liveExportFingerprintRef.current;
-    if (sameExport && !importedHasNewTurns(messagesRef.current, imported)) return false;
+    if (sameExport && !importedHasNewTurns(messagesRef.current, imported) && !reconciled.changed) {
+      return false;
+    }
     // Re-check: a Desktop turn may have started while export was in flight.
     if (sessionHasInflightDesktopRun()) return false;
     if (options?.quiet && !isLiveOwnerTab()) return false;
     const visibleAfter = currentSessionId();
     if (visibleAfter && visibleAfter !== sessionId) return false;
     liveExportFingerprintRef.current = fingerprint;
-    setMessages(imported);
+    setMessages(reconciled.messages);
     if (pendingUndo && !rebasedBase) pendingUndoVisibleMessagesRef.current = null;
     return true;
   }
