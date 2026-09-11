@@ -71,6 +71,11 @@ export interface RunSnapshot {
   watching?: boolean;
   watchingStartedAt?: number | null;
   watchingLabel?: string | null;
+  /**
+   * Idle-monitor wakeup bubble. Not a runs.sqlite row — must never be used as
+   * enqueue parent_run_id (ghost parent → silent bare start).
+   */
+  wakeup?: boolean;
 }
 
 /** A watcher is attached after the visible turn has finished. It must not
@@ -79,6 +84,13 @@ export interface RunSnapshot {
  * for watches to settle. */
 export function isRunInFlight(run: Pick<RunSnapshot, 'state' | 'watching'> | undefined): boolean {
   return Boolean(run && (run.state === 'queued' || run.state === 'running') && !run.watching);
+}
+
+/** True when this run may parent a queued follow-up in runs.sqlite. */
+export function isEnqueueParentCandidate(
+  run: Pick<RunSnapshot, 'state' | 'watching' | 'wakeup'> | undefined,
+): boolean {
+  return Boolean(run && isRunInFlight(run) && !run.wakeup);
 }
 
 export interface QueuedRunMeta {
@@ -256,6 +268,7 @@ class StreamStore {
       watching: false,
       watchingStartedAt: null,
       watchingLabel: null,
+      wakeup: false,
     };
   }
 
@@ -569,6 +582,15 @@ export function cancelOpenWork(runId: string): void {
     watching: false,
     watchingStartedAt: null,
     watchingLabel: null,
+  });
+}
+
+export function markWakeupRun(runId: string, sessionId?: string | null): void {
+  streamStore.patchRun(runId, {
+    wakeup: true,
+    state: 'running',
+    sessionId: sessionId ?? null,
+    startedAt: Date.now(),
   });
 }
 

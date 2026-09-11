@@ -50,7 +50,7 @@ export interface ComposerHandle {
 
 interface Props {
   cwd: string;
-  argsBuilder: () => string[];
+  argsBuilder: (laneId?: string) => string[];
   /** Current session's active run. The backend resolves its session after it ends. */
   parentRunId?: string;
   /**
@@ -72,11 +72,18 @@ interface Props {
     rawText: string;
     attachments: ComposerAttachment[];
     attachedFolder?: ComposerFolder;
+    /** Tab that owned the submit; pinned before any await. */
+    laneId?: string;
   }) => void;
   /** Called when enqueueing the prompt fails, with a human-readable message.
    *  The host surfaces it (session notice) — a silent console.error left the
    *  user staring at a composer that "ate" their prompt. */
   onError?: (message: string) => void;
+  /**
+   * OpenCode-style cleanup-on-commit: run before args/enqueue so a pending
+   * revert pointer can rewind the engine and tighten the visible transcript.
+   */
+  beforeEnqueue?: (laneId?: string) => Promise<void>;
   /**
    * Optional draft-persistence callback. It is deliberately not called on
    * every keystroke — passing it as a per-keystroke listener would force the
@@ -137,6 +144,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     cwd,
     argsBuilder,
     parentRunId,
+  beforeEnqueue,
     laneId,
     sessionRunIds,
     initialValue,
@@ -518,20 +526,26 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         attachedFolder && attachments.length === 0
           ? t('composer.folderOnlyPrompt')
           : t('composer.attachmentOnlyPrompt');
+      // Pin the tab before any await so a mid-flight tab switch cannot steal
+      // this send's lane, resume head, or transcript append.
+      const pinnedLaneId = laneId;
       const expandedText = await expandMentionsInPrompt(rawText || attachmentFallback);
       const attachmentList = attachments.map((item) => `- ${item.name}`).join('\n');
       const folderContext = attachedFolder
         ? `\n\nAttached folder:\n- ${attachedFolder.name} (${attachedFolder.path})`
         : '';
       const prompt = `${attachments.length ? `${expandedText}\n\nAttached files:\n${attachmentList}` : expandedText}${folderContext}`;
-      const args = argsBuilder();
+      if (beforeEnqueue) {
+        await beforeEnqueue(pinnedLaneId);
+      }
+      const args = argsBuilder(pinnedLaneId);
       if (attachments.length > 0) {
         const blocks = [{ type: 'text', text: prompt }, ...attachments.map(attachmentToAcpBlock)];
         args.push('--prompt-json', JSON.stringify(blocks));
       } else {
         args.push('-p', prompt);
       }
-      const result = await enqueueRun({ prompt, cwd, args, parentRunId, laneId, delivery });
+      const result = await enqueueRun({ prompt, cwd, args, parentRunId, laneId: pinnedLaneId, delivery });
       el.value = '';
       recordDraftHistory('');
       resizeTextarea(el);
@@ -547,6 +561,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         rawText,
         attachments,
         ...(attachedFolder ? { attachedFolder } : {}),
+        laneId: pinnedLaneId,
       });
     } catch (err) {
       console.error('[grok-desktop] enqueue failed', err);

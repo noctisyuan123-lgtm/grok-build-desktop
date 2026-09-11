@@ -498,6 +498,7 @@ export const en = {
   'notices.queueActionFailed': 'Queue action failed: {error}',
   'notices.cleared': 'Cleared conversation, run history, and terminal.',
   'notices.conversationDeleted': 'Conversation deleted.',
+  'notices.undoRewindFailed': 'Could not rewind session; next send starts a fresh head with prior context.',
   'notices.desktopContextAppended': 'Desktop context appended to your draft.',
   'notices.restored': 'Restored {count} recent {runWord}{messagePart}.',
   'notices.runWordOne': 'run',

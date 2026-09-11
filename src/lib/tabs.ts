@@ -1,3 +1,4 @@
+import type { TabRevertPointer } from './sessionRevert';
 // Lightweight multi-session tab model.
 //
 // Each tab owns its (cwd, displayName, messages). The rest of the UI state
@@ -28,6 +29,10 @@ export interface Tab {
   /** Root tab and ordinal for Fork sessions shown in the history sidebar. */
   forkRootId?: string;
   forkIndex?: number;
+  /** Bound ACP/engine session for this conversation (OpenCode-style identity). */
+  sessionHead?: string | null;
+  /** Active undo pointer; null/undefined = no pending revert. */
+  revert?: TabRevertPointer | null;
 }
 
 let counter = 0;

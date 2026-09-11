@@ -175,6 +175,11 @@ CREATE TABLE IF NOT EXISTS billing_snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_billing_snapshots_period
     ON billing_snapshots(period_start, sampled_at);
+CREATE TABLE IF NOT EXISTS lane_heads (
+    lane_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
 "#;
 
 /// Columns added after the initial schema. Applied with ALTER TABLE so
@@ -450,5 +455,63 @@ impl Db {
                 },
             )
             .collect())
+    }
+
+    /// Persist the authoritative ACP session identity for a UI lane/tab.
+    pub async fn upsert_lane_head(&self, lane_id: &str, session_id: &str) -> Result<(), sqlx::Error> {
+        if lane_id.is_empty() || session_id.is_empty() {
+            return Ok(());
+        }
+        let now = chrono::Utc::now().timestamp_millis();
+        sqlx::query(
+            "INSERT INTO lane_heads (lane_id, session_id, updated_at) VALUES (?, ?, ?)
+             ON CONFLICT(lane_id) DO UPDATE SET
+               session_id = excluded.session_id,
+               updated_at = excluded.updated_at",
+        )
+        .bind(lane_id)
+        .bind(session_id)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_lane_head(&self, lane_id: &str) -> Result<Option<String>, sqlx::Error> {
+        if lane_id.is_empty() {
+            return Ok(None);
+        }
+        sqlx::query_as::<_, (String,)>(
+            "SELECT session_id FROM lane_heads WHERE lane_id = ?",
+        )
+        .bind(lane_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map(|row| row.map(|(session_id,)| session_id))
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn lane_heads_round_trip() {
+        let db = Db::open_memory().await.expect("open memory db");
+        assert_eq!(db.get_lane_head("tab_a").await.unwrap(), None);
+        db.upsert_lane_head("tab_a", "sess-1").await.unwrap();
+        assert_eq!(
+            db.get_lane_head("tab_a").await.unwrap().as_deref(),
+            Some("sess-1")
+        );
+        db.upsert_lane_head("tab_a", "sess-2").await.unwrap();
+        assert_eq!(
+            db.get_lane_head("tab_a").await.unwrap().as_deref(),
+            Some("sess-2")
+        );
+        // Empty lane ids are ignored (legacy default lane).
+        db.upsert_lane_head("", "sess-x").await.unwrap();
+        assert_eq!(db.get_lane_head("").await.unwrap(), None);
     }
 }

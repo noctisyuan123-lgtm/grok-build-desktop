@@ -257,6 +257,33 @@ describe('composer submit → queued run → streamed reply', () => {
     expect(tauri.unknownCommands).toEqual([]);
   });
 
+  it('does not parent a follow-up on a wakeup run id', async () => {
+    const ctx = await bootApp();
+    const { tauri } = ctx;
+    const parentRunId = await submitPrompt(ctx, 'Keep watching the download');
+    await act(async () => {
+      await tauri.streamReply(parentRunId, ['盯着了。']);
+    });
+
+    const wakeupId = 'wakeup-run-parent-trap';
+    await act(async () => {
+      await tauri.emitWakeup(wakeupId, '', 'sess-1');
+      await tauri.emitRunState(wakeupId, 'Running', { startedAt: Date.now() });
+      await tauri.emitRunEvent(wakeupId, { type: 'text', data: '还在看…' });
+    });
+    expect(await convo().findByText('还在看…')).toBeInTheDocument();
+
+    const before = tauri.calls.filter((call) => call.cmd === 'enqueue_run').length;
+    await submitPrompt(ctx, '检查一下是否已经齐全能直接跑了');
+    const enqueue = tauri.calls.filter((call) => call.cmd === 'enqueue_run').slice(before);
+    expect(enqueue).toHaveLength(1);
+    expect(enqueue[0]?.args?.parentRunId).not.toBe(wakeupId);
+    expect(enqueue[0]?.args?.parentRunId).toBeUndefined();
+    const args = enqueue[0]?.args?.args as string[] | undefined;
+    expect(args).toContain('--resume');
+    expect(args?.includes('sess-1') || args?.includes('s-1')).toBe(true);
+  });
+
   it('hides undo while its monitor is watching', async () => {
     const ctx = await bootApp();
     const { tauri } = ctx;
@@ -405,8 +432,10 @@ describe('composer submit → queued run → streamed reply', () => {
     const undoButtons = await convo().findAllByRole('button', { name: t('message.undoResponse') });
     const enabledUndo = undoButtons.find((button) => !(button as HTMLButtonElement).disabled);
     await ctx.user.click(enabledUndo!);
-    await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
     expect(convo().queryByText('Gone.')).not.toBeInTheDocument();
+    // Cleanup-on-commit: engine rewind happens on the next send.
+    await ctx.user.keyboard('{Enter}');
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
 
     exported = [
       exported,
@@ -468,6 +497,8 @@ describe('composer submit → queued run → streamed reply', () => {
     const undoButtons = await convo().findAllByRole('button', { name: t('message.undoResponse') });
     const enabledUndo = undoButtons.find((button) => !(button as HTMLButtonElement).disabled);
     await ctx.user.click(enabledUndo!);
+    expect(convo().queryByText('Second continue reply')).not.toBeInTheDocument();
+    await ctx.user.keyboard('{Enter}');
     await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
 
     exported = [
@@ -541,20 +572,26 @@ describe('composer submit → queued run → streamed reply', () => {
     const enabledUndo = undoButtons.find((button) => !(button as HTMLButtonElement).disabled);
     await ctx.user.click(enabledUndo!);
 
+    expect(composerTextarea().value).toBe('Undo this turn');
+    expect(await convo().findByText('Context kept.')).toBeInTheDocument();
+    expect(convo().queryByText('Undo this answer.')).not.toBeInTheDocument();
+
+    await ctx.user.keyboard('{Enter}');
     await waitFor(() => {
       const opens = ctx.tauri.calls.filter((call) => call.cmd === 'open_grok_cli');
       expect(opens).toHaveLength(opensBeforeUndo + 1);
       expect(opens.at(-1)?.args.sessionId).toBe('rebased-session');
     });
-    expect(composerTextarea().value).toBe('Undo this turn');
-    expect(await convo().findByText('Context kept.')).toBeInTheDocument();
-    expect(convo().queryByText('Undo this answer.')).not.toBeInTheDocument();
-
     const rewind = [...ctx.tauri.calls]
       .reverse()
       .find((call) => call.cmd === 'rewind_grok_session');
     expect(rewind?.args.replayContext).toContain('Keep this context');
     expect(rewind?.args.replayContext).toContain('Context kept.');
+
+    await waitFor(() => expect(ctx.tauri.runIds).toHaveLength(3));
+    const enqueue = [...ctx.tauri.calls].reverse().find((call) => call.cmd === 'enqueue_run')!;
+    const args = enqueue.args.args as string[];
+    expect(args[args.indexOf('--resume') + 1]).toBe('rebased-session');
 
     exported = '## User\n\nCLI after rebase\n\n## Assistant\n\nCLI rebased reply.\n';
     await act(async () => {
@@ -566,12 +603,6 @@ describe('composer submit → queued run → streamed reply', () => {
     expect(await convo().findByText('CLI rebased reply.')).toBeInTheDocument();
     expect(convo().queryByText('Undo this turn')).not.toBeInTheDocument();
     expect(convo().queryByText('Undo this answer.')).not.toBeInTheDocument();
-
-    await ctx.user.keyboard('{Enter}');
-    await waitFor(() => expect(ctx.tauri.runIds).toHaveLength(3));
-    const enqueue = [...ctx.tauri.calls].reverse().find((call) => call.cmd === 'enqueue_run')!;
-    const args = enqueue.args.args as string[];
-    expect(args[args.indexOf('--resume') + 1]).toBe('rebased-session');
   });
 
   it('resumes a rebased head after undoing the only visible turn', async () => {
@@ -596,14 +627,14 @@ describe('composer submit → queued run → streamed reply', () => {
     await waitFor(() => expect(ctx.tauri.commands()).toContain('open_grok_cli'));
 
     await ctx.user.click(await convo().findByRole('button', { name: t('message.undoResponse') }));
-    await waitFor(() => {
-      const open = [...ctx.tauri.calls].reverse().find((call) => call.cmd === 'open_grok_cli');
-      expect(open?.args.sessionId).toBe('empty-rebased-session');
-    });
     expect(composerTextarea().value).toBe('Only turn');
     expect(convo().queryByText('Only answer.')).not.toBeInTheDocument();
 
     await ctx.user.keyboard('{Enter}');
+    await waitFor(() => {
+      const open = [...ctx.tauri.calls].reverse().find((call) => call.cmd === 'open_grok_cli');
+      expect(open?.args.sessionId).toBe('empty-rebased-session');
+    });
     await waitFor(() => expect(ctx.tauri.runIds).toHaveLength(2));
     const enqueue = [...ctx.tauri.calls].reverse().find((call) => call.cmd === 'enqueue_run')!;
     const args = enqueue.args.args as string[];
@@ -738,16 +769,15 @@ describe('composer submit → queued run → streamed reply', () => {
     ).not.toBeInTheDocument();
     await ctx.user.click(await convo().findByRole('button', { name: t('message.undoResponse') }));
 
+    expect(convo().queryByText('This response should disappear too.')).not.toBeInTheDocument();
+    expect(composerTextarea().value).toBe('Undo this prompt from its own controls');
+
+    await ctx.user.keyboard('{Enter}');
     await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
     const rewind = [...ctx.tauri.calls]
       .reverse()
       .find((call) => call.cmd === 'rewind_grok_session');
     expect(rewind?.args.undoPrompt).toBe('Undo this prompt from its own controls');
-    expect(convo().queryByText('Undo this prompt from its own controls')).not.toBeInTheDocument();
-    expect(convo().queryByText('This response should disappear too.')).not.toBeInTheDocument();
-    expect(composerTextarea().value).toBe('Undo this prompt from its own controls');
-
-    await ctx.user.keyboard('{Enter}');
     await waitFor(() => expect(ctx.tauri.runIds).toHaveLength(2));
     const resumedArgs = [...ctx.tauri.calls].reverse().find((call) => call.cmd === 'enqueue_run')
       ?.args.args as string[];
@@ -847,11 +877,15 @@ describe('composer submit → queued run → streamed reply', () => {
 
     await ctx.user.click(await convo().findByRole('button', { name: t('message.undoResponse') }));
 
-    await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
     expect(await convo().findByText('Keep this context')).toBeInTheDocument();
     expect(await convo().findByText('Kept reply.')).toBeInTheDocument();
     expect(convo().queryByText('Remove this turn')).not.toBeInTheDocument();
     expect(convo().queryByText('This reply is undone.')).not.toBeInTheDocument();
+
+    await ctx.user.keyboard('{Enter}');
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
+    expect(await convo().findByText('Keep this context')).toBeInTheDocument();
+    expect(await convo().findByText('Kept reply.')).toBeInTheDocument();
   });
 
   it('lets a user-only tail undo itself through the same context replacement path', async () => {
@@ -881,10 +915,11 @@ describe('composer submit → queued run → streamed reply', () => {
     expect(await convo().findByText('Undo this user-only tail')).toBeInTheDocument();
     await ctx.user.click(await convo().findByRole('button', { name: t('message.undoPrompt') }));
 
-    await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
-    expect(undonePrompt).toBe('Undo this user-only tail');
     expect(convo().queryByText('Undo this user-only tail')).not.toBeInTheDocument();
     expect(composerTextarea().value).toBe('Undo this user-only tail');
+    await ctx.user.keyboard('{Enter}');
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
+    expect(undonePrompt).toBe('Undo this user-only tail');
   });
 
   it('after undo re-seeds visible prior turns into a fresh session (not a bare /clear)', async () => {

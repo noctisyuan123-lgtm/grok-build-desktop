@@ -275,6 +275,59 @@ impl RunQueue {
         }
     }
 
+
+    async fn remember_session(&self, run_id: &str, lane_id: &str, session_id: &str) {
+        {
+            let mut inner = self.inner.lock().await;
+            inner
+                .completed_sessions
+                .insert(run_id.to_string(), session_id.to_string());
+        }
+        if let Err(err) = self.db.upsert_lane_head(lane_id, session_id).await {
+            eprintln!("[grok core] failed to persist lane head for {lane_id}: {err}");
+        }
+    }
+
+    /// Resolve the ACP session a queued follow-up should continue.
+    /// Order: parent completed_sessions → lane_heads → idle-watch owner → prewarmed.
+    async fn resolve_followup_session(&self, rec: &RunRecord) -> Option<String> {
+        if let Some(parent) = rec.parent_run_id.as_deref() {
+            let from_parent = self.inner.lock().await.completed_sessions.get(parent).cloned();
+            if from_parent.is_some() {
+                return from_parent;
+            }
+        }
+
+        if let Ok(Some(head)) = self.db.get_lane_head(&rec.lane_id).await {
+            if !head.is_empty() {
+                return Some(head);
+            }
+        }
+
+        // Wakeup / monitor parents are not runs-table rows. Fall back to the
+        // idle-watch owner run that still owns this lane's live session.
+        if let Some(watch) = self.idle_watches.lock().await.get(&rec.lane_id) {
+            let owner = watch.run_id.clone();
+            let from_owner = self.inner.lock().await.completed_sessions.get(&owner).cloned();
+            if from_owner.is_some() {
+                return from_owner;
+            }
+            if let Some(session_id) = watch.cancel.session_id().await {
+                if !session_id.is_empty() {
+                    return Some(session_id);
+                }
+            }
+        }
+
+        let prewarmed = self.prewarmed_sessions.lock().await.get(&rec.lane_id).map(|s| s.id.clone());
+        if let Some(id) = prewarmed {
+            if !id.is_empty() {
+                return Some(id);
+            }
+        }
+        None
+    }
+
     /// Start and initialize the lane's persistent ACP host ahead of the first
     /// prompt. The per-lane guard stays held while connecting and pairing the
     /// host with its session so a send racing with the prewarm cannot start a
@@ -716,21 +769,29 @@ impl RunQueue {
         });
 
         let mut args: Vec<String> = serde_json::from_str(&rec.args_json).unwrap_or_default();
-        // The frontend may enqueue a same-session follow-up while its parent
-        // is still running. Resolve the parent's ACP session id here, not via
-        // CLI `-c` (ACP ignores that flag and it could select another UI
-        // session sharing the cwd).
-        let parent_session = {
-            let inner = self.inner.lock().await;
-            inner
-                .parent_runs
-                .get(&rec.id)
-                .and_then(|parent| inner.completed_sessions.get(parent))
-                .cloned()
-        };
-        if let Some(session_id) = parent_session {
-            args.push("--resume".to_string());
-            args.push(session_id);
+        // Follow-ups may be enqueued before the parent emits its session id.
+        // Resolve against lane identity (OpenCode-style), not only parent_run_id.
+        // Never silently bare-start a follow-up that named a parent.
+        let args_have_resume = args.windows(2).any(|pair| pair[0] == "--resume")
+            || args.iter().any(|arg| arg == "-c");
+        if !args_have_resume {
+            let resolved = self.resolve_followup_session(&rec).await;
+            if let Some(session_id) = resolved {
+                // Same-session append: never fork a new head for a follow-up.
+                args.retain(|arg| arg != "--fork-session");
+                args.push("--resume".to_string());
+                args.push(session_id);
+            } else if rec.parent_run_id.is_some() {
+                self.finalize(
+                    &rec.id,
+                    RunState::Failed,
+                    Some(
+                        "no session head to resume; refusing bare start".to_string(),
+                    ),
+                )
+                .await;
+                return;
+            }
         }
         let grok_path = self.inner.lock().await.grok_path.clone();
         let cwd = std::path::PathBuf::from(&rec.cwd);
@@ -879,11 +940,12 @@ impl RunQueue {
                                 Ok(ev) => {
                                     consecutive_fail = 0;
                                     if let GrokEvent::End { session_id, .. } = &ev {
-                                        self.inner
-                                            .lock()
-                                            .await
-                                            .completed_sessions
-                                            .insert(rec.id.clone(), session_id.clone());
+                                        self.remember_session(
+                                            &rec.id,
+                                            &rec.lane_id,
+                                            session_id,
+                                        )
+                                        .await;
                                     }
                                     let _ = self.tx.send(QueueMessage {
                                         run_id: rec.id.clone(),
@@ -1083,11 +1145,8 @@ impl RunQueue {
         let cancelled = self.inner.lock().await.cancelled.contains(&rec.id);
         match result {
             Ok(turn) if !cancelled => {
-                self.inner
-                    .lock()
-                    .await
-                    .completed_sessions
-                    .insert(rec.id.clone(), turn.session_id.clone());
+                self.remember_session(&rec.id, &rec.lane_id, &turn.session_id)
+                    .await;
                 let event = GrokEvent::End {
                     stop_reason: turn.stop_reason,
                     session_id: turn.session_id,
@@ -1112,11 +1171,8 @@ impl RunQueue {
                 // ACP cancellation ends the turn but not the session. Keep
                 // the host and record its head so the next Desktop turn can
                 // continue the same model context.
-                self.inner
-                    .lock()
-                    .await
-                    .completed_sessions
-                    .insert(rec.id.clone(), turn.session_id.clone());
+                self.remember_session(&rec.id, &rec.lane_id, &turn.session_id)
+                    .await;
                 let event = GrokEvent::End {
                     stop_reason: "Cancelled".into(),
                     session_id: turn.session_id,
@@ -1138,11 +1194,8 @@ impl RunQueue {
             Err(error) => {
                 if cancelled {
                     if let Some(session_id) = host.cancel_handle().session_id().await {
-                        self.inner
-                            .lock()
-                            .await
-                            .completed_sessions
-                            .insert(rec.id.clone(), session_id.clone());
+                        self.remember_session(&rec.id, &rec.lane_id, &session_id)
+                            .await;
                         let event = GrokEvent::End {
                             stop_reason: "Cancelled".into(),
                             session_id,
@@ -1254,5 +1307,16 @@ mod tests {
             prewarm_session_key(binary, cwd, &base),
             prewarm_session_key(binary, cwd, &base)
         );
+    }
+
+    #[test]
+    fn followup_without_resume_flag_is_detectable() {
+        let with_resume: Vec<String> = vec!["--resume".into(), "sess".into()];
+        let with_c: Vec<String> = vec!["-c".into()];
+        let bare: Vec<String> = vec!["--model".into(), "grok".into()];
+        assert!(with_resume.windows(2).any(|pair| pair[0] == "--resume"));
+        assert!(with_c.iter().any(|arg| arg.as_str() == "-c"));
+        assert!(!bare.windows(2).any(|pair| pair[0] == "--resume"));
+        assert!(!bare.iter().any(|arg| arg.as_str() == "-c"));
     }
 }

@@ -452,6 +452,65 @@ export function useSessionTabs(deps: SessionTabsDeps) {
     );
   }
 
+
+  function updateActiveTabMeta(
+    patch: Partial<Pick<Tab, 'sessionHead' | 'revert'>>,
+  ): void {
+    if (!activeTabId) return;
+    updateTabMeta(activeTabId, patch);
+  }
+
+  function updateTabMeta(
+    tabId: string,
+    patch: Partial<Pick<Tab, 'sessionHead' | 'revert' | 'messages'>>,
+  ): void {
+    if (!tabId) return;
+    const current = sessionStateRef.current;
+    if (tabId === current.activeTabId && 'messages' in patch && patch.messages) {
+      setMessages(patch.messages as ChatMessage[]);
+    }
+    setTabs((existing) =>
+      existing.map((tab) => {
+        if (tab.id !== tabId) return tab;
+        const next = { ...tab, ...patch };
+        if (tabId === current.activeTabId && 'messages' in patch && patch.messages) {
+          // Active tab transcript is mirrored from messages state; keep tab copy aligned.
+          next.messages = patch.messages as TabMessage[];
+        }
+        return next;
+      }),
+    );
+  }
+
+  function appendTabMessages(tabId: string, rows: ChatMessage[]) {
+    if (!tabId || rows.length === 0) return;
+    const current = sessionStateRef.current;
+    if (tabId === current.activeTabId) {
+      setMessages((msgs) => {
+        const next = [...msgs];
+        for (const message of rows) {
+          if (message.runId && next.some((row) => row.runId === message.runId)) continue;
+          if (next.some((row) => row.id === message.id)) continue;
+          next.push(message);
+        }
+        return next;
+      });
+      return;
+    }
+    setTabs((existing) =>
+      existing.map((tab) => {
+        if (tab.id !== tabId) return tab;
+        const nextMessages = [...tab.messages];
+        for (const message of rows) {
+          if (message.runId && nextMessages.some((row) => row.runId === message.runId)) continue;
+          if (nextMessages.some((row) => row.id === message.id)) continue;
+          nextMessages.push(message as unknown as TabMessage);
+        }
+        return { ...tab, messages: nextMessages };
+      }),
+    );
+  }
+
   return {
     tabs,
     activeTabId,
@@ -462,5 +521,8 @@ export function useSessionTabs(deps: SessionTabsDeps) {
     deleteSession,
     sessionFirstPrompt,
     appendTabMessage,
+    appendTabMessages,
+    updateActiveTabMeta,
+    updateTabMeta,
   };
 }

@@ -25,7 +25,7 @@ export interface ComposerSectionProps {
   composerRef: React.RefObject<ComposerHandle | null>;
   codingCwd: string;
   messages: readonly ChatMessage[];
-  buildRunArgs: () => string[];
+  buildRunArgs: (laneId?: string) => string[];
   drafts: Record<Mode, string>;
   mode: Mode;
   setDrafts: React.Dispatch<React.SetStateAction<Record<Mode, string>>>;
@@ -35,6 +35,7 @@ export interface ComposerSectionProps {
     prompt: string;
     rawText?: string;
     attachments: ComposerAttachment[];
+    laneId?: string;
   }) => void;
   setSessionNotice: (notice: string | null) => void;
   modelConfig: ReturnType<typeof useModelConfig>;
@@ -45,12 +46,15 @@ export interface ComposerSectionProps {
   locked?: boolean;
   grokIsRunning: boolean;
   activeRunId: string | null;
+  /** Real queue run id eligible as parent_run_id (never a wakeup id). */
+  enqueueParentRunId?: string | null;
   /** UI session / tab id for concurrent lane scheduling. */
   laneId: string;
   stopRun: (runId: string) => void;
   /** Empty-session greeting and workspace context, kept on the composer column. */
   emptyState?: ReactNode;
   offline?: boolean;
+  beforeEnqueue?: (laneId?: string) => Promise<void>;
 }
 
 export function ComposerSection({
@@ -71,10 +75,12 @@ export function ComposerSection({
   locked = false,
   grokIsRunning,
   activeRunId,
+  enqueueParentRunId = null,
   laneId,
   stopRun,
   emptyState,
   offline = false,
+  beforeEnqueue,
 }: ComposerSectionProps) {
   const {
     reasoningEffort,
@@ -147,7 +153,8 @@ export function ComposerSection({
         ref={composerRef}
         cwd={codingCwd}
         argsBuilder={buildRunArgs}
-        parentRunId={activeRunId ?? undefined}
+        parentRunId={enqueueParentRunId ?? undefined}
+        beforeEnqueue={beforeEnqueue}
         laneId={laneId}
         sessionRunIds={messages
           .map((message) => message.runId)

@@ -16,7 +16,13 @@ import './App.css';
 import { cancelRun, enqueueRun, ensureStreamListenersAttached, prewarmRun } from './lib/grok';
 import { onDocumentLinkClick } from './lib/externalLinks';
 import { hasTauriRuntime } from './lib/runtime';
-import { cancelOpenWork, isRunInFlight, streamStore } from './lib/streamStore';
+import {
+  cancelOpenWork,
+  isEnqueueParentCandidate,
+  isRunInFlight,
+  markWakeupRun,
+  streamStore,
+} from './lib/streamStore';
 import { playCompletionSound, primeCompletionSound } from './lib/completionSound';
 import { showCompletionPopup } from './lib/completionPopup';
 import { isBackgroundSessionRun } from './lib/completionNotification';
@@ -42,6 +48,10 @@ import { SubagentRail, SubagentUiProvider } from './components/SubagentRail';
 import { SettingsHost } from './components/SettingsHost';
 import type { SettingsSection } from './components/SettingsPage';
 import { UndoToast } from './components/UndoToast';
+import {
+  messagesBeforeRevert,
+  type TabRevertPointer,
+} from './lib/sessionRevert';
 import { useActiveRunKey } from './hooks/useActiveRun';
 import { useGrokRunners } from './hooks/useGrokRunners';
 import { useUndoToast } from './hooks/useUndoToast';
@@ -162,6 +172,8 @@ function App() {
     tabId: string;
     replayMessages: Array<{ role: 'user' | 'assistant'; content: string }>;
   } | null>(null);
+  // Tip-forked tabs need one native --fork-session before same-session append.
+  const nativeForkOnceRef = useRef<{ tabId: string } | null>(null);
   const setComposerValue = useCallback((value: string) => {
     composerRef.current?.setValue(value);
   }, []);
@@ -170,6 +182,8 @@ function App() {
   // Live CLI↔Desktop link is opt-in via /cli or /desktop only — never restore
   // from localStorage on boot (that was resuming the old head into New Session).
   const [liveSessionId, setLiveSessionId] = useState<string | null>(null);
+  // Mirrors liveSessionId for same-tick reads (cleanup-on-commit → enqueue).
+  const liveSessionIdRef = useRef<string | null>(null);
   // Only apply poll updates to the tab that established the link.
   const liveTabIdRef = useRef<string | null>(null);
   const liveExportFingerprintRef = useRef<string>('');
@@ -246,6 +260,9 @@ function App() {
     deleteSession,
     sessionFirstPrompt,
     appendTabMessage,
+    appendTabMessages,
+    updateActiveTabMeta,
+    updateTabMeta,
   } = useSessionTabs({
     messages,
     setMessages,
@@ -430,6 +447,7 @@ function App() {
         if (!runId) return;
         const { activeTabId } = completionSessionRef.current;
         const laneId = event.payload?.laneId || activeTabId;
+        markWakeupRun(runId, event.payload?.sessionId);
         completionRunOwnerRef.current.set(runId, laneId);
         const pending = {
           id: makeId('a'),
@@ -746,7 +764,8 @@ function App() {
   }
 
   function linkLiveSession(sessionId: string | null, tabId?: string | null) {
-    if (sessionId !== liveSessionId) liveExportFingerprintRef.current = '';
+    if (sessionId !== liveSessionIdRef.current) liveExportFingerprintRef.current = '';
+    liveSessionIdRef.current = sessionId;
     setLiveSessionId(sessionId);
     noteLiveSession(sessionId);
     noteCliHandoff(sessionId);
@@ -757,14 +776,19 @@ function App() {
   function sessionHasInflightDesktopRun(list: typeof messages = messagesRef.current): boolean {
     return list.some((message) => {
       if (message.role !== 'assistant' || !message.runId) return false;
-      return isRunInFlight(streamStore.getRunSnapshot(message.runId));
+      // Wakeup bubbles are not queue parents; treating them as inflight forced
+      // the composer to drop resumeSessionId and pass a ghost parent_run_id.
+      return isEnqueueParentCandidate(streamStore.getRunSnapshot(message.runId));
     });
   }
 
   /** True when this tab is the one that owns the current CLI live link. */
   function isLiveOwnerTab(): boolean {
     return Boolean(
-      liveSessionId && liveTabIdRef.current && activeTabId && liveTabIdRef.current === activeTabId,
+      liveSessionIdRef.current &&
+        liveTabIdRef.current &&
+        activeTabId &&
+        liveTabIdRef.current === activeTabId,
     );
   }
 
@@ -807,7 +831,13 @@ function App() {
         imported = dropUndoneUserTurn(imported, undoneUserContentRef.current);
       }
     } else if (undoneUserContentRef.current) {
-      imported = dropUndoneUserTurn(imported, undoneUserContentRef.current);
+      const undone = undoneUserContentRef.current;
+      const rawHadUndone = imported.some(
+        (message) => message.role === 'user' && message.content.trim() === undone.trim(),
+      );
+      imported = dropUndoneUserTurn(imported, undone);
+      // Keep filtering while CLI/export still echoes the ghost turn.
+      if (!rawHadUndone) undoneUserContentRef.current = null;
     }
     // A successful rewind can briefly produce a short export while the
     // session's durable transcript is still being rewritten. Keep the
@@ -998,22 +1028,32 @@ function App() {
 
   // buildGrokArgs/buildGrokRules are pure functions in app/grokArgs.ts; this
   // closure snapshots the current run config for the Composer's submit path.
-  function buildRunArgs(): string[] {
+  function buildRunArgs(forTabId?: string): string[] {
     // Run state is global because the Rust queue is global, but session
     // continuation is not. Only the assistant turn in the currently visible
     // session may parent a queued follow-up. A script in another session must
     // not force a new session through `-c`, nor make its reply look like it
     // belongs to the current tab.
-    const activeSessionHasInflightRun = sessionHasInflightDesktopRun();
-    const visibleSessionId = [...messages]
-      .reverse()
-      .find((message) => message.role === 'assistant' && message.meta?.sessionId)?.meta?.sessionId;
+    const targetTabId = forTabId || activeTabId;
+    const targetTab = tabs.find((tab) => tab.id === targetTabId);
+    const targetMessages =
+      targetTabId === activeTabId
+        ? messagesRef.current
+        : ((targetTab?.messages as typeof messages | undefined) ?? []);
+    const activeSessionHasInflightRun = sessionHasInflightDesktopRun(targetMessages);
     const rebased = rebasedSessionHeadRef.current;
     const inPlaceEditSessionId = editResumeSessionInPlaceRef.current;
+    const visibleSessionId = [...targetMessages]
+      .reverse()
+      .find((message) => message.role === 'assistant' && message.meta?.sessionId)?.meta?.sessionId;
+    // Prefer the pinned tab's head — never the tab the user switched to mid-await.
     const previousSessionId =
       inPlaceEditSessionId ??
+      (rebased?.tabId === targetTabId ? rebased.sessionId : null) ??
       visibleSessionId ??
-      (rebased?.tabId === activeTabId ? rebased.sessionId : undefined);
+      (targetTabId === activeTabId ? currentSessionId() : null) ??
+      targetTab?.sessionHead ??
+      (targetTabId === activeTabId ? tabSessionHead : null);
     // A turn currently running is the parent of anything newly queued. Its
     // session id does not exist yet, so do not accidentally fork from the
     // older completed turn found above.
@@ -1025,18 +1065,21 @@ function App() {
     // turn).
     const resumeSessionId = undoPlan
       ? null
-      : forkSessionPlanRef.current?.tabId === activeTabId
+      : forkSessionPlanRef.current?.tabId === targetTabId
         ? null
         : activeSessionHasInflightRun
           ? null
           : previousSessionId;
     const forkPlan =
-      forkSessionPlanRef.current?.tabId === activeTabId ? forkSessionPlanRef.current : null;
+      forkSessionPlanRef.current?.tabId === targetTabId ? forkSessionPlanRef.current : null;
     const forceNewSession = Boolean(undoPlan || forkPlan);
-    // Share (no fork) only when this tab still owns the live link AND the
-    // visible head is that same session.
+    // Share (no fork) only when the pinned tab owns the live link AND the
+    // resume head is that same session.
+    const liveId = liveSessionIdRef.current;
+    const pinnedOwnsLive =
+      Boolean(liveId) && liveTabIdRef.current === targetTabId && Boolean(targetTabId);
     const shareSession = Boolean(
-      isLiveOwnerTab() && liveSessionId && resumeSessionId && resumeSessionId === liveSessionId,
+      pinnedOwnsLive && liveId && resumeSessionId && resumeSessionId === liveId,
     );
     return buildGrokArgs({
       mode,
@@ -1055,8 +1098,12 @@ function App() {
       forceNewSession,
       replayMessages: undoPlan?.replayMessages ?? forkPlan?.replayMessages,
       shareSession,
+      // OpenCode-style same-session append: do not fork on ordinary follow-ups.
+      // Explicit tip-fork gets one native --fork-session on the child tab.
       resumeSessionInPlace:
-        resumeSessionId != null && editResumeSessionInPlaceRef.current === resumeSessionId,
+        resumeSessionId != null &&
+        !forceNewSession &&
+        nativeForkOnceRef.current?.tabId !== targetTabId,
     });
   }
 
@@ -1104,14 +1151,21 @@ function App() {
     rawText?: string;
     attachments: ComposerAttachment[];
     attachedFolder?: ComposerFolder;
+    laneId?: string;
   }) {
-    completionRunOwnerRef.current.set(info.runId, activeTabId);
+    const ownerTabId = info.laneId || activeTabId;
+    completionRunOwnerRef.current.set(info.runId, ownerTabId);
     // Post-Undo re-seed has been consumed. Later turns resume the new session.
     undoSessionPlanRef.current = null;
-    if (forkSessionPlanRef.current?.tabId === activeTabId) {
+    if (forkSessionPlanRef.current?.tabId === ownerTabId) {
       forkSessionPlanRef.current = null;
     }
-    undoneUserContentRef.current = null;
+    if (nativeForkOnceRef.current?.tabId === ownerTabId) {
+      nativeForkOnceRef.current = null;
+    }
+    // Keep undoneUserContentRef so a brief CLI export that still contains the
+    // undone turn cannot paint it back after cleanup-on-commit. Cleared on
+    // toast restore, session reset, or a clean rehydrate below.
     pendingUndoVisibleMessagesRef.current = null;
     editResumeSessionInPlaceRef.current = null;
     const now = Date.now();
@@ -1130,9 +1184,9 @@ function App() {
       }));
     }
     const persistedAttachments = info.attachments.map(toPersistedAttachmentRef);
-    appendMessage({
+    const userMessage = {
       id: userMessageId,
-      role: 'user',
+      role: 'user' as const,
       // Show what the user ACTUALLY typed, not the sent prompt. The Composer
       // appends expanded @-mention file contents for grok's benefit — that
       // belongs in the request, not in the chat bubble. rawText is the clean
@@ -1141,12 +1195,22 @@ function App() {
       ts: now,
       meta: { workflow: mode === 'coding' ? codingWorkflow : 'chat' },
       attachments: persistedAttachments.length > 0 ? persistedAttachments : undefined,
-    });
+    };
+    const assistantMessage = {
+      id: assistantMessageId,
+      role: 'assistant' as const,
+      content: '',
+      ts: now,
+      runId: info.runId,
+      status: 'streaming' as const,
+      meta: { model: activeModel, workflow: mode === 'coding' ? codingWorkflow : 'chat' },
+    };
+    appendTabMessages(ownerTabId, [userMessage, assistantMessage]);
     if (persistedAttachments.length > 0 && hasTauriRuntime()) {
       void Promise.all(
         info.attachments.map((attachment) =>
           invoke<void>('save_attachment', {
-            sessionId: activeTabId,
+            sessionId: ownerTabId,
             assetId: attachment.id,
             dataUrl: attachment.dataUrl,
           }),
@@ -1159,15 +1223,6 @@ function App() {
         );
       });
     }
-    appendMessage({
-      id: assistantMessageId,
-      role: 'assistant',
-      content: '',
-      ts: now,
-      runId: info.runId,
-      status: 'streaming',
-      meta: { model: activeModel, workflow: mode === 'coding' ? codingWorkflow : 'chat' },
-    });
     setTotalRuns((current) => {
       const next = current + 1;
       window.localStorage.setItem('grok-desktop-run-count-total', String(next));
@@ -1493,6 +1548,44 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, activeRunKey]);
   const activeSessionIsRunning = activeSessionRunId != null;
+  // parent_run_id must be a real queue row. Wakeup ids are UI-only and caused
+  // silent bare starts when used as parents.
+  const activeEnqueueParentRunId = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message?.role !== 'assistant' || !message.runId) continue;
+      if (isEnqueueParentCandidate(streamStore.getRunSnapshot(message.runId))) {
+        return message.runId;
+      }
+    }
+    return null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, activeRunKey]);
+
+  const activeTabMeta = tabs.find((tab) => tab.id === activeTabId);
+  const activeRevert = activeTabMeta?.revert ?? null;
+  const tabSessionHead = activeTabMeta?.sessionHead ?? null;
+  const visibleMessages = useMemo(
+    () => messagesBeforeRevert(messages, activeRevert),
+    [messages, activeRevert],
+  );
+
+  // Keep tab.sessionHead aligned with the latest known engine identity.
+  useEffect(() => {
+    const head =
+      [...messages]
+        .reverse()
+        .find((message) => message.role === 'assistant' && message.meta?.sessionId)?.meta
+        ?.sessionId ??
+      (rebasedSessionHeadRef.current?.tabId === activeTabId
+        ? rebasedSessionHeadRef.current.sessionId
+        : null) ??
+      liveSessionId;
+    if (head && head !== tabSessionHead) {
+      updateActiveTabMeta({ sessionHead: head });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, activeTabId, liveSessionId]);
 
   // Refresh the static preview when a streaming grok run finishes. The main
   // chat path (enqueue_run) never touches lastRun, so keying only on it left
@@ -1511,8 +1604,60 @@ function App() {
   // Removing an older pair would leave later answers backed by context that is
   // no longer visible. The prompt is restored verbatim to the composer, and
   // the existing undo toast makes this destructive operation recoverable.
+
+  async function commitRevertIfNeeded(forTabId?: string): Promise<void> {
+    const targetTabId = forTabId || activeTabId;
+    const targetTab = tabs.find((tab) => tab.id === targetTabId);
+    const revert = targetTab?.revert ?? null;
+    if (!revert) return;
+    const sourceMessages =
+      targetTabId === activeTabId
+        ? messages
+        : ((targetTab?.messages as typeof messages | undefined) ?? []);
+    const preserved = messagesBeforeRevert(sourceMessages, revert);
+    const grokSessionId =
+      revert.grokSessionId ||
+      targetTab?.sessionHead ||
+      [...preserved]
+        .reverse()
+        .find((message) => message.role === 'assistant' && message.meta?.sessionId)?.meta
+        ?.sessionId ||
+      (targetTabId === activeTabId ? currentSessionId() : null) ||
+      '';
+    // Physically tighten UI now that redo window closes — only the pinned tab.
+    if (targetTabId === activeTabId) {
+      messagesRef.current = preserved;
+      setMessages(preserved);
+      updateActiveTabMeta({ revert: null });
+    } else {
+      updateTabMeta(targetTabId, { revert: null, messages: preserved });
+    }
+    if (!hasTauriRuntime() || !grokSessionId) {
+      undoSessionPlanRef.current = {
+        replayMessages: preserved
+          .filter((message) => message.role === 'user' || message.role === 'assistant')
+          .map((message) => ({
+            role: message.role as 'user' | 'assistant',
+            content: message.content,
+          })),
+      };
+      return;
+    }
+    pendingUndoVisibleMessagesRef.current = {
+      sessionId: grokSessionId,
+      messages: preserved,
+    };
+    suppressLiveRehydrateRef.current = true;
+    const ok = await persistUndoToGrokSession(grokSessionId);
+    if (!ok) {
+      // Fall through: undoSessionPlanRef still set so next turn force-new + replay.
+      setSessionNotice(t('notices.undoRewindFailed'));
+    }
+  }
+
   function undoLatestTurn(messageId: string) {
     if (activeSessionIsRunning) return;
+    if (activeRevert) return;
     const selectedIndex = messages.findIndex((message) => message.id === messageId);
     if (selectedIndex < 0) return;
     const selected = messages[selectedIndex];
@@ -1536,13 +1681,18 @@ function App() {
       return;
     }
 
-    const snapshot = messages;
     const previousDraft = composerRef.current?.getValue() ?? '';
     const previousFolder = composerRef.current?.getAttachedFolder() ?? null;
     const restoredFolder = messageFolders[user.id] ?? null;
     const preserved = messages.slice(0, assistant ? assistantIndex - 1 : selectedIndex);
-    // Keep still-visible turns as replay context; exclude the undone pair.
-    // If ACP rewind fails, the next submit starts fresh and re-seeds these.
+    const anchor = preserved[preserved.length - 1] ?? null;
+    const grokSessionId =
+      assistant?.meta?.sessionId ?? currentSessionId() ?? tabSessionHead ?? liveSessionId;
+    if (!grokSessionId && hasTauriRuntime()) {
+      // Without an engine head we can still hide UI turns; commit will rebase.
+    }
+
+    // OpenCode pointer: keep messages, hide via revert; engine rewind waits for commit.
     undoSessionPlanRef.current = {
       replayMessages: preserved
         .filter((message) => message.role === 'user' || message.role === 'assistant')
@@ -1552,37 +1702,40 @@ function App() {
         })),
     };
     undoneUserContentRef.current = user.content;
-    suppressLiveRehydrateRef.current = true;
-    const grokSessionId = assistant?.meta?.sessionId ?? currentSessionId() ?? liveSessionId;
-    if (grokSessionId) {
-      pendingUndoVisibleMessagesRef.current = {
-        sessionId: grokSessionId,
-        messages: preserved,
-      };
-    }
-    messagesRef.current = preserved;
-    setMessages(preserved);
+    const pointer: TabRevertPointer | null = anchor
+      ? {
+          messageId: anchor.id,
+          grokSessionId: grokSessionId ?? '',
+          undoneRunId: assistant?.runId,
+        }
+      : {
+          // Undoing the only turn: empty visible transcript.
+          messageId: '',
+          grokSessionId: grokSessionId ?? '',
+          undoneRunId: assistant?.runId,
+        };
+    // Empty messageId => hide everything (messagesBeforeRevert finds no anchor).
+    updateActiveTabMeta({
+      revert:
+        pointer.messageId === ''
+          ? { ...pointer, messageId: '__empty__' }
+          : pointer,
+    });
+    // Sentinel: messagesBeforeRevert must treat __empty__ as hide-all.
     updatePrompt(user.content);
     composerRef.current?.setAttachedFolder(restoredFolder);
     composerRef.current?.focus();
     showUndoToast({
       text: t('message.turnUndone'),
       undo: () => {
+        // Redo / unrevert: pure UI, engine untouched.
         undoSessionPlanRef.current = null;
         undoneUserContentRef.current = null;
-        pendingUndoVisibleMessagesRef.current = null;
-        suppressLiveRehydrateRef.current = false;
-        messagesRef.current = snapshot;
-        setMessages(snapshot);
+        updateActiveTabMeta({ revert: null });
         updatePrompt(previousDraft);
         composerRef.current?.setAttachedFolder(previousFolder);
       },
     });
-    if (hasTauriRuntime() && grokSessionId) {
-      void persistUndoToGrokSession(grokSessionId);
-    } else {
-      suppressLiveRehydrateRef.current = false;
-    }
   }
 
   function forkAssistantResponse(messageId: string) {
@@ -1611,6 +1764,9 @@ function App() {
           content: message.content,
         })),
       };
+      nativeForkOnceRef.current = null;
+    } else {
+      nativeForkOnceRef.current = { tabId };
     }
   }
 
@@ -1701,7 +1857,7 @@ function App() {
   ): Promise<boolean> {
     try {
       const undoPlan = undoSessionPlanRef.current;
-      const wasLive = liveSessionId === sessionId;
+      const wasLive = liveSessionIdRef.current === sessionId;
       const result = await invoke<{
         rewound: boolean;
         sessionId: string;
@@ -1750,6 +1906,7 @@ function App() {
           };
           messagesRef.current = retainedMessages;
           setMessages(retainedMessages);
+          updateActiveTabMeta({ sessionHead: nextSessionId });
           // A replacement session is only shared when the undone turn was
           // actually connected to `/cli`. Ordinary Desktop runs must resume
           // the new isolated head without inventing a shared leader; doing
@@ -1791,8 +1948,8 @@ function App() {
   }
 
   const messageRefs: MessageRef[] = useMemo(() => {
-    const latestIndex = messages.length - 1;
-    const latestMessage = messages[latestIndex];
+    const latestIndex = visibleMessages.length - 1;
+    const latestMessage = visibleMessages[latestIndex];
     const latestSnapshot =
       latestMessage?.role === 'assistant' && latestMessage.runId
         ? streamStore.getRunSnapshot(latestMessage.runId)
@@ -1820,10 +1977,10 @@ function App() {
     const latestTurnCanEdit = Boolean(
       !activeSessionIsRunning &&
       latestUserIndex >= 0 &&
-      messages[latestUserIndex]?.role === 'user' &&
-      messages[latestUserIndex]?.content.trim(),
+      visibleMessages[latestUserIndex]?.role === 'user' &&
+      visibleMessages[latestUserIndex]?.content.trim(),
     );
-    return messages.map((m, index) =>
+    return visibleMessages.map((m, index) =>
       m.role === 'user'
         ? {
             runId: '',
@@ -1864,7 +2021,7 @@ function App() {
             showCopy: index === latestIndex && tipCopyForkReady,
           },
     );
-  }, [activeSessionIsRunning, messageAttachments, messages]);
+  }, [activeSessionIsRunning, messageAttachments, visibleMessages]);
   return (
     <main
       className={`app-shell theme-${themeMode}${expandedWindow ? ' has-task-rail' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}${sidebarTransitionReady ? ' sidebar-transition-ready' : ''}`}
@@ -1944,16 +2101,16 @@ function App() {
             project chip (click → folder picker), a draggable spacer, session
             usage, and panels. Stop replaces the composer send button while running. */}
         <TitleBar
-          messages={messages}
+          messages={visibleMessages}
           codingCwd={codingCwd}
           anyPanelOpen={contextOpen || previewOpen || terminalOpen || toolsOpen}
           openPanelMenu={openPanelMenu}
         />
-        <LiveRunHud messages={messages} />
-        <SubagentUiProvider messages={messages}>
+        <LiveRunHud messages={visibleMessages} />
+        <SubagentUiProvider messages={visibleMessages}>
           <section className="workbench">
             <div
-              className={`conversation-panel${messages.length === 0 ? ' is-empty' : ''}`}
+              className={`conversation-panel${visibleMessages.length === 0 ? ' is-empty' : ''}`}
               onContextMenu={openConversationMenu}
             >
               {/* Session tabs removed per request — Claude-Desktop-style single
@@ -1964,7 +2121,7 @@ function App() {
               {/* Scroll position is owned by MessageList's Virtuoso instance —
                 this div only provides the flex sizing for it. */}
               <div className="conversation-scroll">
-                {messages.length > 0 ? (
+                {visibleMessages.length > 0 ? (
                   <MessageList
                     key={activeTabId}
                     messages={messageRefs}
@@ -2002,7 +2159,7 @@ function App() {
               <ComposerSection
                 composerRef={composerRef}
                 codingCwd={codingCwd}
-                messages={messages}
+                messages={visibleMessages}
                 buildRunArgs={buildRunArgs}
                 drafts={drafts}
                 mode={mode}
@@ -2018,10 +2175,12 @@ function App() {
                 offline={!appOnline}
                 grokIsRunning={activeSessionIsRunning}
                 activeRunId={activeSessionRunId}
+                enqueueParentRunId={activeEnqueueParentRunId}
+                beforeEnqueue={commitRevertIfNeeded}
                 laneId={activeTabId}
                 stopRun={stopRun}
                 emptyState={
-                  messages.length === 0 ? (
+                  visibleMessages.length === 0 ? (
                     <EmptyState
                       codingCwd={codingCwd}
                       folderPickerBusy={folderPickerBusy}
@@ -2032,7 +2191,7 @@ function App() {
                   ) : null
                 }
               />
-              {expandedWindow ? <SubagentRail messages={messages} onStopTask={stopRun} /> : null}
+              {expandedWindow ? <SubagentRail messages={visibleMessages} onStopTask={stopRun} /> : null}
             </div>
             <PreviewPanel
               open={previewOpen}
