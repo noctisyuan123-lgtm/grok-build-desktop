@@ -237,7 +237,11 @@ impl std::fmt::Display for RewindTargetError {
 }
 
 /// Prefer the rewind point that matches the Desktop-undone user text.
-/// Blindly dropping the newest grok prompt undoes a later CLI turn instead.
+///
+/// Multi-level Undo is intentional: matching an earlier unique preview keeps
+/// `points[drop_at - 1]` and lets `_x.ai/rewind/execute` drop that turn and
+/// every later prompt (Grok native `targetPromptIndex`). Ambiguous duplicate
+/// previews still refuse so we never guess which "continue" to truncate.
 pub fn kept_prompt_index_for_undo(
     points: &Value,
     undone_preview: Option<&str>,
@@ -276,11 +280,6 @@ pub fn kept_prompt_index_for_undo(
             }
         }
     };
-    if drop_at + 1 < points.len() {
-        return Err(RewindTargetError::NewerPrompts {
-            count: points.len() - drop_at - 1,
-        });
-    }
     if drop_at == 0 {
         return Ok(None);
     }
@@ -2078,9 +2077,39 @@ mod tests {
                 { "prompt_index": 2, "prompt_preview": "from CLI" }
             ]
         });
+        // Multi-level: undoing an earlier unique prompt keeps the prior index
+        // and drops that turn plus every later one (including a later CLI turn).
         assert_eq!(
             kept_prompt_index_for_undo(&labeled, Some("from desktop")),
-            Err(RewindTargetError::NewerPrompts { count: 1 })
+            Ok(Some(0))
+        );
+        assert_eq!(
+            kept_prompt_index_for_undo(&labeled, Some("from CLI")),
+            Ok(Some(1))
+        );
+    }
+
+    #[test]
+    fn kept_prompt_index_matches_non_last_unique_points() {
+        let points = json!({
+            "rewind_points": [
+                { "prompt_index": 0, "prompt_preview": "first" },
+                { "prompt_index": 1, "prompt_preview": "second" },
+                { "prompt_index": 2, "prompt_preview": "third" }
+            ]
+        });
+        assert_eq!(
+            kept_prompt_index_for_undo(&points, Some("second")),
+            Ok(Some(0))
+        );
+        assert_eq!(
+            kept_prompt_index_for_undo(&points, Some("third")),
+            Ok(Some(1))
+        );
+        assert_eq!(
+            kept_prompt_index_for_undo(&points, Some("first")),
+            Ok(None),
+            "dropping the first prompt cannot keep an earlier index"
         );
     }
 

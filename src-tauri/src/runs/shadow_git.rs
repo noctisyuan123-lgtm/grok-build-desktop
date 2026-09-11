@@ -660,6 +660,31 @@ mod tests {
     }
 
     #[test]
+    fn multi_turn_restore_targets_specific_prompt_boundary() {
+        let (cwd, base, _guard) = temp_pair();
+        fs::write(cwd.join("shared.txt"), "v0").unwrap();
+
+        capture_before_turn(&cwd, "sess-1", "run-1", "first turn").unwrap();
+        fs::write(cwd.join("shared.txt"), "v1").unwrap();
+        fs::write(cwd.join("only-first.txt"), "a").unwrap();
+
+        capture_before_turn(&cwd, "sess-1", "run-2", "second turn").unwrap();
+        fs::write(cwd.join("shared.txt"), "v2").unwrap();
+        fs::write(cwd.join("only-second.txt"), "b").unwrap();
+
+        // Undo the first turn: restore the tree captured BEFORE "first turn".
+        let restored =
+            restore_undone_turn(&cwd, "sess-1", Some("first turn")).unwrap();
+        assert!(restored >= 1, "expected restore, got {restored}");
+        assert_eq!(fs::read_to_string(cwd.join("shared.txt")).unwrap(), "v0");
+        assert!(!cwd.join("only-first.txt").exists());
+        assert!(!cwd.join("only-second.txt").exists());
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+
+    #[test]
     fn restore_rejects_path_escape_candidates() {
         let (cwd, base, _guard) = temp_pair();
         fs::write(cwd.join("ok.txt"), "v1").unwrap();

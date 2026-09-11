@@ -1353,12 +1353,11 @@ fn prewarm_session_key(
     cwd: &std::path::Path,
     config: &CoreConfig,
 ) -> String {
-    format!(
-        "{}\0{}\0{}",
-        cwd.to_string_lossy(),
-        config.launch_key(binary),
-        config.rules.as_deref().unwrap_or_default()
-    )
+    // Stable host identity only: cwd + launch_key(binary).
+    // launch_args already covers model/effort/permission/memory/websearch/
+    // subagents/leader flags and excludes resume/fork/rules blobs — including
+    // raw rules here would thrash prewarm on undo-replay instruction text.
+    format!("{}\0{}", cwd.to_string_lossy(), config.launch_key(binary))
 }
 
 #[cfg(test)]
@@ -1373,14 +1372,32 @@ mod tests {
         let base = CoreConfig::from_legacy_args(&[]);
         let model = CoreConfig::from_legacy_args(&["--model".into(), "grok-4".into()]);
         let rules = CoreConfig::from_legacy_args(&["--rules".into(), "Stay read-only".into()]);
+        let resume = CoreConfig::from_legacy_args(&[
+            "--resume".into(),
+            "sess-abc".into(),
+        ]);
+        let replay_rules = CoreConfig::from_legacy_args(&[
+            "--rules".into(),
+            "## Conversation so far\n\n## User\n\nold turn".into(),
+        ]);
 
         assert_ne!(
             prewarm_session_key(binary, cwd, &base),
-            prewarm_session_key(binary, cwd, &model)
+            prewarm_session_key(binary, cwd, &model),
+            "model must rekey the warm host"
         );
-        assert_ne!(
+        // Rules / resume are ephemeral launch overlays — must NOT thrash prewarm.
+        assert_eq!(
             prewarm_session_key(binary, cwd, &base),
             prewarm_session_key(binary, cwd, &rules)
+        );
+        assert_eq!(
+            prewarm_session_key(binary, cwd, &base),
+            prewarm_session_key(binary, cwd, &resume)
+        );
+        assert_eq!(
+            prewarm_session_key(binary, cwd, &rules),
+            prewarm_session_key(binary, cwd, &replay_rules)
         );
         assert_eq!(
             prewarm_session_key(binary, cwd, &base),

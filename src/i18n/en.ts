@@ -335,9 +335,9 @@ export const en = {
   'message.fork': 'Fork response',
   'message.forkDisabled': 'Only completed responses can be forked',
   'message.undoResponse': 'Undo response',
-  'message.undoLatestOnly': 'Only the latest completed response can be undone',
+  'message.undoLatestOnly': 'Undo is unavailable while the session is busy',
   'message.undoPrompt': 'Undo prompt',
-  'message.undoPromptLatestOnly': 'Only the latest completed prompt can be undone',
+  'message.undoPromptLatestOnly': 'Undo is unavailable while the session is busy',
   'message.turnUndone': 'Response moved back to the composer.',
 
   // ── Subagent float / drawer ───────────────────────────────────────────────

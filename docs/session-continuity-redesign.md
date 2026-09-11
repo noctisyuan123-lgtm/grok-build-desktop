@@ -1,10 +1,12 @@
 # 会话续接与 Undo/Redo 改造设计（评审稿 · 修订）
 
-状态：**Phase 0+1 已落地**（`157db4b`）· Phase 2 热路径已落地 · 2026-09-11
+状态：**Phase 0+1 已落地**（`157db4b`）· Phase 2 热路径已落地 · prewarm key 收窄 + 多级 Undo 已落地 · 2026-09-11
 
 > 实现对照（忽略文中过时「现状」表）：Phase 0 止血与 Phase 1 同 session 已合并；
 > Phase 2a replay 截断、2b rebase 提示、2c ACP `file_snapshots` 还原、2d shadow-git 工作区快照已落地；
 > **Undo 已对齐 Grok Build native eager rewind**（点击即 `_x.ai/rewind/execute` / 同 session 截断，不再 OpenCode 式 pointer-until-send）；
+> **多级连续 Undo**：可对同 tab 内更早的已完成 user 回合 rewind 到该 `prompt_index`（非仅 tip）；
+> **prewarm key 已收窄**为 `laneId + cwd + 稳定 host 配置`（不含 `liveSessionId` / 完整 args / rules blob）；
 > Phase 2 item 4 热路径：活 ACP host / prewarm 已挂载同 session 时走直接 `session/prompt`；
 > 冷启动仍 `session/load(sessionHead)`（CLI 层可表现为 `--resume` 且不 fork）。
 作者：基于 2026-09-11 上下文丢失事故根因 + OpenCode / 主流 Agent 对照 + 本仓库代码核对（`feat/settings-usage-quota`）
@@ -243,6 +245,8 @@ Phase 0 已部分朝 OpenCode「响亮失败」对齐；为 Phase 1 热路径改
    Toast 回填 undone prompt；toast「Undo」仅还原草稿 / AFTER 文件 stash，
    **不**假装对话可 Redo。`commitRevertIfNeeded` 仅作遗留 pointer 安全网。
    见 `src/App.tsx`、`src-tauri/src/runs/{core,shadow_git}.rs`。
+   **多级连续 Undo 已落地**（非 tip-only；shadow-git 按 prompt preview 还原边界树）。
+
 3. ✅ Undo 窗口内 head 被 monitor/CLI 推走：引擎 `NewerPrompts` → 自动 rebase，并 toast
    `undoRebasedAfterAdvance`。更细的归属策略仍可继续打磨。
 4. ✅ 热路径：活 ACP host 已持有 `sessionHead`（或 prewarm 已 `session/load`）时，
@@ -254,17 +258,20 @@ Phase 0 已部分朝 OpenCode「响亮失败」对齐；为 Phase 1 热路径改
 
 ## 7. 风险与待验证项
 
-1. **连续多次 `rewind_last_user_turn`** 行为未验证。Grok 1.0 可能拒绝
-   `_x.ai/rewind/execute`（`core.rs` 注释）。多级 undo 若不支持，退化为
-   「一次 rewind 到最早点 + rebased 新 session」。Phase 1 前用 `scripts/fake-grok.sh`
-   做双级 rewind 实验。
+1. **多级 Undo 已落地（UI + `kept_prompt_index_for_undo`）**：可对更早已完成
+   user 回合执行 Grok native `targetPromptIndex` rewind；UI 自该 user 起截断。
+   若 Grok 拒绝 `_x.ai/rewind/execute`，仍走既有 local JSONL truncate / rebase
+   退化路径（toast 无 conversation Redo）。重复 preview（如两次「continue」）仍
+   `AmbiguousPreview`，避免猜错截断点。
 2. **`--rules` replay 体积**：仅留在 rebase 失败分支；Phase 2 加截断。
-3. **eager rewind 与 monitor 竞态**：Undo 点击时若 head 已被推走，引擎
-   `NewerPrompts` → rebase + `undoRebasedAfterAdvance` toast（已落地）。
+3. **eager rewind 与 monitor 竞态**：Undo 点击时若 head 已被推走且无法 in-place
+   rewind，走 rebase + `undoRebasedAfterAdvance` toast（已落地）。
 4. **同 session 追加与 Undo 的张力**：去掉 per-turn fork 后，undo 完全依赖 rewind /
    rebase。可接受，但集成测试必须覆盖两条路径。
-5. **ACP host 复用边界**：prewarm key 今日含完整 args；同 session 模型下应按
-   `laneId + cwd + 稳定配置` 键控，避免「换了拼参就丢掉活 session」。
+5. **ACP host 复用边界（已落地）**：`prewarm_session_key` = `cwd + launch_key(binary)`
+   （不含 raw rules）；前端 debounce key = `activeTabId + codingCwd +` 稳定 knobs
+   （model / effort / permission / memory / websearch / actionPolicy），**不含**
+   `liveSessionId` 与完整 args。`prewarmRun` 仍传完整 `buildRunArgs()` 以便 resume/load。
 
 ---
 

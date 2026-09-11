@@ -430,7 +430,10 @@ describe('composer submit → queued run → streamed reply', () => {
     await waitFor(() => expect(ctx.tauri.commands()).toContain('open_grok_cli'));
 
     const undoButtons = await convo().findAllByRole('button', { name: t('message.undoResponse') });
-    const enabledUndo = undoButtons.find((button) => !(button as HTMLButtonElement).disabled);
+    // Multi-level Undo exposes earlier turns too — tip tests must click the latest.
+    const enabledUndo = [...undoButtons]
+      .reverse()
+      .find((button) => !(button as HTMLButtonElement).disabled);
     await ctx.user.click(enabledUndo!);
     expect(convo().queryByText('Gone.')).not.toBeInTheDocument();
     // Cleanup-on-commit: engine rewind happens on the next send.
@@ -495,7 +498,10 @@ describe('composer submit → queued run → streamed reply', () => {
     await waitFor(() => expect(ctx.tauri.commands()).toContain('open_grok_cli'));
 
     const undoButtons = await convo().findAllByRole('button', { name: t('message.undoResponse') });
-    const enabledUndo = undoButtons.find((button) => !(button as HTMLButtonElement).disabled);
+    // Multi-level Undo exposes earlier turns too — tip tests must click the latest.
+    const enabledUndo = [...undoButtons]
+      .reverse()
+      .find((button) => !(button as HTMLButtonElement).disabled);
     await ctx.user.click(enabledUndo!);
     expect(convo().queryByText('Second continue reply')).not.toBeInTheDocument();
     await ctx.user.keyboard('{Enter}');
@@ -569,7 +575,10 @@ describe('composer submit → queued run → streamed reply', () => {
     const opensBeforeUndo = ctx.tauri.calls.filter((call) => call.cmd === 'open_grok_cli').length;
 
     const undoButtons = await convo().findAllByRole('button', { name: t('message.undoResponse') });
-    const enabledUndo = undoButtons.find((button) => !(button as HTMLButtonElement).disabled);
+    // Multi-level Undo exposes earlier turns too — tip tests must click the latest.
+    const enabledUndo = [...undoButtons]
+      .reverse()
+      .find((button) => !(button as HTMLButtonElement).disabled);
     await ctx.user.click(enabledUndo!);
 
     expect(composerTextarea().value).toBe('Undo this turn');
@@ -738,9 +747,52 @@ describe('composer submit → queued run → streamed reply', () => {
     expect(convo().queryByText('A completed answer.')).not.toBeInTheDocument();
 
     await ctx.user.click(screen.getByRole('button', { name: t('common.undo') }));
-    expect(await convo().findByText('Please revise this prompt')).toBeInTheDocument();
+    // Grok-native eager Undo: toast only restores the prior composer draft
+    // (and optional file stash) — not the truncated conversation.
     expect(composerTextarea().value).toBe('Keep this newer draft');
+    expect(convo().queryByText('A completed answer.')).not.toBeInTheDocument();
   });
+
+  it('undoes an earlier completed turn and truncates later turns', async () => {
+    const ctx = await bootApp({
+      rewind_grok_session: (args) => ({
+        rewound: true,
+        sessionId: String(args.sessionId ?? 'sess-multi'),
+        rebased: false,
+      }),
+    });
+    const first = await submitPrompt(ctx, 'First prompt');
+    await act(async () => {
+      await ctx.tauri.streamReply(first, ['First answer.']);
+    });
+    const second = await submitPrompt(ctx, 'Second prompt');
+    await act(async () => {
+      await ctx.tauri.streamReply(second, ['Second answer.']);
+    });
+    await waitFor(() => {
+      expect(convo().getByText('Second answer.')).toBeInTheDocument();
+    });
+
+    // Multi-level: Undo controls appear on the earlier completed assistant too.
+    const undoButtons = await convo().findAllByRole('button', {
+      name: t('message.undoResponse'),
+    });
+    expect(undoButtons.length).toBeGreaterThanOrEqual(2);
+    const earlierUndo = undoButtons[0];
+    await ctx.user.click(earlierUndo);
+
+    expect(convo().queryByText('First answer.')).not.toBeInTheDocument();
+    expect(convo().queryByText('Second answer.')).not.toBeInTheDocument();
+    expect(convo().queryByText('Second prompt')).not.toBeInTheDocument();
+    expect(composerTextarea().value).toBe('First prompt');
+
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
+    const rewind = [...ctx.tauri.calls]
+      .reverse()
+      .find((call) => call.cmd === 'rewind_grok_session');
+    expect(rewind?.args.undoPrompt).toBe('First prompt');
+  });
+
 
   it('copies the prompt and rewinds context from the latest response control', async () => {
     const ctx = await bootApp({
@@ -764,10 +816,14 @@ describe('composer submit → queued run → streamed reply', () => {
     await ctx.user.click(await convo().findByRole('button', { name: t('message.copyPrompt') }));
     expect(writeText).toHaveBeenCalledWith('Undo this prompt from its own controls');
 
+    // User-turn Undo is available on completed turns (multi-level); tip assistant Undo remains.
     expect(
       convo().queryByRole('button', { name: t('message.undoPrompt') }),
-    ).not.toBeInTheDocument();
-    await ctx.user.click(await convo().findByRole('button', { name: t('message.undoResponse') }));
+    ).toBeInTheDocument();
+    const tipUndo = (
+      await convo().findAllByRole('button', { name: t('message.undoResponse') })
+    ).at(-1)!;
+    await ctx.user.click(tipUndo);
 
     expect(convo().queryByText('This response should disappear too.')).not.toBeInTheDocument();
     expect(composerTextarea().value).toBe('Undo this prompt from its own controls');
@@ -875,7 +931,11 @@ describe('composer submit → queued run → streamed reply', () => {
       await ctx.tauri.streamReply(secondRun, ['This reply is undone.']);
     });
 
-    await ctx.user.click(await convo().findByRole('button', { name: t('message.undoResponse') }));
+    const undoButtons = await convo().findAllByRole('button', { name: t('message.undoResponse') });
+    const tipUndo = [...undoButtons]
+      .reverse()
+      .find((button) => !(button as HTMLButtonElement).disabled);
+    await ctx.user.click(tipUndo!);
 
     expect(await convo().findByText('Keep this context')).toBeInTheDocument();
     expect(await convo().findByText('Kept reply.')).toBeInTheDocument();
@@ -941,7 +1001,9 @@ describe('composer submit → queued run → streamed reply', () => {
     });
 
     const undoButtons = await convo().findAllByRole('button', { name: t('message.undoResponse') });
-    const enabledUndo = undoButtons.find((button) => !(button as HTMLButtonElement).disabled);
+    const enabledUndo = [...undoButtons]
+      .reverse()
+      .find((button) => !(button as HTMLButtonElement).disabled);
     expect(enabledUndo).toBeTruthy();
     await ctx.user.click(enabledUndo!);
     expect(convo().queryByText('Wrong answer to undo.')).not.toBeInTheDocument();
@@ -966,7 +1028,12 @@ describe('composer submit → queued run → streamed reply', () => {
   });
 
   it('toast recovery after undo clears the fresh-session re-seed plan', async () => {
-    const ctx = await bootApp();
+    const ctx = await bootApp({
+      // Fail rewind so undoSessionPlanRef stays set until toast Undo clears it.
+      rewind_grok_session: () => {
+        throw new Error('rewind unavailable');
+      },
+    });
     const firstRun = await submitPrompt(ctx, 'Keep this context');
     await act(async () => {
       await ctx.tauri.streamReply(firstRun, ['Kept.']);
@@ -979,12 +1046,22 @@ describe('composer submit → queued run → streamed reply', () => {
       expect(document.querySelectorAll('.message-assistant').length).toBe(2);
     });
 
+    await ctx.user.type(composerTextarea(), 'draft before undo');
+
     const undoButtons = await convo().findAllByRole('button', { name: t('message.undoResponse') });
-    const enabledUndo = undoButtons.find((button) => !(button as HTMLButtonElement).disabled);
+    const enabledUndo = [...undoButtons]
+      .reverse()
+      .find((button) => !(button as HTMLButtonElement).disabled);
     expect(enabledUndo).toBeTruthy();
     await ctx.user.click(enabledUndo!);
+    expect(convo().queryByText('Gone.')).not.toBeInTheDocument();
+    expect(await convo().findByText('Kept.')).toBeInTheDocument();
+    expect(composerTextarea().value).toBe('Undo me');
+
     await ctx.user.click(screen.getByRole('button', { name: t('common.undo') }));
-    expect(await convo().findByText('Gone.')).toBeInTheDocument();
+    // No conversation Redo — only the prior composer draft returns.
+    expect(convo().queryByText('Gone.')).not.toBeInTheDocument();
+    expect(composerTextarea().value).toBe('draft before undo');
 
     // Follow-up after toast restore should resume normally, not force-replay.
     await ctx.user.clear(composerTextarea());
@@ -994,7 +1071,8 @@ describe('composer submit → queued run → streamed reply', () => {
     const enqueue = [...ctx.tauri.calls].reverse().find((c) => c.cmd === 'enqueue_run')!;
     const args = enqueue.args.args as string[];
     expect(args).toContain('--resume');
-    const rules = (args[args.indexOf('--rules') + 1] as string) ?? '';
+    const rulesIdx = args.indexOf('--rules');
+    const rules = rulesIdx >= 0 ? String(args[rulesIdx + 1] ?? '') : '';
     expect(rules).not.toContain('re-seeded into a fresh session after Undo');
   });
 

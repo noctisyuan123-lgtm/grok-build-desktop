@@ -1116,8 +1116,21 @@ function App() {
   // keeps this host alive and reuses it for subsequent turns.
   useEffect(() => {
     if (!hasTauriRuntime() || !sessionLoaded || !activeTabId) return;
+    // Debounce key = lane + cwd + host-stable knobs only. Resume/session id and
+    // full args (rules replay blobs) must not thrash prewarm or drop the live
+    // ACP host — still pass full buildRunArgs() so resume/load works.
     const args = buildRunArgs();
-    const key = `${activeTabId}\0${codingCwd}\0${args.join('\0')}`;
+    const key = [
+      activeTabId,
+      codingCwd,
+      mode,
+      activeModel,
+      reasoningEffort,
+      permissionMode,
+      String(experimentalMemory),
+      String(webSearchEnabled),
+      actionPolicy,
+    ].join('\0');
     if (prewarmKeyRef.current === key) return;
     prewarmKeyRef.current = key;
     let cancelled = false;
@@ -1130,8 +1143,9 @@ function App() {
     return () => {
       cancelled = true;
     };
-    // buildRunArgs intentionally snapshots the current run configuration;
-    // the explicit dependencies below trigger a new warm host when it changes.
+    // Stable knobs only — liveSessionId intentionally omitted (session id must
+    // not retrigger prewarm). buildRunArgs still snapshots resume/rules for the
+    // warm call itself.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     sessionLoaded,
@@ -1144,7 +1158,6 @@ function App() {
     permissionMode,
     experimentalMemory,
     webSearchEnabled,
-    liveSessionId,
   ]);
 
   function handleEnqueued(info: {
@@ -1682,10 +1695,12 @@ function App() {
     const assistant =
       messages[assistantIndex]?.role === 'assistant' ? messages[assistantIndex] : null;
     const user = selectedUser ?? messages[assistantIndex - 1];
-    const isUserOnlyTail = Boolean(
-      selectedUser && assistant == null && selectedIndex === messages.length - 1,
-    );
-    if (assistantIndex !== messages.length - 1 && !isUserOnlyTail) return;
+    const isUserOnlyTail = Boolean(selectedUser && assistant == null);
+    // Multi-level Undo: any completed prior user turn (and its assistant reply)
+    // may rewind to that prompt_index — not tip-only. Truncate from that user
+    // message onward; later turns leave with the same rewind boundary.
+    if (!isUserOnlyTail && assistant == null) return;
+    if (assistant && assistantIndex < selectedIndex) return;
     const assistantSnapshot = assistant?.runId
       ? streamStore.getRunSnapshot(assistant.runId)
       : undefined;
@@ -1771,6 +1786,10 @@ function App() {
       undo: () => {
         // Conversation is already truncated in the engine — toast "Undo" only
         // restores the prior composer draft and optional AFTER file stash.
+        // Clear any force-new reseed plan so a follow-up resumes the (truncated)
+        // head instead of replaying rules into a replacement session.
+        undoSessionPlanRef.current = null;
+        pendingUndoVisibleMessagesRef.current = null;
         const pendingWorkspace = undoWorkspaceRedoRef.current;
         undoWorkspaceRedoRef.current = null;
         updatePrompt(previousDraft);
@@ -2013,9 +2032,6 @@ function App() {
       latestMessage?.role === 'assistant' &&
       latestMessage.status === 'streaming' &&
       (!latestSnapshot || isRunInFlight(latestSnapshot));
-    const latestTurnCanUndo = Boolean(
-      latestMessage && !activeSessionIsRunning && !latestMessageIsLive && !latestSnapshot?.watching,
-    );
     const tipCopyForkReady = Boolean(
       latestMessage?.role === 'assistant' &&
       latestMessage.status !== 'streaming' &&
@@ -2035,6 +2051,38 @@ function App() {
       visibleMessages[latestUserIndex]?.role === 'user' &&
       visibleMessages[latestUserIndex]?.content.trim(),
     );
+    const sessionHeadForUndo = Boolean(
+      currentSessionId() ?? tabSessionHead ?? liveSessionId,
+    );
+    const sessionIdleForUndo = !activeSessionIsRunning && !latestMessageIsLive;
+
+    const turnCanUndoAt = (index: number): boolean => {
+      if (!sessionIdleForUndo || !sessionHeadForUndo) return false;
+      const message = visibleMessages[index];
+      if (!message) return false;
+      if (message.role === 'user') {
+        if (!message.content.trim()) return false;
+        const next = visibleMessages[index + 1];
+        if (!next) {
+          // User-only tail (no assistant yet).
+          return index === latestIndex;
+        }
+        if (next.role !== 'assistant' || next.status === 'streaming') return false;
+        const snap = next.runId ? streamStore.getRunSnapshot(next.runId) : undefined;
+        if (snap?.watching) return false;
+        if (snap && isRunInFlight(snap)) return false;
+        return true;
+      }
+      // Assistant reply: undo the paired user turn when this reply is settled.
+      if (!message.content.trim() || message.status === 'streaming') return false;
+      const prev = visibleMessages[index - 1];
+      if (prev?.role !== 'user' || !prev.content.trim()) return false;
+      const snap = message.runId ? streamStore.getRunSnapshot(message.runId) : undefined;
+      if (snap?.watching) return false;
+      if (snap && isRunInFlight(snap)) return false;
+      return true;
+    };
+
     return visibleMessages.map((m, index) =>
       m.role === 'user'
         ? {
@@ -2047,8 +2095,8 @@ function App() {
             userText: m.content.replace(/\n\n📎[^\n]*$/, ''),
             id: m.id,
             attachments: messageAttachments[m.id],
-            canUndo: index === latestIndex && latestTurnCanUndo,
-            showUndo: index === latestIndex && latestTurnCanUndo,
+            canUndo: turnCanUndoAt(index),
+            showUndo: turnCanUndoAt(index),
             canEdit: index === latestUserIndex && latestTurnCanEdit,
             showEdit: index === latestUserIndex,
           }
@@ -2067,16 +2115,21 @@ function App() {
             autoExpandWork: m.status === 'streaming',
             status: m.status,
             id: m.id,
-            canUndo: index === latestIndex && latestTurnCanUndo,
-            showUndo: index === latestIndex && latestTurnCanUndo,
-            // Copy/Fork/Undo only on the conversation tip after the turn has
-            // finished and idle monitors have settled.
+            canUndo: turnCanUndoAt(index),
+            showUndo: turnCanUndoAt(index),
+            // Copy/Fork stay tip-only after the tip turn has settled.
             canFork: index === latestIndex && tipCopyForkReady,
             showFork: index === latestIndex && tipCopyForkReady,
             showCopy: index === latestIndex && tipCopyForkReady,
           },
     );
-  }, [activeSessionIsRunning, messageAttachments, visibleMessages]);
+  }, [
+    activeSessionIsRunning,
+    liveSessionId,
+    messageAttachments,
+    tabSessionHead,
+    visibleMessages,
+  ]);
   return (
     <main
       className={`app-shell theme-${themeMode}${expandedWindow ? ' has-task-rail' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}${sidebarTransitionReady ? ' sidebar-transition-ready' : ''}`}
