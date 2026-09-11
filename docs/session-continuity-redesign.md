@@ -1,10 +1,11 @@
 # 会话续接与 Undo/Redo 改造设计（评审稿 · 修订）
 
-状态：**Phase 0+1 已落地**（`157db4b`）· Phase 2 进行中 · 2026-09-11
+状态：**Phase 0+1 已落地**（`157db4b`）· Phase 2 热路径已落地 · 2026-09-11
 
 > 实现对照（忽略文中过时「现状」表）：Phase 0 止血与 Phase 1 同 session / 指针 Undo 已合并；
 > Phase 2a replay 截断、2b rebase 提示、2c 成功 rewind 后还原 `file_snapshots` 已在本分支后续改动中推进；
-> 热路径仍为 `--resume` 不 fork + prewarm（尚未纯 ACP `session/prompt`）。
+> Phase 2 item 4 热路径：活 ACP host / prewarm 已挂载同 session 时走直接 `session/prompt`；
+> 冷启动仍 `session/load(sessionHead)`（CLI 层可表现为 `--resume` 且不 fork）。
 作者：基于 2026-09-11 上下文丢失事故根因 + OpenCode / 主流 Agent 对照 + 本仓库代码核对（`feat/settings-usage-quota`）
 
 ---
@@ -237,8 +238,10 @@ Phase 0 已部分朝 OpenCode「响亮失败」对齐；为 Phase 1 热路径改
    turn 的 `file_snapshots`（路径限制在 cwd 内）。快照为空时为 no-op；影子 git 仍未做。
 3. ✅ Undo 窗口内 head 被 monitor/CLI 推走：引擎 `NewerPrompts` → 自动 rebase，并 toast
    `undoRebasedAfterAdvance`。更细的归属策略仍可继续打磨。
-4. ⏳ 热路径：今日为同 session `--resume`（不 fork）+ lane prewarm；尚未改为纯 ACP
-   `session/prompt` 热路径。
+4. ✅ 热路径：活 ACP host 已持有 `sessionHead`（或 prewarm 已 `session/load`）时，
+   `run_one_core` 经 `warm_direct_session_id` 直接 `session/prompt`，不再为暖路径支付
+   多余的 `session/load`；冷启动仍挂载 `sessionHead`（`--resume` 不 fork）。前端日常跟进
+   保持 `resumeSessionInPlace`（OpenCode 同 session 追加）。
 
 ---
 

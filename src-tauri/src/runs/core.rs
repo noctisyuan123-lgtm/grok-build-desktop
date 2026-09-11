@@ -750,6 +750,54 @@ impl AcpHost {
             && self.child.try_wait().ok().flatten().is_none()
     }
 
+    /// True when this ACP client already has `session_id` mounted (warm path).
+    pub fn has_loaded_session(&self, session_id: &str) -> bool {
+        self.loaded_sessions.contains(session_id)
+    }
+
+    /// Mount an existing conversation head onto this host without prompting.
+    /// Used by lane prewarm so the first follow-up can `session/prompt` directly.
+    pub async fn ensure_session_loaded(
+        &mut self,
+        cwd: &Path,
+        config: &CoreConfig,
+        session_id: &str,
+    ) -> Result<String, String> {
+        if self.loaded_sessions.contains(session_id) {
+            return Ok(session_id.to_string());
+        }
+        let resolved_cwd = if cwd.is_absolute() && cwd.is_dir() {
+            cwd.to_path_buf()
+        } else {
+            std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/"))
+        };
+        let cwd = resolved_cwd.to_string_lossy();
+        match self
+            .request(
+                "session/load",
+                session_open_params(&cwd, config, Some(session_id)),
+                None,
+            )
+            .await
+        {
+            Ok(result) => {
+                let loaded = result
+                    .get("sessionId")
+                    .and_then(Value::as_str)
+                    .unwrap_or(session_id)
+                    .to_string();
+                self.loaded_sessions.insert(loaded.clone());
+                Ok(loaded)
+            }
+            Err(error) => {
+                reject_unloaded_shared_session(config, session_id, &error)?;
+                Err(error)
+            }
+        }
+    }
+
     pub fn pgid(&self) -> i32 {
         self.pgid
     }

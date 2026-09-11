@@ -359,18 +359,73 @@ impl RunQueue {
                 // prior prewarm belongs to the host that created it and must
                 // not survive a host handoff.
                 self.prewarmed_sessions.lock().await.remove(&lane_id);
+                if let Some(resume_id) = config.resume_session_id.clone() {
+                    let warm_key = prewarm_session_key(&grok_path, &resolved_cwd, &config);
+                    if existing.has_loaded_session(&resume_id) {
+                        self.prewarmed_sessions.lock().await.insert(
+                            lane_id.clone(),
+                            PrewarmedSession {
+                                key: warm_key,
+                                id: resume_id,
+                            },
+                        );
+                    } else {
+                        match existing
+                            .ensure_session_loaded(&resolved_cwd, &config, &resume_id)
+                            .await
+                        {
+                            Ok(id) => {
+                                self.prewarmed_sessions.lock().await.insert(
+                                    lane_id.clone(),
+                                    PrewarmedSession {
+                                        key: warm_key,
+                                        id,
+                                    },
+                                );
+                            }
+                            Err(error) => {
+                                eprintln!(
+                                    "[grok core] prewarm session/load failed for {resume_id}: {error}"
+                                );
+                            }
+                        }
+                    }
+                }
                 self.acp_hosts.lock().await.insert(lane_id, existing);
                 return Ok(true);
             }
             existing.shutdown().await;
         }
         let mut host = AcpHost::connect(&grok_path, &resolved_cwd, &config).await?;
-        if config.resume_session_id.is_none() {
+        let warm_key = prewarm_session_key(&grok_path, &resolved_cwd, &config);
+        if let Some(resume_id) = config.resume_session_id.clone() {
+            // Mount the durable head during prewarm so Send can session/prompt
+            // directly instead of paying session/load on the hot path.
+            match host
+                .ensure_session_loaded(&resolved_cwd, &config, &resume_id)
+                .await
+            {
+                Ok(id) => {
+                    self.prewarmed_sessions.lock().await.insert(
+                        lane_id.clone(),
+                        PrewarmedSession {
+                            key: warm_key,
+                            id,
+                        },
+                    );
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[grok core] prewarm session/load failed for {resume_id}: {error}"
+                    );
+                }
+            }
+        } else {
             let id = host.prewarm_session(&resolved_cwd, &config).await?;
             self.prewarmed_sessions.lock().await.insert(
                 lane_id.clone(),
                 PrewarmedSession {
-                    key: prewarm_session_key(&grok_path, &resolved_cwd, &config),
+                    key: warm_key,
                     id,
                 },
             );
@@ -1103,17 +1158,22 @@ impl RunQueue {
             }
         };
         host.cancel_handle().prepare_for_turn().await;
-        let prewarmed_session_id = if config.resume_session_id.is_none() {
-            let key = prewarm_session_key(grok_path, cwd, &config);
-            self.prewarmed_sessions
-                .lock()
-                .await
-                .remove(&rec.lane_id)
-                .filter(|warm| warm.key == key)
-                .map(|warm| warm.id)
-        } else {
-            None
-        };
+        // Warm path: parked/prewarmed host already owns the target session →
+        // pass it as a direct bind so run_turn session/prompt without another
+        // session/load. Cold resume leaves this None and run_turn loads.
+        let key = prewarm_session_key(grok_path, cwd, &config);
+        let taken_prewarm = self
+            .prewarmed_sessions
+            .lock()
+            .await
+            .remove(&rec.lane_id)
+            .filter(|warm| warm.key == key)
+            .map(|warm| warm.id);
+        let prewarmed_session_id = warm_direct_session_id(
+            config.resume_session_id.as_deref(),
+            |id| host.has_loaded_session(id),
+            taken_prewarm.as_deref(),
+        );
         {
             let mut inner = self.inner.lock().await;
             if let Some(slot) = inner.active_lanes.get_mut(&rec.lane_id) {
@@ -1269,6 +1329,25 @@ impl RunQueue {
     }
 }
 
+/// Decide whether a turn can skip ACP `session/load` and prompt directly.
+///
+/// - Resume id already on the host (or matching prewarm cache) → warm direct.
+/// - Resume id present but not loaded → cold resume (caller uses session/load).
+/// - No resume id → use prewarmed empty session if any, else session/new.
+pub(crate) fn warm_direct_session_id(
+    resume_id: Option<&str>,
+    host_has_loaded: impl Fn(&str) -> bool,
+    prewarmed_id: Option<&str>,
+) -> Option<String> {
+    if let Some(id) = resume_id {
+        if host_has_loaded(id) || prewarmed_id == Some(id) {
+            return Some(id.to_string());
+        }
+        return None;
+    }
+    prewarmed_id.map(str::to_string)
+}
+
 fn prewarm_session_key(
     binary: &std::path::Path,
     cwd: &std::path::Path,
@@ -1318,5 +1397,32 @@ mod tests {
         assert!(with_c.iter().any(|arg| arg.as_str() == "-c"));
         assert!(!bare.windows(2).any(|pair| pair[0] == "--resume"));
         assert!(!bare.iter().any(|arg| arg.as_str() == "-c"));
+    }
+
+    #[test]
+    fn warm_direct_skips_load_when_host_already_owns_resume_head() {
+        let loaded = ["sess-a"];
+        assert_eq!(
+            warm_direct_session_id(Some("sess-a"), |id| loaded.contains(&id), None).as_deref(),
+            Some("sess-a")
+        );
+        assert_eq!(
+            warm_direct_session_id(Some("sess-a"), |_| false, Some("sess-a")).as_deref(),
+            Some("sess-a")
+        );
+        // Cold: resume present but not on host → force session/load path.
+        assert_eq!(
+            warm_direct_session_id(Some("sess-a"), |_| false, Some("other")),
+            None
+        );
+    }
+
+    #[test]
+    fn warm_direct_uses_prewarmed_empty_session_without_resume() {
+        assert_eq!(
+            warm_direct_session_id(None, |_| false, Some("prewarm-1")).as_deref(),
+            Some("prewarm-1")
+        );
+        assert_eq!(warm_direct_session_id(None, |_| false, None), None);
     }
 }

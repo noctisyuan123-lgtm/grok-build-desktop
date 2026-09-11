@@ -2549,10 +2549,14 @@ button.status-cluster.status-action:disabled {
 .session-toast {
   position: absolute;
   top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 60;
+  /* Prefer inset + margin auto over left/transform so centering survives
+     sibling layout quirks and any transform-based animations. */
+  left: 0;
+  right: 0;
+  width: fit-content;
   max-width: min(680px, 85%);
+  margin-inline: auto;
+  z-index: 60;
   padding: 8px 14px;
   border-radius: 8px;
   background: var(--bg-4);
