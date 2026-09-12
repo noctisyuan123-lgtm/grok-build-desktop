@@ -232,16 +232,33 @@ export function useSessionTabs(deps: SessionTabsDeps) {
         if (cancelled) return;
         if (stored && Array.isArray(stored.tabs) && stored.tabs.length > 0) {
           const diskTabs = stored.tabs as Tab[];
-          setTabs((current) => mergeTabLists(current, diskTabs));
           const diskActive =
             stored.activeTabId && diskTabs.some((tab) => tab.id === stored.activeTabId)
               ? stored.activeTabId
               : undefined;
-          setMessages((current) => {
-            const activeId = sessionStateRef.current.activeTabId || diskActive;
-            const diskTab = diskTabs.find((tab) => tab.id === activeId);
-            return richerMessageList(current, tabMessages(diskTab));
+          // Merge may drop a reinstall-bootstrap tab (new id, same content as
+          // disk). Re-point activeTabId / messages at a tab that still exists.
+          let merged: Tab[] = [];
+          setTabs((current) => {
+            merged = mergeTabLists(current, diskTabs);
+            return merged;
           });
+          const previousActive = sessionStateRef.current.activeTabId;
+          const activeStillPresent = merged.some((tab) => tab.id === previousActive);
+          const nextActive =
+            (activeStillPresent ? previousActive : undefined) ||
+            diskActive ||
+            merged[0]?.id ||
+            '';
+          if (nextActive && nextActive !== previousActive) {
+            setActiveTabId(nextActive);
+            const nextTab = merged.find((tab) => tab.id === nextActive);
+            if (nextTab) setCodingCwd(nextTab.cwd);
+          }
+          const activeTab =
+            merged.find((tab) => tab.id === nextActive) ??
+            diskTabs.find((tab) => tab.id === nextActive);
+          setMessages((msgs) => richerMessageList(msgs, tabMessages(activeTab)));
         }
       })
       .catch(() => {
