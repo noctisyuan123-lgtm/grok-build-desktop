@@ -1777,7 +1777,7 @@ pre {
 
 .app-shell.theme-dark {
   --app-bg: #0b0c0d;
-  --sidebar-bg: rgba(20, 14, 10, 0.42);
+  --sidebar-bg: rgba(36, 36, 36, 0.52);
   --topbar-bg: #0d0f10;
   --panel: #101214;
   --panel-raised: #151719;
@@ -1808,23 +1808,21 @@ pre {
    Premium = restraint: soft depth, clean edge highlight, quiet fill. */
 .app-shell.theme-dark .app-sidebar {
   position: relative;
-  isolation: isolate;
-  background: var(--glass-surface);
+  /* Visible glass: #242424 family at ~52% so Tauri sidebar vibrancy reads.
+     Avoid isolation:isolate — it can flatten the native material blend. */
+  background: rgba(36, 36, 36, 0.52);
   -webkit-backdrop-filter: blur(36px) saturate(140%);
   backdrop-filter: blur(36px) saturate(140%);
-  border-right: 1px solid rgba(255, 255, 255, 0.07);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.055),
-    inset -1px 0 0 rgba(255, 255, 255, 0.06),
-    10px 0 28px rgba(0, 0, 0, 0.16);
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    10px 0 28px rgba(0, 0, 0, 0.12);
 }
 
 /* Specular veil — decorative only; never intercepts sidebar input. */
 .app-shell.theme-dark .app-sidebar::before {
   background:
-    radial-gradient(ellipse 90% 42% at 8% -4%, rgba(255, 236, 220, 0.08), transparent 58%),
-    linear-gradient(180deg, rgba(255, 230, 210, 0.03), transparent 42%),
-    linear-gradient(90deg, rgba(255, 220, 190, 0.018), transparent 38%);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 36%);
   content: '';
   inset: 0;
   pointer-events: none;
@@ -1835,8 +1833,8 @@ pre {
 /* Keep internal controls translucent too; opaque children were previously
    masking most of the frosted rail. */
 .app-shell.theme-dark .app-sidebar .search-box {
-  background: rgba(14, 9, 6, 0.34);
-  border-color: rgba(255, 255, 255, 0.07);
+  background: rgba(0, 0, 0, 0.22);
+  border-color: rgba(255, 255, 255, 0.08);
 }
 .app-shell.theme-dark .app-sidebar .primary-nav .nav-list {
   background: transparent;
@@ -5935,7 +5933,9 @@ body[data-theme='light'] .hljs-comment {
 
 .subagent-rail {
   animation: subagent-float-in 180ms ease-out;
-  background: var(--glass-surface, color-mix(in srgb, var(--bg-4, #242424) 90%, transparent));
+  /* Match the composer family: opaque graphite a half-step lighter than the
+     input shell (#202020), not the bluish --glass-surface / --bg-4 mix. */
+  background: #242424;
   border: 1px solid color-mix(in srgb, var(--conversation-text) 12%, transparent);
   border-radius: 16px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
@@ -5954,9 +5954,15 @@ body[data-theme='light'] .hljs-comment {
 }
 
 .theme-light .subagent-rail {
-  background: var(--glass-surface, var(--bg-4, #f3f1ec));
+  /* Light shell sits near parchment fields; keep a hair lighter than the
+     typical composer fill without the cool glass mix. */
+  background: #f6f3ec;
   border-color: var(--border-2);
   box-shadow: 0 16px 40px rgba(20, 18, 16, 0.12);
+}
+
+.theme-dark .subagent-rail {
+  background: #242424;
 }
 
 .subagent-rail.is-collapsed {
@@ -9321,24 +9327,21 @@ body,
   background: transparent;
 }
 
-/* Dark glass wash over native sidebar vibrancy — restrained fill, top/edge
-   specular, soft depth. Opacity stays high enough for text/icon contrast. */
+/* Packaged app: CSS blur off so Tauri's native "sidebar" effect shows;
+   graphite wash at 52% (Codex uses native glass + dark tint — 94% looked solid). */
 .app-shell.theme-dark .app-sidebar {
-  background: var(--glass-surface);
+  background: rgba(36, 36, 36, 0.52);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
-  border-right: 1px solid rgba(255, 255, 255, 0.055);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    inset -1px 0 0 rgba(255, 255, 255, 0.075),
-    8px 0 24px rgba(0, 0, 0, 0.12);
+    8px 0 24px rgba(0, 0, 0, 0.1);
 }
 
 .app-shell.theme-dark .app-sidebar::before {
   background:
-    radial-gradient(ellipse 88% 40% at 6% -6%, rgba(255, 236, 220, 0.09), transparent 56%),
-    linear-gradient(180deg, rgba(255, 230, 210, 0.035), transparent 40%),
-    linear-gradient(90deg, rgba(255, 220, 190, 0.02), transparent 36%);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 36%);
 }
 
 /* Light mode uses the same native macOS sidebar material. A translucent white
