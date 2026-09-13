@@ -12,6 +12,7 @@ interface ParseRequest {
 interface ParseResponse {
   runId: string;
   html: string;
+  text: string;
 }
 
 // Workers don't have access to Window globals, but `self` is the worker scope.
@@ -22,10 +23,10 @@ self.addEventListener('message', (e: MessageEvent<ParseRequest>) => {
   const { runId, text } = e.data;
   try {
     const html = renderMarkdown(text);
-    workerSelf.postMessage({ runId, html });
+    workerSelf.postMessage({ runId, html, text });
   } catch {
     const safe = escapeHtml(text);
-    workerSelf.postMessage({ runId, html: `<pre>${safe}</pre>` });
+    workerSelf.postMessage({ runId, html: `<pre>${safe}</pre>`, text });
   }
 });
 

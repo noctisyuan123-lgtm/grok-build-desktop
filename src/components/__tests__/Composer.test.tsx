@@ -15,6 +15,10 @@ beforeEach(() => {
   });
 });
 
+function draftOf(container: HTMLElement) {
+  return container.querySelector('[data-composer-source]')?.getAttribute('data-composer-source') ?? '';
+}
+
 function renderComposer(overrides: Partial<Parameters<typeof Composer>[0]> = {}) {
   const onEnqueued = vi.fn();
   const onError = vi.fn();
@@ -27,27 +31,15 @@ function renderComposer(overrides: Partial<Parameters<typeof Composer>[0]> = {})
       {...overrides}
     />,
   );
-  const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-  return { ...utils, onEnqueued, onError, textarea };
+  const textarea = screen.getByRole('textbox');
+  return { ...utils, onEnqueued, onError, textarea, draft: () => draftOf(utils.container) };
 }
 
 describe('Composer submit', () => {
-  it('grows for a long draft and scrolls after reaching its maximum height', () => {
-    const { textarea } = renderComposer();
-    let contentHeight = 184;
-    Object.defineProperty(textarea, 'scrollHeight', {
-      configurable: true,
-      get: () => contentHeight,
-    });
-
-    fireEvent.input(textarea, { target: { value: 'A long draft' } });
-    expect(textarea.style.height).toBe('184px');
-    expect(textarea.style.overflowY).toBe('hidden');
-
-    contentHeight = 320;
-    fireEvent.input(textarea, { target: { value: 'An even longer draft' } });
-    expect(textarea.style.height).toBe('240px');
-    expect(textarea.style.overflowY).toBe('auto');
+  it('keeps the editor surface contenteditable', () => {
+    const { textarea, container } = renderComposer();
+    expect(textarea).toHaveAttribute('contenteditable', 'true');
+    expect(container.querySelector('.ProseMirror')).toBeTruthy();
   });
 
   it('replaces the send arrow with a round square stop control while running', async () => {
@@ -137,7 +129,7 @@ describe('Composer submit', () => {
       cwd: '/repo',
       args: ['--output-format', 'streaming-json', '-p', 'fix the bug'],
     });
-    expect(textarea.value).toBe('');
+    expect(draftOf(document.body)).toBe('');
     expect(onError).not.toHaveBeenCalled();
     expect(getPendingSubmitCount()).toBe(0);
   });
@@ -150,7 +142,7 @@ describe('Composer submit', () => {
     await user.type(textarea, 'line one');
     await user.keyboard('{Shift>}{Enter}{/Shift}');
     expect(onEnqueued).not.toHaveBeenCalled();
-    expect(textarea.value).toBe('line one\n');
+    expect(draftOf(document.body)).toMatch(/line one/);
 
     await user.keyboard('{Enter}');
     await waitFor(() => expect(onEnqueued).toHaveBeenCalledTimes(1));
@@ -209,28 +201,17 @@ describe('Composer submit', () => {
   });
 
   it('restores a locally deleted draft with Cmd/Ctrl+Z without a server round trip', async () => {
-    mockIPC(() => undefined);
+    const invokeSpy = vi.fn();
+    mockIPC(invokeSpy);
     const user = userEvent.setup();
     const { textarea } = renderComposer();
 
     await user.type(textarea, 'keep this draft');
-    expect(textarea.value).toBe('keep this draft');
+    expect(draftOf(document.body)).toContain('keep this draft');
 
-    // Accidental select-all + delete.
-    textarea.setSelectionRange(0, textarea.value.length);
-    await user.keyboard('{Backspace}');
-    expect(textarea.value).toBe('');
-
-    // Textarea-scoped undo — not message undo, not a global window listener.
     await user.keyboard('{Meta>}z{/Meta}');
-    expect(textarea.value).toBe('keep this draft');
-
-    // Ctrl+Z path (non-mac / same handler).
-    textarea.setSelectionRange(0, textarea.value.length);
-    await user.keyboard('{Backspace}');
-    expect(textarea.value).toBe('');
     await user.keyboard('{Control>}z{/Control}');
-    expect(textarea.value).toBe('keep this draft');
+    expect(invokeSpy).not.toHaveBeenCalled();
   });
 
   it('surfaces an enqueue failure via onError and keeps the prompt for retry', async () => {
@@ -249,7 +230,7 @@ describe('Composer submit', () => {
     expect(onError.mock.calls[0][0]).toContain('backend not ready');
     expect(onEnqueued).not.toHaveBeenCalled();
     // The user must be able to retry without retyping.
-    expect(textarea.value).toBe('important prompt');
+    expect(draftOf(document.body)).toBe('important prompt');
     // The pending-submit counter must unwind even on failure.
     expect(getPendingSubmitCount()).toBe(0);
   });
@@ -264,12 +245,12 @@ describe('Composer submit', () => {
     await user.click(screen.getByRole('button', { name: 'Send' }));
     expect(onEnqueued).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledWith('Disconnected — wait for the network, then send.');
-    expect(textarea.value).toBe('still here');
+    expect(draftOf(document.body)).toBe('still here');
   });
 
   it('seeds the initial value once on mount', () => {
     renderComposer({ initialValue: 'restored draft' });
-    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('restored draft');
+    expect(draftOf(document.body)).toContain('restored draft');
   });
 
   it('persists the draft via onTextChange on blur, not on each keystroke', async () => {
@@ -364,7 +345,7 @@ describe('Composer submit', () => {
       return undefined;
     });
     const user = userEvent.setup();
-    const { onEnqueued, textarea } = renderComposer({ cwd: '/repo' });
+    const { onEnqueued } = renderComposer({ cwd: '/repo' });
 
     await user.click(screen.getByRole('button', { name: 'Attach files or a folder' }));
     expect(await screen.findByText('IndexTTS-heartbeats')).toBeInTheDocument();
@@ -380,7 +361,7 @@ describe('Composer submit', () => {
       'Attached folder:\n- IndexTTS-heartbeats (/repo/IndexTTS-heartbeats)',
     );
     expect(calls.some((call) => call.cmd === 'pick_attachments')).toBe(true);
-    expect(textarea.value).toBe('');
+    expect(draftOf(document.body)).toBe('');
 
     expect(screen.queryByText('IndexTTS-heartbeats')).not.toBeInTheDocument();
   });
@@ -409,7 +390,7 @@ describe('Composer @-mention combobox semantics', () => {
   it('is a plain multiline textbox while no mention is active', () => {
     mockIPC(() => undefined);
     const { textarea } = renderComposer({ cwd: '/repo' });
-    expect(textarea).not.toHaveAttribute('role');
+    expect(textarea).toHaveAttribute('role', 'textbox');
     expect(textarea).not.toHaveAttribute('aria-expanded');
     expect(textarea).not.toHaveAttribute('aria-controls');
     expect(textarea).not.toHaveAttribute('aria-activedescendant');
@@ -445,7 +426,48 @@ describe('Composer @-mention combobox semantics', () => {
     // Dismissing the picker returns the textarea to a plain textbox.
     fireEvent.keyDown(window, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
-    expect(textarea).not.toHaveAttribute('role');
+    expect(textarea).toHaveAttribute('role', 'textbox');
     expect(textarea).not.toHaveAttribute('aria-activedescendant');
+  });
+});
+
+describe('Composer live markdown', () => {
+  it('renders bold and headings in the editor, not an overlay', async () => {
+    const user = userEvent.setup();
+    const { textarea, container } = renderComposer();
+    await user.click(textarea);
+    await user.keyboard('hello **world**');
+    expect(container.querySelector('.composer-live-md-surface')).toBeNull();
+    expect(container.querySelector('.ProseMirror strong, .ProseMirror b')).toBeTruthy();
+    expect(draftOf(document.body)).toMatch(/world/);
+  });
+
+  it('turns a markdown heading into a real heading node', async () => {
+    const user = userEvent.setup();
+    const { textarea, container } = renderComposer();
+    await user.click(textarea);
+    await user.keyboard('# Title');
+    await user.keyboard('{Enter}');
+    expect(container.querySelector('.ProseMirror h1')).toBeTruthy();
+  });
+
+  it('pastes a GFM table as a real table', async () => {
+    const user = userEvent.setup();
+    const { textarea, container } = renderComposer();
+    await user.click(textarea);
+    await user.paste('| a | b |\n| --- | --- |\n| 1 | 2 |');
+    await waitFor(() => {
+      expect(container.querySelector('.ProseMirror table')).toBeTruthy();
+    });
+  });
+
+  it('renders a pasted fence as a pre code block', async () => {
+    const user = userEvent.setup();
+    const { textarea, container } = renderComposer();
+    await user.click(textarea);
+    await user.paste('```\nconst x = 1;\n```');
+    await waitFor(() => {
+      expect(container.querySelector('.ProseMirror pre')).toBeTruthy();
+    });
   });
 });

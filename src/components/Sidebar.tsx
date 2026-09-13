@@ -19,6 +19,7 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  Folders,
   History,
   Loader2,
   MoreHorizontal,
@@ -42,6 +43,7 @@ import { statusTone } from '../app/format';
 import { t } from '../i18n';
 
 const PROJECT_LIST_COLLAPSED_KEY = 'grok-desktop-project-list-collapsed-v3';
+const RECENT_LIST_COLLAPSED_KEY = 'grok-desktop-recent-list-collapsed-v1';
 
 export interface SidebarProps {
   history: ReturnType<typeof useHistoryOrganization>;
@@ -125,6 +127,9 @@ export function Sidebar({
   const [projectsCollapsed, setProjectsCollapsed] = useState(
     () => window.localStorage.getItem(PROJECT_LIST_COLLAPSED_KEY) !== 'expanded',
   );
+  const [recentCollapsed, setRecentCollapsed] = useState(
+    () => window.localStorage.getItem(RECENT_LIST_COLLAPSED_KEY) === 'collapsed',
+  );
   const seenProjectPaths = useRef(new Set(historyView.projectGroups.map(([path]) => path)));
   const [sidebarPeek, setSidebarPeek] = useState(false);
   const peekHoverRef = useRef(false);
@@ -204,6 +209,14 @@ export function Sidebar({
     setProjectsCollapsed((current) => {
       const next = !current;
       window.localStorage.setItem(PROJECT_LIST_COLLAPSED_KEY, next ? 'collapsed' : 'expanded');
+      return next;
+    });
+  }
+
+  function toggleRecent() {
+    setRecentCollapsed((current) => {
+      const next = !current;
+      window.localStorage.setItem(RECENT_LIST_COLLAPSED_KEY, next ? 'collapsed' : 'expanded');
       return next;
     });
   }
@@ -560,6 +573,7 @@ export function Sidebar({
                       aria-expanded={!projectsCollapsed}
                       onClick={toggleProjects}
                     >
+                      <Folders size={12} aria-hidden="true" />
                       <span>{t('sidebar.projects')}</span>
                       <span className="project-list-count" aria-hidden="true">
                         {historyView.projectGroups.length}
@@ -618,14 +632,28 @@ export function Sidebar({
 
                 {historyView.ungrouped.length > 0 ? (
                   <div className="history-group">
-                    {historyView.pinned.length > 0 ||
-                    historyView.groups.length > 0 ||
-                    historyView.projectGroups.length > 0 ? (
-                      <div className="history-section-head">
-                        <History size={12} /> {t('sidebar.recent')}
+                    <button
+                      type="button"
+                      className="history-section-head toggle project-list-label"
+                      aria-controls="recent-list-content"
+                      aria-expanded={!recentCollapsed}
+                      onClick={toggleRecent}
+                    >
+                      <History size={12} aria-hidden="true" />
+                      <span>{t('sidebar.recent')}</span>
+                      <span className="project-list-count" aria-hidden="true">
+                        {historyView.ungrouped.length}
+                      </span>
+                      <ChevronDown
+                        size={13}
+                        className={`chev${recentCollapsed ? '' : ' open'}`}
+                      />
+                    </button>
+                    {!recentCollapsed ? (
+                      <div id="recent-list-content">
+                        {historyView.ungrouped.map(renderHistoryRow)}
                       </div>
                     ) : null}
-                    {historyView.ungrouped.map(renderHistoryRow)}
                   </div>
                 ) : null}
 

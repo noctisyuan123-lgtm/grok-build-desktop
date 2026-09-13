@@ -3084,27 +3084,31 @@ body[data-completion-popup='true'] {
   margin-top: 2px;
 }
 
-/* VSCode-style headings: tighter, with underline accent on h1/h2 */
+/* Headings: size scale only — no underline (Codex-style). */
 .markdown-body h1 {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  font-size: 1.35rem;
+  font-size: 1.2rem;
   font-weight: 650;
   letter-spacing: -0.01em;
-  padding-bottom: 8px;
 }
 .markdown-body h2 {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  font-size: 1.15rem;
+  font-size: 1.08rem;
   font-weight: 650;
   letter-spacing: -0.005em;
-  padding-bottom: 6px;
 }
 .markdown-body h3 {
   font-size: 1.05rem;
   font-weight: 600;
 }
 .markdown-body h4 {
-  font-size: 0.98rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.markdown-body h5 {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.markdown-body h6 {
+  font-size: 0.8rem;
   font-weight: 600;
 }
 
@@ -3173,8 +3177,8 @@ body[data-completion-popup='true'] {
   padding: 0 14px 14px;
 }
 
-.conversation-panel.is-empty .composer-input-shell > textarea,
-.theme-dark .conversation-panel.is-empty .composer-input-shell > textarea {
+.conversation-panel.is-empty .composer-input-shell textarea,
+.theme-dark .conversation-panel.is-empty .composer-input-shell textarea {
   min-height: 42px;
   padding-bottom: 2px;
   padding-top: 9px;
@@ -4696,7 +4700,7 @@ body[data-completion-popup='true'] {
 /* VS Code Agent Pane parity. The parser uses markdown-it (as VS Code does);
    keep this scoped so the rest of the desktop UI retains its theme.
    Customize Markdown previews share the same rules via :is(). */
-:is(.message.message-assistant .message-body.markdown-body, .customize-markdown-preview.markdown-body) {
+:is(:is(.message.message-assistant, .message.message-user) .message-body.markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) {
   --vscode-editor-foreground: var(--grok-text-1);
   --vscode-textCodeBlock-background: var(--grok-bg-1);
   --vscode-widget-border: var(--grok-border-1);
@@ -4709,65 +4713,61 @@ body[data-completion-popup='true'] {
   white-space: normal;
   word-break: normal;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h1,
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h2,
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h3,
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h4,
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h5,
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h6 {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) h1,
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) h2,
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) h3,
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) h4,
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) h5,
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) h6 {
   color: inherit;
   font-weight: 600;
   line-height: 1.25;
   margin-top: 24px;
   margin-bottom: 16px;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) > :first-child {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) > :first-child {
   margin-top: 0;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) > :last-child {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) > :last-child {
   margin-bottom: 0;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h1 {
-  font-size: 2em;
-  padding-bottom: 0.3em;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) h1 {
+  font-size: 1.6em;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h2 {
-  font-size: 1.5em;
-  padding-bottom: 0.3em;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) h2 {
+  font-size: 1.35em;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h3 {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) h3 {
   font-size: 1.25em;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h4 {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) h4 {
+  font-size: 1.125em;
+}
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) h5 {
   font-size: 1em;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h5 {
-  font-size: 0.875em;
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) h6 {
+  font-size: 0.8125em;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h6 {
-  font-size: 0.85em;
-}
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) p {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) p {
   margin: 0 0 16px;
   white-space: normal;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) ul {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) ul {
   margin: 0 0 0.7em;
   padding-inline-start: 24px;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) ol {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) ol {
   margin: 0 0 0.7em;
   padding-inline-start: 28px;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) li {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) li {
   margin: 4px 0;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) li p {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) li p {
   margin: 0;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) blockquote {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) blockquote {
   background: transparent;
   border-left: 3.5px solid rgba(255, 255, 255, 0.18);
   border-radius: 2px;
@@ -4775,12 +4775,12 @@ body[data-completion-popup='true'] {
   margin: 0 0 16px;
   padding: 0 16px 0 14px;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) hr {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) hr {
   border: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.18);
   margin: 16px 0;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .md-table-wrap {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .md-table-wrap {
   margin: 0 0 0.7em;
   max-width: 100%;
   min-width: 0;
@@ -4788,7 +4788,7 @@ body[data-completion-popup='true'] {
   overflow-y: hidden;
   overscroll-behavior-x: contain;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) {
   border: 0;
   border-collapse: collapse;
   border-radius: 0;
@@ -4799,8 +4799,8 @@ body[data-completion-popup='true'] {
   table-layout: auto;
   width: max-content;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > thead > tr > th,
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > tbody > tr > td {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) > thead > tr > th,
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) > tbody > tr > td {
   background: transparent;
   border: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.035);
@@ -4812,35 +4812,35 @@ body[data-completion-popup='true'] {
   text-align: left;
   word-break: keep-all;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > thead > tr > th {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) > thead > tr > th {
   border-bottom-color: rgba(255, 255, 255, 0.09);
   font-weight: 600;
   white-space: nowrap;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > thead > tr > th:first-child,
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > tbody > tr > td:first-child {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) > thead > tr > th:first-child,
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) > tbody > tr > td:first-child {
   padding-left: 0;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > thead > tr > th:last-child,
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > tbody > tr > td:last-child {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) > thead > tr > th:last-child,
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) > tbody > tr > td:last-child {
   padding-right: 0;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > tbody > tr:last-child > td {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) > tbody > tr:last-child > td {
   border-bottom: 0;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > tbody > tr:nth-child(even) > td {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) > tbody > tr:nth-child(even) > td {
   background: transparent;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) ul.task-list-container {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) ul.task-list-container {
   list-style: none;
   padding-inline-start: 2px;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .task-list-item {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .task-list-item {
   align-items: flex-start;
   display: flex;
   gap: 8px;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .task-list-item-checkbox {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .task-list-item-checkbox {
   appearance: none;
   background: transparent;
   border: 1px solid var(--grok-text-3);
@@ -4852,11 +4852,11 @@ body[data-completion-popup='true'] {
   position: relative;
   width: 11px;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .task-list-item-checkbox:checked {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .task-list-item-checkbox:checked {
   background: var(--grok-text-1);
   border-color: var(--grok-text-1);
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .task-list-item-checkbox:checked::after {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .task-list-item-checkbox:checked::after {
   border: solid var(--grok-bg-0);
   border-width: 0 1.5px 1.5px 0;
   content: '';
@@ -4867,48 +4867,48 @@ body[data-completion-popup='true'] {
   transform: rotate(45deg);
   width: 2px;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .footnote-ref a,
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .footnote-backref {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .footnote-ref a,
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .footnote-backref {
   color: var(--accent);
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .footnotes-sep {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .footnotes-sep {
   border-bottom-color: rgba(255, 255, 255, 0.1);
   margin: 24px 0 12px;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .footnotes {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .footnotes {
   color: var(--grok-text-2);
   font-size: 0.86em;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .footnotes ol {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .footnotes ol {
   margin-bottom: 0;
   padding-inline-start: 24px;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .footnotes li {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .footnotes li {
   margin: 3px 0;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .katex-display,
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .katex-block {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .katex-display,
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .katex-block {
   margin: 16px 0;
   overflow: visible;
   padding: 6px 0;
   text-align: center;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .katex math {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .katex math {
   color: inherit;
   font-family: 'STIX Two Math', 'STIXGeneral', 'Times New Roman', serif;
   font-size: 1em;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .katex-block math[display='block'] {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .katex-block math[display='block'] {
   display: block;
   margin-inline: auto;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .katex-display > .katex,
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .katex-block > .katex {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .katex-display > .katex,
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .katex-block > .katex {
   overflow-x: auto;
   overflow-y: hidden;
   padding-block: 0.15em;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) code {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) code {
   background: transparent;
   border-radius: 0;
   color: inherit;
@@ -4928,8 +4928,8 @@ body[data-completion-popup='true'] {
   line-height: 1.357em;
   padding: 0;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) pre,
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .code-block {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) pre,
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .code-block {
   background: var(--vscode-textCodeBlock-background);
   border: 1px solid var(--vscode-widget-border);
   border-radius: 3px;
@@ -4938,7 +4938,7 @@ body[data-completion-popup='true'] {
   padding: 11px 16px;
   position: relative;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) pre code {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) pre code {
   color: inherit;
   display: inline-block;
   font-size: 1.1rem;
@@ -4991,14 +4991,14 @@ body[data-completion-popup='true'] {
 .markdown-body .code-block-copy-button.copied .code-block-check-icon {
   display: block;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) a {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) a {
   color: var(--accent) !important;
   text-decoration: none;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) a:hover {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) a:hover {
   text-decoration: underline;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) img {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) img {
   max-width: 100%;
   max-height: 100%;
 }
@@ -6703,7 +6703,8 @@ body[data-theme='light'] .hljs-comment {
 .history-list button.project-list-label .chev {
   margin-left: 0;
 }
-#project-list-content {
+#project-list-content,
+#recent-list-content {
   margin-top: 0;
 }
 .history-list button.project-section-head {
@@ -9043,6 +9044,7 @@ select:focus-visible {
   max-width: min(74%, 920px);
   padding: 13px 19px;
   white-space: pre-wrap;
+  width: fit-content;
 }
 
 /* Codex-style long paste disclosure: keep the transcript compact, then open
@@ -9682,8 +9684,8 @@ body,
   z-index: 30;
 }
 
-.theme-dark :is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) pre,
-.theme-dark :is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .code-block {
+.theme-dark :is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) pre,
+.theme-dark :is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .code-block {
   background: #1d1d1d;
   border-color: #303030;
 }
@@ -9802,6 +9804,7 @@ body,
 .message.message-user .message-body {
   font-size: 14px;
   max-width: min(760px, 100%);
+  width: fit-content;
 }
 /* da69c2c's final computed conversation size, after the VS Code base rules. */
 :root {
@@ -9874,14 +9877,20 @@ body,
   max-width: min(74%, 920px);
   width: auto;
 }
-:is(.message.message-assistant .message-body.markdown-body, .customize-markdown-preview.markdown-body) {
+:is(:is(.message.message-assistant, .message.message-user) .message-body.markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) {
   font-size: 14px;
   line-height: 22px;
   max-width: 100%;
+}
+.message.message-assistant .message-body.markdown-body,
+:is(.customize-markdown-preview, .composer-markdown-preview).markdown-body {
   width: 100%;
 }
-.message.message-user .message-body {
-  max-width: 100%;
+.message.message-user .message-body,
+.message.message-user .message-body.markdown-body {
+  align-self: flex-end;
+  max-width: min(74%, 920px);
+  width: fit-content;
 }
 .message-edit-box {
   align-self: flex-end;
@@ -9951,12 +9960,12 @@ body,
   box-shadow: none;
 }
 /* The table remains the one intentional post-VS-Code customization. */
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) {
   color: var(--conversation-text);
   font-size: 13px;
   line-height: 20px;
 }
-:is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > thead > tr > th {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) > thead > tr > th {
   color: inherit;
   font-size: inherit;
   font-weight: 600;
@@ -9980,16 +9989,16 @@ body,
      preserve the shell's top edge while lifting its lower edge by 8px. */
   margin-bottom: 8px;
 }
-.conversation-panel:not(.is-empty) .composer-input-shell > textarea,
-.theme-dark .conversation-panel:not(.is-empty) .composer-input-shell > textarea {
+.conversation-panel:not(.is-empty) .composer-input-shell textarea,
+.theme-dark .conversation-panel:not(.is-empty) .composer-input-shell textarea {
   min-height: 38px;
 }
 .theme-dark .composer-input-shell:focus-within {
   border-color: #555;
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.075);
 }
-.composer-input-shell > textarea,
-.theme-dark .composer-input-shell > textarea {
+.composer-input-shell textarea,
+.theme-dark .composer-input-shell textarea {
   background: transparent;
   border: 0;
   border-radius: 13px 13px 0 0;
@@ -10002,8 +10011,8 @@ body,
   resize: none;
   width: 100%;
 }
-.composer-input-shell > textarea:focus,
-.theme-dark .composer-input-shell > textarea:focus {
+.composer-input-shell textarea:focus,
+.theme-dark .composer-input-shell textarea:focus {
   border: 0;
   box-shadow: none;
   outline: none;
@@ -10037,6 +10046,169 @@ body,
 }
 .composer-inline-bar .composer-send svg {
   display: block;
+}
+.composer-input-field {
+  position: relative;
+}
+.composer-editor {
+  display: block;
+}
+.composer-editor .ProseMirror {
+  box-sizing: border-box;
+  caret-color: var(--grok-text-1, #f5f5f5);
+  color: var(--conversation-text, #f5f5f5);
+  font-size: 14px;
+  line-height: 22px;
+  max-height: 240px;
+  min-height: 38px;
+  outline: none;
+  overflow-y: auto;
+  padding: 8px 14px 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.composer-editor .ProseMirror p {
+  margin: 0 0 0.55em;
+}
+.composer-editor .ProseMirror p:last-child,
+.composer-editor .ProseMirror h1:last-child,
+.composer-editor .ProseMirror h2:last-child,
+.composer-editor .ProseMirror h3:last-child,
+.composer-editor .ProseMirror h4:last-child,
+.composer-editor .ProseMirror h5:last-child,
+.composer-editor .ProseMirror h6:last-child {
+  margin-bottom: 0;
+}
+.composer-editor .ProseMirror h1,
+.composer-editor .ProseMirror h2,
+.composer-editor .ProseMirror h3,
+.composer-editor .ProseMirror h4,
+.composer-editor .ProseMirror h5,
+.composer-editor .ProseMirror h6 {
+  font-weight: 600;
+  margin: 0 0 0.35em;
+}
+.composer-editor .ProseMirror h1 {
+  font-size: 1.6em;
+  line-height: 1.25;
+}
+.composer-editor .ProseMirror h2 {
+  font-size: 1.35em;
+  line-height: 1.3;
+}
+.composer-editor .ProseMirror h3 {
+  font-size: 1.25em;
+}
+.composer-editor .ProseMirror h4 {
+  font-size: 1.125em;
+}
+.composer-editor .ProseMirror h5 {
+  font-size: 1em;
+}
+.composer-editor .ProseMirror h6 {
+  font-size: 0.8125em;
+}
+.composer-editor .ProseMirror strong {
+  font-weight: 700;
+}
+.composer-editor .ProseMirror em {
+  font-style: italic;
+}
+.composer-editor .ProseMirror s {
+  text-decoration: line-through;
+}
+.composer-editor .ProseMirror code {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  font-family: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.92em;
+  padding: 1px 5px;
+}
+.composer-editor .ProseMirror pre {
+  background: #1d1d1d;
+  border: 1px solid #303030;
+  border-radius: 6px;
+  box-sizing: border-box;
+  margin: 0 0 0.55em;
+  overflow-x: auto;
+  padding: 10px 12px;
+}
+.composer-editor .ProseMirror pre code {
+  background: transparent;
+  padding: 0;
+}
+.composer-editor .ProseMirror blockquote {
+  border-left: 3.5px solid rgba(255, 255, 255, 0.18);
+  margin: 0 0 0.55em;
+  padding: 0 12px;
+}
+.composer-editor .ProseMirror table {
+  border-collapse: collapse;
+  margin: 0 0 0.55em;
+  max-width: 100%;
+}
+.composer-editor .ProseMirror th,
+.composer-editor .ProseMirror td {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  padding: 6px 10px;
+  text-align: left;
+}
+.composer-editor .ProseMirror th {
+  font-weight: 600;
+}
+.composer-editor .ProseMirror p.is-editor-empty:first-child::before {
+  color: var(--text-muted, #8a8a8a);
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+.composer-live-md-surface {
+  box-sizing: border-box;
+  inset: 0;
+  overflow: hidden;
+  padding: 8px 14px 4px;
+  pointer-events: none;
+  position: absolute;
+}
+.composer-input-shell.is-live-md textarea {
+  caret-color: var(--grok-text-1, #f5f5f5);
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+.composer-input-shell.is-live-md textarea::placeholder {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+.composer-input-shell.is-live-md textarea::selection {
+  background: rgba(90, 140, 255, 0.45);
+  color: #fff;
+  -webkit-text-fill-color: #fff;
+}
+.composer-live-md-surface > .message-body,
+.composer-live-md-surface .composer-markdown-preview {
+  margin-top: 0;
+}
+.message-edit-live {
+  position: relative;
+}
+.message-edit-live.is-live-md > textarea {
+  caret-color: var(--conversation-text, #f5f5f5);
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+.message-edit-live.is-live-md > textarea::selection {
+  background: rgba(90, 140, 255, 0.45);
+  color: #fff;
+  -webkit-text-fill-color: #fff;
+}
+.message-edit-live-surface {
+  box-sizing: border-box;
+  inset: 0;
+  overflow: hidden;
+  padding: 11px 13px;
+  pointer-events: none;
+  position: absolute;
 }
 .composer-attachments {
   padding: 0 0 8px;
@@ -10383,24 +10555,20 @@ body,
    blockquote bar, hr, table rules, footnote separator) vanish on the
    parchment canvas. Ink-based equivalents keep the same visual weight; the
    dark rules above are untouched. */
-.theme-light :is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h1,
-.theme-light :is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) h2 {
-  border-bottom-color: rgba(31, 29, 25, 0.14);
-}
-.theme-light :is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) blockquote {
+.theme-light :is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) blockquote {
   border-left-color: rgba(31, 29, 25, 0.22);
 }
-.theme-light :is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) hr {
+.theme-light :is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) hr {
   border-bottom-color: rgba(31, 29, 25, 0.14);
 }
-.theme-light :is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > thead > tr > th,
-.theme-light :is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > tbody > tr > td {
+.theme-light :is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) > thead > tr > th,
+.theme-light :is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) > tbody > tr > td {
   border-bottom-color: rgba(31, 29, 25, 0.08);
 }
-.theme-light :is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) table:not(.vlist-t) > thead > tr > th {
+.theme-light :is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) > thead > tr > th {
   border-bottom-color: rgba(31, 29, 25, 0.18);
 }
-.theme-light :is(.message.message-assistant .markdown-body, .customize-markdown-preview.markdown-body) .footnotes-sep {
+.theme-light :is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .footnotes-sep {
   border-bottom-color: rgba(31, 29, 25, 0.12);
 }
 

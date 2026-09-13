@@ -9,7 +9,7 @@ import type { SessionSubagent } from '../lib/sessionSubagents';
 import { useSubagentUi } from './subagentUiContext';
 import { PlanTodoList, resolvePlanEntriesFromTraces } from './PlanTodoList';
 import { LongTextMessage } from './LongTextMessage';
-import { TranscriptMessage } from './MessageItem';
+import { TranscriptMessage, MarkdownSegment } from './MessageItem';
 import { isLongUserText } from '../lib/longText';
 import { t } from '../i18n';
 
@@ -233,7 +233,7 @@ function SubagentDrawerBody({ runId, subagent }: { runId: string; subagent: Trac
           {isLongUserText(prompt) ? (
             <LongTextMessage text={prompt} />
           ) : (
-            <pre className="message-body">{prompt}</pre>
+            <MarkdownSegment cacheKey={`subagent-prompt:${transcriptRunId}`} text={prompt} />
           )}
         </div>
       ) : null}

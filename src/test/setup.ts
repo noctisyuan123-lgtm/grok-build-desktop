@@ -6,6 +6,38 @@ import { afterEach, vi } from 'vitest';
 import { cleanup } from '@testing-library/react';
 import { clearMocks } from '@tauri-apps/api/mocks';
 
+const emptyRects = {
+  item: () => null,
+  length: 0,
+  [Symbol.iterator]: function* () {},
+} as unknown as DOMRectList;
+const emptyRect = {
+  x: 0,
+  y: 0,
+  width: 0,
+  height: 0,
+  top: 0,
+  right: 0,
+  bottom: 0,
+  left: 0,
+  toJSON() {
+    return this;
+  },
+} as DOMRect;
+if (typeof Range !== 'undefined') {
+  Range.prototype.getClientRects = () => emptyRects;
+  Range.prototype.getBoundingClientRect = () => emptyRect;
+}
+Element.prototype.getClientRects = function () {
+  return emptyRects;
+};
+Element.prototype.getBoundingClientRect = function () {
+  return emptyRect;
+};
+Document.prototype.elementFromPoint = function () {
+  return this.body;
+};
+
 vi.mock('@xterm/addon-fit', () => ({
   FitAddon: class {
     activate() {}

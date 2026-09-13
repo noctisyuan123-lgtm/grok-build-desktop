@@ -16,3 +16,11 @@ export function useRunHtml(runId: string | null | undefined): string | undefined
     () => undefined,
   );
 }
+
+export function useRunHtmlSource(runId: string | null | undefined): string | undefined {
+  return useSyncExternalStore(
+    streamStore.subscribe,
+    () => (runId ? streamStore.getHtmlSource(runId) : undefined),
+    () => undefined,
+  );
+}

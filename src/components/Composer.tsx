@@ -15,6 +15,7 @@ import { useHasInflight } from '../hooks/useActiveRun';
 import { notePendingSubmitEnd, notePendingSubmitStart } from '../lib/streamStore';
 import { extractFileMentions, readFileSafe, type FileEntry } from '../lib/files';
 import { FilePicker } from './FilePicker';
+import { ComposerEditor, type ComposerEditorHandle } from './ComposerEditor';
 import { t } from '../i18n';
 import { hasTauriRuntime } from '../lib/runtime';
 import {
@@ -110,41 +111,15 @@ interface Props {
   offline?: boolean;
 }
 
-/**
- * Find the active `@token` immediately to the left of the textarea caret. If
- * the caret is not inside an unfinished `@…` mention, returns null. The token
- * begins right after the most recent `@` that follows whitespace or
- * string-start, and runs until the caret. Whitespace inside the token closes
- * it (the user finished typing the filename).
- */
-/** Listbox id shared by the textarea (aria-controls) and the FilePicker. */
+/** Listbox id shared by the editor (aria-controls) and the FilePicker. */
 const FILE_PICKER_LISTBOX_ID = 'composer-file-picker-listbox';
-const TEXTAREA_MAX_HEIGHT = 240;
-
-function detectActiveMention(text: string, caret: number): { start: number; query: string } | null {
-  if (caret <= 0) return null;
-  let i = caret - 1;
-  while (i >= 0) {
-    const ch = text[i];
-    if (ch === '@') {
-      // valid only if @ is at string-start or preceded by whitespace
-      if (i === 0 || /\s/.test(text[i - 1]!)) {
-        return { start: i, query: text.slice(i + 1, caret) };
-      }
-      return null;
-    }
-    if (/\s/.test(ch ?? '')) return null;
-    i--;
-  }
-  return null;
-}
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   {
     cwd,
     argsBuilder,
     parentRunId,
-  beforeEnqueue,
+    beforeEnqueue,
     laneId,
     sessionRunIds,
     initialValue,
@@ -160,12 +135,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   }: Props,
   outerRef,
 ) {
-  const ref = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<ComposerEditorHandle>(null);
   // Track composition via BOTH a ref (sync, immune to React lag) and React
   // state (drives Send/Queuing label re-render). The ref is the authoritative
   // guard inside the keydown handler.
-  const composingRef = useRef(false);
-  const [isComposing, setIsComposing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
   // Highlighted FilePicker option id, exposed as aria-activedescendant while
@@ -186,7 +159,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   useEffect(() => {
     const onModifierKey = (event: KeyboardEvent) => {
       const isMeta =
-        event.key === 'Meta' || event.key === 'OS' || event.key === 'Command' || event.keyCode === 91;
+        event.key === 'Meta' ||
+        event.key === 'OS' ||
+        event.key === 'Command' ||
+        event.keyCode === 91;
       const isControl = event.key === 'Control' || event.keyCode === 17;
       if (isMeta) heldModifierRef.current.meta = event.type === 'keydown';
       if (isControl) heldModifierRef.current.ctrl = event.type === 'keydown';
@@ -204,59 +180,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       window.removeEventListener('blur', clearModifiers);
     };
   }, []);
-  // Local draft undo/redo (textarea-scoped). Native undo stacks are cleared by
-  // programmatic value writes (setValue / submit clear / IME edge cases) and
-  // are unreliable in WebView/jsdom — keep a small stack so Cmd/Ctrl+Z restores
-  // accidental deletes without a global key listener or message-round-trip undo.
-  const draftHistoryRef = useRef<string[]>([initialValue ?? '']);
-  const draftIndexRef = useRef(0);
-  const applyingDraftHistoryRef = useRef(false);
-
-  const recordDraftHistory = useCallback((value: string) => {
-    if (applyingDraftHistoryRef.current || composingRef.current) return;
-    const history = draftHistoryRef.current;
-    const index = draftIndexRef.current;
-    if (history[index] === value) return;
-    const next = history.slice(0, index + 1);
-    next.push(value);
-    // Cap growth; drop oldest and keep index aligned.
-    if (next.length > 100) {
-      next.shift();
-      draftHistoryRef.current = next;
-      draftIndexRef.current = next.length - 1;
-    } else {
-      draftHistoryRef.current = next;
-      draftIndexRef.current = next.length - 1;
-    }
-  }, []);
-
-  const resizeTextarea = useCallback((textarea = ref.current) => {
-    if (!textarea) return;
-    textarea.style.height = 'auto';
-    const contentHeight = textarea.scrollHeight;
-    textarea.style.height = `${Math.min(contentHeight, TEXTAREA_MAX_HEIGHT)}px`;
-    textarea.style.overflowY = contentHeight > TEXTAREA_MAX_HEIGHT ? 'auto' : 'hidden';
-  }, []);
-
-  const applyDraftHistory = useCallback(
-    (value: string) => {
-      const el = ref.current;
-      if (!el) return;
-      applyingDraftHistoryRef.current = true;
-      el.value = value;
-      const caret = value.length;
-      try {
-        el.setSelectionRange(caret, caret);
-      } catch {
-        /* some test hosts reject selection on detached nodes */
-      }
-      applyingDraftHistoryRef.current = false;
-      resizeTextarea(el);
-      const nextCaret = el.selectionStart ?? 0;
-      setMention(detectActiveMention(el.value, nextCaret));
-    },
-    [resizeTextarea],
-  );
   // Primitive selector — subscribing to whole run/queue snapshots would
   // re-render the Composer on every streamed token (see useHasInflight).
   // Session-scoped so another tab's long run does not flip Send → Enqueue here.
@@ -408,24 +331,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     };
   }, [addNativePaths, onError]);
 
-  // Apply initialValue once on mount.
-  useEffect(() => {
-    if (initialValue && ref.current && !ref.current.value) {
-      ref.current.value = initialValue;
-      draftHistoryRef.current = [initialValue];
-      draftIndexRef.current = 0;
-    }
-    resizeTextarea();
-  }, [resizeTextarea]);
-
   // Persist the in-flight draft on focus/window lifecycle boundaries (e.g.
   // the macOS close button hides the window without unmounting the WebView).
   // Reads the current text directly from the DOM ref — no dependency on
   // React state. These listeners stay scoped to this mounted Composer.
   useEffect(() => {
-    const node = ref.current;
     const flushDraft = () => {
-      onTextChangeRef.current?.(ref.current?.value ?? '');
+      onTextChangeRef.current?.(editorRef.current?.getMarkdown() ?? '');
     };
     const onVisibilityChange = () => {
       if (document.visibilityState === 'hidden') flushDraft();
@@ -437,7 +349,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       window.removeEventListener('blur', flushDraft);
       window.removeEventListener('pagehide', flushDraft);
       document.removeEventListener('visibilitychange', onVisibilityChange);
-      onTextChangeRef.current?.(node?.value ?? '');
+      onTextChangeRef.current?.(editorRef.current?.getMarkdown() ?? '');
     };
   }, []);
 
@@ -446,33 +358,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
    * movement. We can't use a controlled value because the textarea is
    * uncontrolled (perf invariant — see onTextChange comment).
    */
-  const refreshMentionFrom = (el: HTMLTextAreaElement | null) => {
-    if (!el) {
-      setMention(null);
-      return;
-    }
-    const caret = el.selectionStart ?? 0;
-    setMention(detectActiveMention(el.value, caret));
-  };
-
-  const refreshMention = () => refreshMentionFrom(ref.current);
-
   const insertMention = (entry: FileEntry) => {
-    const el = ref.current;
-    if (!el || !mention) return;
-    const caret = el.selectionStart ?? 0;
-    const before = el.value.slice(0, mention.start);
-    const after = el.value.slice(caret);
-    // Quote paths containing whitespace so extractFileMentions can parse them
-    // back out as one token ("My Project/notes.md" would otherwise become @My).
-    const insertion = /\s/.test(entry.path) ? `@"${entry.path}" ` : `@${entry.path} `;
-    el.value = `${before}${insertion}${after}`;
-    const newCaret = before.length + insertion.length;
-    el.setSelectionRange(newCaret, newCaret);
-    recordDraftHistory(el.value);
-    resizeTextarea(el);
+    editorRef.current?.replaceActiveMention(entry);
     setMention(null);
-    el.focus();
+    editorRef.current?.focus();
   };
 
   /**
@@ -503,9 +392,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       return;
     }
     if (submitting || (locked && !force)) return;
-    const el = ref.current;
-    if (!el) return;
-    const rawText = el.value.trim();
+    const editor = editorRef.current;
+    if (!editor) return;
+    const rawText = editor.getMarkdown().trim();
     if (!rawText && attachments.length === 0 && !attachedFolder) return;
     setSubmitting(true);
     setMention(null);
@@ -513,13 +402,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     try {
       // Host slash commands stay in the desktop shell (CLI handoff, etc.).
       if (rawText.startsWith('/') && onHostSlash && (await onHostSlash(rawText))) {
-        el.value = '';
-        recordDraftHistory('');
-        resizeTextarea(el);
+        editor.setMarkdown('');
         onTextChangeRef.current?.('');
         notePendingSubmitEnd();
         setSubmitting(false);
-        requestAnimationFrame(() => ref.current?.focus());
+        requestAnimationFrame(() => editorRef.current?.focus());
         return;
       }
       const attachmentFallback =
@@ -545,10 +432,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       } else {
         args.push('-p', prompt);
       }
-      const result = await enqueueRun({ prompt, cwd, args, parentRunId, laneId: pinnedLaneId, delivery });
-      el.value = '';
-      recordDraftHistory('');
-      resizeTextarea(el);
+      const result = await enqueueRun({
+        prompt,
+        cwd,
+        args,
+        parentRunId,
+        laneId: pinnedLaneId,
+        delivery,
+      });
+      editor.setMarkdown('');
       setAttachments([]);
       setAttachedFolder(null);
       onTextChangeRef.current?.('');
@@ -574,7 +466,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       // Disabling the textarea during submit blurs it; restore focus so the
       // type→Enter→type flow survives every send. rAF lets the re-enable
       // render commit first.
-      requestAnimationFrame(() => ref.current?.focus());
+      requestAnimationFrame(() => editorRef.current?.focus());
     }
   };
 
@@ -589,16 +481,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   mentionRef.current = mention;
   useEffect(() => {
     const onNativeKeyDown = (event: KeyboardEvent) => {
-      if (event.target !== ref.current) return;
+      const dom = editorRef.current?.getDom();
+      const target = event.target;
+      if (!dom) return;
+      if (target !== dom && (!(target instanceof Node) || !dom.contains(target))) return;
       if ((event.key !== 'Enter' && event.code !== 'NumpadEnter') || event.shiftKey) return;
       if (event.altKey) return;
       if (mentionRef.current && cwd.trim()) return;
-      if (
-        composingRef.current ||
-        isComposing ||
-        event.isComposing ||
-        event.keyCode === 229
-      ) {
+      if (event.isComposing || event.keyCode === 229) {
         return;
       }
       const modifier =
@@ -615,28 +505,21 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     };
     window.addEventListener('keydown', onNativeKeyDown, true);
     return () => window.removeEventListener('keydown', onNativeKeyDown, true);
-  }, [cwd, isComposing]);
+  }, [cwd]);
 
   useImperativeHandle(
     outerRef,
     () => ({
       setValue: (text: string) => {
-        const el = ref.current;
-        if (!el) return;
-        el.value = text;
-        // Imperative writes (mode switch, undo-response restore, starters)
-        // replace the live draft — seed history so Cmd+Z can still recover
-        // the previous local text if the user immediately deletes.
-        recordDraftHistory(text);
-        resizeTextarea(el);
+        editorRef.current?.setMarkdown(text);
       },
       setAttachedFolder,
       getAttachedFolder: () => attachedFolder,
-      getValue: () => ref.current?.value ?? '',
-      focus: () => ref.current?.focus(),
+      getValue: () => editorRef.current?.getMarkdown() ?? '',
+      focus: () => editorRef.current?.focus(),
       submit: () => submit(true),
     }),
-    [attachedFolder, recordDraftHistory, resizeTextarea, submit],
+    [attachedFolder, submit],
   );
 
   const pickerOpen = Boolean(mention && cwd.trim());
@@ -729,137 +612,31 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         }}
       />
       <div className="composer-input-shell">
-        <textarea
-          ref={ref}
-          disabled={submitting || locked}
-          // While the @-mention picker is open the textarea drives a listbox
-          // without losing DOM focus — the ARIA combobox pattern. The role is
-          // scoped to that state so the composer stays a plain multiline
-          // textbox the rest of the time.
-          role={pickerOpen ? 'combobox' : undefined}
-          aria-expanded={pickerOpen ? true : undefined}
-          aria-controls={pickerOpen ? FILE_PICKER_LISTBOX_ID : undefined}
-          aria-activedescendant={pickerOpen ? (activeOptionId ?? undefined) : undefined}
-          aria-autocomplete={pickerOpen ? 'list' : undefined}
-          placeholder={
-            submitting
-              ? t('composer.placeholderQueuing')
-              : (placeholder ??
-                (hasInflight
-                  ? t('composer.placeholderQueueAnother')
-                  : t('composer.placeholderAsk')))
-          }
-          onCompositionStart={() => {
-            composingRef.current = true;
-            setIsComposing(true);
-          }}
-          onCompositionEnd={() => {
-            composingRef.current = false;
-            setIsComposing(false);
-            const el = ref.current;
-            if (el) {
-              recordDraftHistory(el.value);
-              resizeTextarea(el);
+        <div className="composer-input-field">
+          <ComposerEditor
+            ref={editorRef}
+            initialValue={initialValue}
+            disabled={submitting || locked}
+            placeholder={
+              submitting
+                ? t('composer.placeholderQueuing')
+                : (placeholder ??
+                  (hasInflight
+                    ? t('composer.placeholderQueueAnother')
+                    : t('composer.placeholderAsk')))
             }
-            refreshMention();
-          }}
-          onInput={(event) => {
-            const el = event.currentTarget;
-            if (el && !composingRef.current) recordDraftHistory(el.value);
-            resizeTextarea(el);
-            refreshMention();
-          }}
-          onClick={() => refreshMention()}
-          onKeyUp={(e) => {
-            // arrow-nav over the textarea moves the caret too — refresh after.
-            if (
-              e.key === 'ArrowLeft' ||
-              e.key === 'ArrowRight' ||
-              e.key === 'ArrowUp' ||
-              e.key === 'ArrowDown' ||
-              e.key === 'Home' ||
-              e.key === 'End'
-            ) {
-              refreshMention();
-            }
-          }}
-          onBlur={(e) => {
-            // Persist draft on normal textarea blur. Window lifecycle hooks
-            // above cover the native close/hide path while it is focused.
-            onTextChangeRef.current?.((e.target as HTMLTextAreaElement).value);
-            // Close mention picker on blur so it doesn't linger over other UI.
-            // Use a microtask so mousedown on a picker row can fire first.
-            setTimeout(() => setMention(null), 100);
-          }}
-          onKeyDown={(e) => {
-            // When the file picker is open it owns Enter/Tab/Arrows/Esc. Mirror
-            // the render condition below (`mention && cwd.trim()`): with no cwd
-            // the picker never shows, so a trailing @word must not swallow Enter.
-            if (mention && cwd.trim()) {
-              const navKeys = ['Enter', 'Tab', 'ArrowDown', 'ArrowUp', 'Escape'];
-              if (navKeys.includes(e.key)) return;
-            }
-            // Draft undo/redo — only while this textarea is the event target.
-            // Never register a window-level listener that could steal Cmd+Z from
-            // other editable controls or app-wide undo surfaces.
-            const mod = e.metaKey || e.ctrlKey;
-            if (mod && !e.altKey && e.key.toLowerCase() === 'z') {
-              const native = e.nativeEvent as KeyboardEvent;
-              if (
-                composingRef.current ||
-                isComposing ||
-                native.isComposing ||
-                native.keyCode === 229
-              ) {
-                return;
-              }
-              e.preventDefault();
-              e.stopPropagation();
-              if (e.shiftKey) {
-                // Redo (Cmd/Ctrl+Shift+Z)
-                if (draftIndexRef.current < draftHistoryRef.current.length - 1) {
-                  draftIndexRef.current += 1;
-                  applyDraftHistory(draftHistoryRef.current[draftIndexRef.current] ?? '');
-                }
-              } else if (draftIndexRef.current > 0) {
-                draftIndexRef.current -= 1;
-                applyDraftHistory(draftHistoryRef.current[draftIndexRef.current] ?? '');
-              }
-              return;
-            }
-            if ((e.key !== 'Enter' && e.code !== 'NumpadEnter') || e.shiftKey) return;
-            // Four-layer guard against accidental Enter-during-IME auto-submit:
-            //   1. composingRef.current — sync ref, set synchronously by
-            //      onCompositionStart even when React is busy
-            //   2. React isComposing state — same signal but visible to children
-            //   3. native.isComposing — browser-level flag, immune to React lag
-            //   4. keyCode 229 — some browsers fire Enter as 229 mid-composition
-            // Any one means "do not submit".
-            const native = e.nativeEvent as KeyboardEvent;
-            if (
-              composingRef.current ||
-              isComposing ||
-              native.isComposing ||
-              native.keyCode === 229
-            ) {
-              return;
-            }
-            e.preventDefault();
-            // Plain Enter follows the normal send/queue path, including while
-            // a session is active. Command/Ctrl+Enter is the explicit
-            // interrupt-and-send gesture; Alt+Enter remains a queue alias.
-            const nativeModifier =
-              native.metaKey ||
-              native.ctrlKey ||
-              native.getModifierState?.('Meta') ||
-              native.getModifierState?.('Control') ||
-              heldModifierRef.current.meta ||
-              heldModifierRef.current.ctrl;
-            const interrupt = nativeModifier;
-            const delivery = interrupt ? 'interrupt' : 'queue';
-            void submit(delivery === 'interrupt', delivery);
-          }}
-        />
+            pickerOpen={pickerOpen}
+            activeOptionId={activeOptionId}
+            onMentionScan={setMention}
+            onBlurMarkdown={(markdown) => {
+              onTextChangeRef.current?.(markdown);
+              setTimeout(() => setMention(null), 100);
+            }}
+            onSubmitEnter={(delivery) => {
+              void submit(delivery === 'interrupt', delivery);
+            }}
+          />
+        </div>
         <div className="composer-inline-bar">
           <button
             className="composer-attach"

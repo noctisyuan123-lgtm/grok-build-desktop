@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown } from 'lucide-react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import { MessageItem } from './MessageItem';
+import { MessageItem, MarkdownSegment } from './MessageItem';
 import { LongTextMessage } from './LongTextMessage';
 import { MessageActions } from './MessageActions';
 import { isLongUserText } from '../lib/longText';
+import { shouldLiveRenderMarkdown } from '../lib/liveMarkdown';
 import { useSessionActiveRunProgress } from '../hooks/useActiveRun';
 import { t } from '../i18n';
 import type { TraceEvent } from '../lib/traceParser';
@@ -300,36 +301,48 @@ export function MessageList({
                 ) : null}
                 {isEditing ? (
                   <div className="message-edit-box">
-                    <textarea
-                      ref={registerEditInput}
-                      aria-label={t('message.editPromptInput')}
-                      className="message-edit-input"
-                      value={editingText}
-                      onChange={(event) => setEditingText(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Escape') {
-                          event.preventDefault();
-                          cancelEditing();
-                          return;
-                        }
-                        // Edit follows the Composer convention: Enter commits,
-                        // Shift+Enter inserts a newline. Keep IME composition
-                        // untouched so Enter does not submit half-composed text.
-                        const native = event.nativeEvent as KeyboardEvent;
-                        if (
-                          event.key === 'Enter' &&
-                          !event.shiftKey &&
-                          !event.metaKey &&
-                          !event.ctrlKey &&
-                          !native.isComposing &&
-                          native.keyCode !== 229
-                        ) {
-                          event.preventDefault();
-                          submitEditing();
-                        }
-                      }}
-                      rows={Math.min(8, Math.max(3, editingText.split('\n').length))}
-                    />
+                    <div className={`message-edit-live${shouldLiveRenderMarkdown(editingText) ? ' is-live-md' : ''}`}>
+                      {shouldLiveRenderMarkdown(editingText) ? (
+                        <div className="message-edit-live-surface" aria-hidden="true">
+                          <MarkdownSegment
+                            cacheKey={`user-edit:${msg.id || msg.runId || 'anon'}`}
+                            text={editingText}
+                            className="composer-markdown-preview"
+                            immediate
+                          />
+                        </div>
+                      ) : null}
+                      <textarea
+                        ref={registerEditInput}
+                        aria-label={t('message.editPromptInput')}
+                        className="message-edit-input"
+                        value={editingText}
+                        onChange={(event) => setEditingText(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape') {
+                            event.preventDefault();
+                            cancelEditing();
+                            return;
+                          }
+                          // Edit follows the Composer convention: Enter commits,
+                          // Shift+Enter inserts a newline. Keep IME composition
+                          // untouched so Enter does not submit half-composed text.
+                          const native = event.nativeEvent as KeyboardEvent;
+                          if (
+                            event.key === 'Enter' &&
+                            !event.shiftKey &&
+                            !event.metaKey &&
+                            !event.ctrlKey &&
+                            !native.isComposing &&
+                            native.keyCode !== 229
+                          ) {
+                            event.preventDefault();
+                            submitEditing();
+                          }
+                        }}
+                        rows={Math.min(8, Math.max(3, editingText.split('\n').length))}
+                      />
+                    </div>
                     <div className="message-edit-controls">
                       <button className="message-edit-cancel" type="button" onClick={cancelEditing}>
                         {t('message.editCancel')}
@@ -348,7 +361,10 @@ export function MessageList({
                   isLongUserText(msg.userText) ? (
                     <LongTextMessage text={msg.userText} />
                   ) : (
-                    <pre className="message-body">{msg.userText}</pre>
+                    <MarkdownSegment
+                      cacheKey={`user:${msg.id || msg.runId || 'anon'}`}
+                      text={msg.userText}
+                    />
                   )
                 ) : null}
                 {!isEditing ? (

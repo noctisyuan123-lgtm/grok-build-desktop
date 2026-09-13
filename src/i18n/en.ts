@@ -71,6 +71,9 @@ export const en = {
   'composer.sendQueuing': 'Queuing…',
   'composer.sendEnqueue': 'Enqueue',
   'composer.send': 'Send',
+  'composer.previewMarkdown': 'Preview markdown',
+  'composer.editMarkdown': 'Edit prompt',
+  'composer.previewEmpty': 'Nothing to preview yet.',
   'composer.chooseAttachment': 'Attach files or a folder',
   'composer.chooseFiles': 'Attach images or files',
   'composer.attachFolder': 'Attach a folder',
@@ -498,8 +501,10 @@ export const en = {
   'notices.queueActionFailed': 'Queue action failed: {error}',
   'notices.cleared': 'Cleared conversation, run history, and terminal.',
   'notices.conversationDeleted': 'Conversation deleted.',
-  'notices.undoRebasedAfterAdvance': 'Background activity moved this session forward, so Undo continued on a fresh head with your retained turns.',
-  'notices.undoRewindFailed': 'Could not rewind session; next send starts a fresh head with prior context.',
+  'notices.undoRebasedAfterAdvance':
+    'Background activity moved this session forward, so Undo continued on a fresh head with your retained turns.',
+  'notices.undoRewindFailed':
+    'Could not rewind session; next send starts a fresh head with prior context.',
   'notices.desktopContextAppended': 'Desktop context appended to your draft.',
   'notices.restored': 'Restored {count} recent {runWord}{messagePart}.',
   'notices.runWordOne': 'run',

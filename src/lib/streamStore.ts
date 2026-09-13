@@ -117,6 +117,7 @@ type CompletionListener = (completion: RunCompletion) => void;
 class StreamStore {
   private runs = new Map<string, RunSnapshot>();
   private html = new Map<string, string>();
+  private htmlSource = new Map<string, string>();
   private queue: QueueSnapshot = { active: null, activeIds: [], items: [] };
   private listeners = new Set<Listener>();
   private completionListeners = new Set<CompletionListener>();
@@ -176,6 +177,7 @@ class StreamStore {
 
   getRunSnapshot = (id: string): RunSnapshot | undefined => this.runs.get(id);
   getHtml = (id: string): string | undefined => this.html.get(id);
+  getHtmlSource = (id: string): string | undefined => this.htmlSource.get(id);
   getQueueSnapshot = (): QueueSnapshot => this.queue;
   /**
    * Stable primitive snapshot for sidebar/session indicators. The queue event
@@ -221,8 +223,9 @@ class StreamStore {
     if (options?.notify !== false) this.notifyNow();
   };
 
-  setHtml = (id: string, html: string): void => {
+  setHtml = (id: string, html: string, source?: string): void => {
     this.html.set(id, html);
+    if (source !== undefined) this.htmlSource.set(id, source);
     const cur = this.runs.get(id);
     if (cur) {
       this.runs.set(id, { ...cur, htmlVersion: cur.htmlVersion + 1 });
@@ -276,6 +279,7 @@ class StreamStore {
   __reset = (): void => {
     this.runs.clear();
     this.html.clear();
+    this.htmlSource.clear();
     this.queue = { active: null, activeIds: [], items: [] };
     this.completedRunIds.clear();
     this.cancelScheduledNotify?.();

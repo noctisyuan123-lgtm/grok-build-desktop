@@ -235,6 +235,29 @@ describe('Sidebar conversations list', () => {
     expect(screen.queryByText('a')).not.toBeInTheDocument();
   });
 
+  it('collapses and reopens the Recent bar like Projects', async () => {
+    const current = JSON.parse(window.localStorage.getItem(tabsStorageKey) ?? '[]');
+    current.push({
+      id: 't3',
+      name: 'loose',
+      cwd: '',
+      createdAt: 3,
+      messages: [message('m300', 'scratch notes')],
+    });
+    window.localStorage.setItem(tabsStorageKey, JSON.stringify(current));
+    const user = userEvent.setup();
+    render(<Harness />);
+    const toggle = screen.getByRole('button', { name: 'Recent' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle.querySelector('.project-list-count')).toHaveTextContent('1');
+    expect(screen.getByText('scratch notes')).toBeInTheDocument();
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('scratch notes')).not.toBeInTheDocument();
+    await user.click(toggle);
+    expect(screen.getByText('scratch notes')).toBeInTheDocument();
+  });
+
   it('collapses and reopens a project folder without losing its sessions', async () => {
     const user = userEvent.setup();
     render(<Harness />);

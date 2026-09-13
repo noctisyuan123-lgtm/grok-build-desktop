@@ -239,3 +239,60 @@ describe('MessageList session isolation', () => {
     expect(screen.queryByRole('button', { name: 'Scroll to bottom' })).not.toBeInTheDocument();
   });
 });
+
+describe('MessageList user prompt markdown', () => {
+  it('renders user prompts through the same sanitized markdown path as assistants', () => {
+    delete (window as unknown as Record<string, unknown>).__pwned;
+    streamStore.setHtml(
+      'user:user-md',
+      '<p>hello <strong>world</strong></p>' +
+        '<script>window.__pwned = 1</script>' +
+        '<a href="javascript:window.__pwned=1">x</a>',
+    );
+    const { container } = render(
+      <VirtuosoMockContext.Provider value={{ viewportHeight: 800, itemHeight: 64 }}>
+        <MessageList
+          messages={[
+            {
+              id: 'user-md',
+              runId: '',
+              role: 'user',
+              userText: 'hello **world**',
+            },
+          ]}
+        />
+      </VirtuosoMockContext.Provider>,
+    );
+
+    const body = container.querySelector('.message-user .message-body.markdown-body');
+    expect(body).toBeTruthy();
+    expect(body).toHaveTextContent('hello world');
+    expect(body?.querySelector('strong')).toHaveTextContent('world');
+    expect(container.querySelector('script')).toBeNull();
+    const link = container.querySelector('.message-user a');
+    expect(link?.getAttribute('href') ?? '').not.toContain('javascript:');
+    expect((window as unknown as Record<string, unknown>).__pwned).toBeUndefined();
+    // Actions still bind to the raw source text (edit/copy/undo unchanged).
+    expect(screen.getByRole('button', { name: 'Copy prompt' })).toBeInTheDocument();
+  });
+
+  it('falls back to plain text until the markdown worker result arrives', () => {
+    const { container } = render(
+      <VirtuosoMockContext.Provider value={{ viewportHeight: 800, itemHeight: 64 }}>
+        <MessageList
+          messages={[
+            {
+              id: 'user-plain',
+              runId: '',
+              role: 'user',
+              userText: 'plain **until** parsed',
+            },
+          ]}
+        />
+      </VirtuosoMockContext.Provider>,
+    );
+    expect(
+      container.querySelector('.message-user pre.message-body.streaming-raw'),
+    ).toHaveTextContent('plain **until** parsed');
+  });
+});

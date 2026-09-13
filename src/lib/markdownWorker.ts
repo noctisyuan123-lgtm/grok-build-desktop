@@ -3,6 +3,7 @@ import { streamStore } from './streamStore';
 interface ParseResponse {
   runId: string;
   html: string;
+  text?: string;
 }
 
 let worker: Worker | null = null;
@@ -25,8 +26,8 @@ function ensureWorker(): Worker | null {
     try {
       worker = new Worker(new URL('./markdown.worker.ts', import.meta.url), { type: 'module' });
       worker.addEventListener('message', (e: MessageEvent<ParseResponse>) => {
-        const { runId, html } = e.data;
-        streamStore.setHtml(runId, html);
+        const { runId, html, text } = e.data;
+        streamStore.setHtml(runId, html, text);
         inflight.delete(runId);
         if (latestByRun.has(runId)) {
           const next = latestByRun.get(runId)!;

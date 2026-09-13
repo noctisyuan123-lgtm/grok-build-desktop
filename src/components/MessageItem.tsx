@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { useRunHtml, useRunSnapshot } from '../hooks/useRunSnapshot';
+import { useRunHtml, useRunHtmlSource, useRunSnapshot } from '../hooks/useRunSnapshot';
 import { sanitizeHtml } from '../lib/sanitizeHtml';
 import { ActivityGroup, TraceTimeline } from './TraceTimeline';
 import { MarkdownHtml } from './MarkdownHtml';
@@ -766,22 +766,32 @@ function isUpstreamTruncatedThought(text: string): boolean {
   return trimmed.length >= 190 && trimmed.length <= 220 && /\.\.\.$/u.test(trimmed);
 }
 
-function MarkdownSegment({
+/** Shared markdown path: worker parse -> DOMPurify -> markdown-body HTML. */
+export function MarkdownSegment({
   cacheKey,
   text,
   className = '',
+  immediate = false,
 }: {
   cacheKey: string;
   text: string;
   className?: string;
+  immediate?: boolean;
 }) {
   const html = useRunHtml(cacheKey);
-  const safeHtml = useMemo(() => (html ? sanitizeHtml(html) : html), [html]);
+  const htmlSource = useRunHtmlSource(cacheKey);
+  const matchedHtml = htmlSource === undefined || htmlSource === text ? html : undefined;
+  const safeHtml = useMemo(
+    () => (matchedHtml ? sanitizeHtml(matchedHtml) : matchedHtml),
+    [matchedHtml],
+  );
   useEffect(() => {
     import('../lib/markdownWorker')
-      .then(({ scheduleMarkdownParse }) => scheduleMarkdownParse(cacheKey, text))
+      .then(({ scheduleMarkdownParse }) =>
+        scheduleMarkdownParse(cacheKey, text, immediate ? { immediate: true } : {}),
+      )
       .catch(() => {});
-  }, [cacheKey, text]);
+  }, [cacheKey, immediate, text]);
   return safeHtml ? (
     <MarkdownHtml
       html={safeHtml}
