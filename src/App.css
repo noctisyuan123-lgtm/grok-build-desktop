@@ -3005,14 +3005,28 @@ body[data-completion-popup='true'] {
 /* VSCode-style tables: cleaner borders, alternating rows.
    Wrap + max-content so mixed CJK/Latin columns keep their min-width
    instead of collapsing to one character under overflow-wrap: anywhere. */
-.markdown-body .md-table-wrap {
+.markdown-body .md-table-shell {
   box-sizing: border-box;
   margin: 12px 0 16px;
+  max-width: 100%;
+  min-width: 0;
+  position: relative;
+}
+.markdown-body .md-table-wrap {
+  box-sizing: border-box;
   max-width: 100%;
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
+}
+.markdown-body .md-code-shell {
+  margin: 0 0 16px;
+  max-width: 100%;
+  position: relative;
+}
+.markdown-body .md-code-shell > pre {
+  margin-bottom: 0;
 }
 .markdown-body table {
   border-collapse: collapse;
@@ -4790,13 +4804,26 @@ body[data-completion-popup='true'] {
   border-bottom: 1px solid rgba(255, 255, 255, 0.18);
   margin: 16px 0;
 }
-:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .md-table-wrap {
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .md-table-shell {
   margin: 0 0 0.7em;
+  max-width: 100%;
+  min-width: 0;
+  position: relative;
+}
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .md-table-wrap {
   max-width: 100%;
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
+}
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .md-code-shell {
+  margin: 0 0 16px;
+  max-width: 100%;
+  position: relative;
+}
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) .md-code-shell > pre {
+  margin-bottom: 0;
 }
 :is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) {
   border: 0;
@@ -4826,14 +4853,6 @@ body[data-completion-popup='true'] {
   border-bottom-color: rgba(255, 255, 255, 0.09);
   font-weight: 600;
   white-space: nowrap;
-}
-:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) > thead > tr > th:first-child,
-:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) > tbody > tr > td:first-child {
-  padding-left: 0;
-}
-:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) > thead > tr > th:last-child,
-:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) > tbody > tr > td:last-child {
-  padding-right: 0;
 }
 :is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) table:not(.vlist-t) > tbody > tr:last-child > td {
   border-bottom: 0;
@@ -4975,7 +4994,8 @@ body[data-completion-popup='true'] {
   width: 28px;
 }
 
-.markdown-body pre:hover > .code-block-copy-button,
+.markdown-body .md-code-shell:hover > .code-block-copy-button,
+.markdown-body .md-table-shell:hover > .code-block-copy-button,
 .markdown-body .code-block-copy-button:focus,
 .markdown-body .code-block-copy-button.copied {
   opacity: 1;

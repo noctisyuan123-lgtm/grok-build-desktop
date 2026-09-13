@@ -75,6 +75,25 @@ describe('tableScroll', () => {
     expect(wrap.scrollLeft).toBe(140);
   });
 
+
+  it('turns a vertical wheel into code-block horizontal scroll', () => {
+    const root = document.createElement('div');
+    const shell = document.createElement('div');
+    shell.className = 'md-code-shell';
+    const pre = document.createElement('pre');
+    pre.innerHTML = '<code>const long = true;</code>';
+    Object.defineProperty(pre, 'scrollWidth', { configurable: true, value: 800 });
+    Object.defineProperty(pre, 'clientWidth', { configurable: true, value: 200 });
+    shell.appendChild(pre);
+    root.appendChild(shell);
+    document.body.appendChild(root);
+    pre.scrollLeft = 10;
+    const event = new WheelEvent('wheel', { deltaY: 40, bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'target', { value: pre });
+    expect(steerWheelToTable(event, root)).toBe(true);
+    expect(pre.scrollLeft).toBe(50);
+  });
+
   it('reapplies the saved offset after the conversation scroller moves', async () => {
     const scroller = document.createElement('div');
     scroller.setAttribute('data-virtuoso-scroller', '');

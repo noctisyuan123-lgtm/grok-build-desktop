@@ -39,16 +39,19 @@ const markdown = new MarkdownIt({
 // after markdown-it renders the native <pre><code> structure. Keep the same
 // structure here (no custom title bar/shell) and let the React container own
 // the clipboard interaction so it remains safe under the Tauri CSP.
+//
+// The copy control sits OUTSIDE the scrolling <pre> / .md-table-wrap, in a
+// relative shell, so horizontal wheel/trackpad pan does not drag the button.
 const defaultFence = markdown.renderer.rules.fence!;
 markdown.renderer.rules.fence = (...args) =>
-  defaultFence(...args).replace('</pre>', `${vscodeCopyButtonHtml()}</pre>`);
+  `<div class="md-code-shell">${defaultFence(...args)}${vscodeCopyButtonHtml()}</div>`;
 
 // Wrap tables so wide grids can scroll horizontally. `overflow-wrap: anywhere`
 // on `.message-body` otherwise collapses each column's min-content to 1ch.
 markdown.renderer.rules.table_open = (tokens, idx, options, _env, slf) =>
-  `<div class="md-table-wrap">${slf.renderToken(tokens, idx, options)}`;
+  `<div class="md-table-shell"><div class="md-table-wrap">${slf.renderToken(tokens, idx, options)}`;
 markdown.renderer.rules.table_close = (tokens, idx, options, _env, slf) =>
-  `${slf.renderToken(tokens, idx, options)}</div>`;
+  `${slf.renderToken(tokens, idx, options)}</div>${vscodeCopyButtonHtml('Copy table')}</div>`;
 
 const defaultValidateLink = markdown.validateLink.bind(markdown);
 markdown.validateLink = (url) =>
@@ -140,9 +143,9 @@ function normalizeLanguage(language: string): string {
   }
 }
 
-function vscodeCopyButtonHtml(): string {
+function vscodeCopyButtonHtml(ariaLabel = 'Copy code block'): string {
   return (
-    '<button class="code-block-copy-button" type="button" aria-label="Copy code block">' +
+    `<button class="code-block-copy-button" type="button" aria-label="${ariaLabel}">` +
     '<svg class="code-block-copy-icon" aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 16 16" fill="none">' +
     '<path d="M4 4H2V14H11V12H4V4Z" fill="currentColor"></path>' +
     '<path fill-rule="evenodd" clip-rule="evenodd" d="M5 2H14V11H5V2ZM6 3H13V10H6V3Z" fill="currentColor"></path>' +

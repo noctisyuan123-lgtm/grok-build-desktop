@@ -36,15 +36,18 @@ describe('renderMarkdown extensions', () => {
 
   it('wraps tables so wide grids can scroll instead of collapsing columns', () => {
     const html = renderMarkdown('| a | 伴侣关系 |\n| --- | --- |\n| 1 | confirmed |');
+    expect(html).toContain('class="md-table-shell"');
     expect(html).toContain('class="md-table-wrap"');
-    expect(html).toMatch(/<div class="md-table-wrap">[\s\S]*<table>/);
-    expect(html).toMatch(/<\/table>\s*<\/div>/);
+    expect(html).toMatch(/<div class="md-table-shell"><div class="md-table-wrap">[\s\S]*<table>/);
+    expect(html).toMatch(/<\/table>\s*<\/div>[\s\S]*class="code-block-copy-button"[\s\S]*<\/div>/);
+    expect(html).toContain('aria-label="Copy table"');
     expect(html).toContain('<th>伴侣关系</th>');
     expect(html).toContain('<td>confirmed</td>');
   });
 
   it('uses the original compact native pre for fenced code', () => {
     const html = renderMarkdown('```ts\nconst value = 1;\n```');
+    expect(html).toContain('class="md-code-shell"');
     expect(html).toContain('<pre><code class="language-ts"');
     expect(html).toContain('class="language-ts"');
     expect(html).toContain('<span class="hljs-keyword">const</span>');

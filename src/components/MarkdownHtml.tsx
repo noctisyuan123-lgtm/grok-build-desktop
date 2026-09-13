@@ -36,21 +36,46 @@ function handleMarkdownClick(event: MouseEvent<HTMLDivElement>): void {
   if (!button) return;
   event.preventDefault();
   event.stopPropagation();
+
+  const tableShell = button.closest('.md-table-shell, .md-table-wrap');
+  if (tableShell) {
+    const table = tableShell.querySelector('table');
+    if (!table) return;
+    void copyMarkdownClipboard(button, tableToPlainText(table), 'Copy table');
+    return;
+  }
+
   const code = button.parentElement?.querySelector('code');
   if (!code) return;
-  void copyCodeBlock(button, code.textContent ?? '');
+  void copyMarkdownClipboard(button, code.textContent ?? '', 'Copy code block');
 }
 
-async function copyCodeBlock(button: HTMLButtonElement, text: string): Promise<void> {
+function tableToPlainText(table: HTMLTableElement): string {
+  return Array.from(table.querySelectorAll('tr'))
+    .map((row) =>
+      Array.from(row.querySelectorAll('th, td'))
+        .map((cell) => (cell.textContent ?? '').replace(/\s+/g, ' ').trim())
+        .join('\t'),
+    )
+    .join('\n');
+}
+
+async function copyMarkdownClipboard(
+  button: HTMLButtonElement,
+  text: string,
+  idleLabel: string,
+): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
   } catch {
-    const code = button.parentElement?.querySelector('code');
     const selection = window.getSelection();
-    if (!code || !selection) return;
+    if (!selection) return;
     selection.removeAllRanges();
     const range = document.createRange();
-    range.selectNodeContents(code);
+    const tableHost = button.closest('.md-table-shell, .md-table-wrap');
+    const fallback = tableHost?.querySelector('table') ?? button.parentElement?.querySelector('code');
+    if (!fallback) return;
+    range.selectNodeContents(fallback);
     selection.addRange(range);
     document.execCommand('copy');
     selection.removeAllRanges();
@@ -59,6 +84,6 @@ async function copyCodeBlock(button: HTMLButtonElement, text: string): Promise<v
   button.setAttribute('aria-label', 'Copied');
   window.setTimeout(() => {
     button.classList.remove('copied');
-    button.setAttribute('aria-label', 'Copy code block');
+    button.setAttribute('aria-label', idleLabel);
   }, 2_000);
 }

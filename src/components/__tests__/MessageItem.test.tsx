@@ -102,6 +102,21 @@ describe('MessageItem sanitization', () => {
     await expect(navigator.clipboard.readText()).resolves.toBe('echo ok\n');
     expect(screen.getByRole('button', { name: 'Copied' })).toHaveClass('copied');
   });
+
+  it('copies a markdown table through the preview control as TSV', async () => {
+    const user = userEvent.setup();
+    applyRunEvent('copy-table', { type: 'text', data: 'table' });
+    streamStore.setHtml(
+      exteriorMarkdownKey('copy-table', 0),
+      renderMarkdown('| Name | Status |\n| --- | --- |\n| alpha | ok |'),
+    );
+    render(<MessageItem runId="copy-table" />);
+
+    await user.click(screen.getByRole('button', { name: 'Copy table' }));
+
+    await expect(navigator.clipboard.readText()).resolves.toBe('Name\tStatus\nalpha\tok');
+    expect(screen.getByRole('button', { name: 'Copied' })).toHaveClass('copied');
+  });
 });
 
 describe('MessageItem rendering states', () => {
