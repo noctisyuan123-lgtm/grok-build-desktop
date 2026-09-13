@@ -3084,16 +3084,20 @@ body[data-completion-popup='true'] {
   margin-top: 2px;
 }
 
-/* Headings: size scale only — no underline (Codex-style). */
+/* Headings: composer-matched H1/H2, no underline. */
 .markdown-body h1 {
-  font-size: 1.2rem;
-  font-weight: 650;
+  font-size: 1.6em;
+  font-weight: 600;
   letter-spacing: -0.01em;
+  line-height: 1.25;
+  margin: 0 0 0.35em;
 }
 .markdown-body h2 {
-  font-size: 1.08rem;
-  font-weight: 650;
+  font-size: 1.35em;
+  font-weight: 600;
   letter-spacing: -0.005em;
+  line-height: 1.3;
+  margin: 0 0 0.35em;
 }
 .markdown-body h3 {
   font-size: 1.05rem;
@@ -4733,9 +4737,15 @@ body[data-completion-popup='true'] {
 }
 :is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) h1 {
   font-size: 1.6em;
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 0 0 0.35em;
 }
 :is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) h2 {
   font-size: 1.35em;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 0 0 0.35em;
 }
 :is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) h3 {
   font-size: 1.25em;
