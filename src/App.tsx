@@ -2161,10 +2161,21 @@ function App() {
             id: m.id,
             canUndo: turnCanUndoAt(index),
             showUndo: turnCanUndoAt(index),
-            // Copy/Fork stay tip-only after the tip turn has settled.
-            canFork: index === latestIndex && tipCopyForkReady,
-            showFork: index === latestIndex && tipCopyForkReady,
-            showCopy: index === latestIndex && tipCopyForkReady,
+            // Copy/Fork on every settled assistant reply. The live tip still
+            // waits for tipCopyForkReady; older bubbles stay available even
+            // while a later turn is running (fork replays from that point).
+            canFork:
+              Boolean(m.content.trim()) &&
+              m.status !== 'streaming' &&
+              (index !== latestIndex || tipCopyForkReady),
+            showFork:
+              Boolean(m.content.trim()) &&
+              m.status !== 'streaming' &&
+              (index !== latestIndex || tipCopyForkReady),
+            showCopy:
+              Boolean(m.content.trim()) &&
+              m.status !== 'streaming' &&
+              (index !== latestIndex || tipCopyForkReady),
           },
     );
   }, [

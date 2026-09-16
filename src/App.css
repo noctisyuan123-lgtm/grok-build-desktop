@@ -493,10 +493,12 @@ pre {
   overflow: auto;
   flex: 1 1 auto;
   /* Let the native scrollbar sit on the sidebar's outer edge while keeping
-     conversation rows aligned with the rest of the rail. */
+     conversation rows aligned with the rest of the rail. Always reserve the
+     gutter so expanding/collapsing Recent cannot shift count+chevron. */
   margin-right: -12px;
   min-height: 0;
   padding-right: 8px;
+  scrollbar-gutter: stable;
 }
 
 .history-list button {
@@ -6694,10 +6696,12 @@ body[data-theme='light'] .hljs-comment {
   column-gap: 6px;
   cursor: pointer;
   display: flex !important;
+  flex-direction: row;
+  flex-wrap: nowrap;
   font-size: 10.5px;
   font-weight: 600;
   gap: 6px;
-  grid-template-columns: none;
+  grid-template-columns: none !important;
   justify-content: flex-start;
   letter-spacing: 0.06em;
   line-height: 1.2;
@@ -6707,7 +6711,14 @@ body[data-theme='light'] .hljs-comment {
   text-transform: uppercase;
   width: 100%;
 }
-.history-list button.project-list-label svg {
+.history-list button.project-list-label > span:not(.project-list-trail) {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-list button.project-list-label > svg {
   color: var(--text-4);
   display: block;
   flex: 0 0 auto;
@@ -6724,14 +6735,31 @@ body[data-theme='light'] .hljs-comment {
   font-weight: 500;
   letter-spacing: 0;
   line-height: 1;
-  margin-left: auto;
   text-transform: none;
 }
-.history-list button.project-list-label .project-list-count {
+/* Count + chevron stay on the same row, pinned right; fixed trail width so
+   6 vs 110 and open/closed never shove the row. */
+.history-list button.project-list-label .project-list-trail {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 3.25rem;
+  gap: 4px;
+  justify-content: flex-end;
   margin-left: auto;
+  width: 3.25rem;
+}
+.history-list button.project-list-label .project-list-count {
+  margin-left: 0;
+  min-width: 2.5ch;
+  text-align: right;
 }
 .history-list button.project-list-label .chev {
-  margin-left: 0;
+  box-sizing: content-box;
+  flex: 0 0 13px;
+  height: 13px;
+  margin-left: 0 !important;
+  transform-origin: 50% 50%;
+  width: 13px;
 }
 #project-list-content,
 #recent-list-content {
@@ -6884,8 +6912,11 @@ button.history-section-head.toggle {
 button.history-section-head.toggle:hover {
   color: var(--text-2);
 }
-.history-section-head .chev {
+.history-section-head > .chev {
   margin-left: auto;
+  transition: transform 120ms ease;
+}
+.history-section-head .chev {
   transition: transform 120ms ease;
 }
 .history-section-head .chev.open {
@@ -9032,36 +9063,95 @@ select:focus-visible {
   padding: 8px 12px;
 }
 
-/* Images use a bounded lightbox. The body owns scrolling so very tall or wide
-   attachments remain fully reachable instead of being clipped by the frame. */
-.attachment-preview-panel.is-image {
-  bottom: auto;
-  height: auto;
-  left: 50%;
-  max-height: calc(100vh - 96px);
-  right: auto;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: min(760px, calc(100% - 40px));
-}
-
-.attachment-preview-panel.is-image .attachment-preview-body {
-  align-items: flex-start;
-  justify-content: flex-start;
-  max-height: calc(100vh - 156px);
-  overflow: auto;
-  padding: 6px;
-}
-
-.attachment-preview-panel.is-image .attachment-preview-image {
-  flex: 0 0 auto;
-  margin: auto;
-  max-height: none;
-  max-width: 100%;
-}
-
-.attachment-preview-panel.is-image .attachment-preview-meta {
+/* Codex / ChatGPT-style image lightbox (issue-backed chrome + ChatGPT-family
+   tokens): solid dark scrim, centered contain, floating circular download/close. */
+.attachment-lightbox {
+  align-items: center;
+  animation: attachment-lightbox-in 150ms ease-out;
   display: none;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  /* Above Agents/Tasks rail (90) and subagent drawer (160); below modal sheets (~300). */
+  z-index: 220;
+}
+.attachment-lightbox.open {
+  display: flex;
+}
+@keyframes attachment-lightbox-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.attachment-lightbox-scrim {
+  appearance: none;
+  background: rgba(0, 0, 0, 0.85);
+  border: 0;
+  cursor: zoom-out;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  position: absolute;
+}
+.attachment-lightbox-stage {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  max-height: min(90vh, 100%);
+  max-width: min(90vw, 100%);
+  position: relative;
+  z-index: 1;
+}
+.attachment-lightbox-image {
+  animation: attachment-lightbox-zoom 180ms ease-out;
+  background: #0a0a0a;
+  border-radius: 8px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.45);
+  display: block;
+  height: auto;
+  max-height: min(90vh, calc(100vh - 96px));
+  max-width: min(90vw, 100%);
+  object-fit: contain;
+  user-select: none;
+  width: auto;
+}
+@keyframes attachment-lightbox-zoom {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+.attachment-lightbox-close,
+.attachment-lightbox-download {
+  align-items: center;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.1);
+  border: 0;
+  border-radius: 9999px;
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  height: 40px;
+  justify-content: center;
+  position: absolute;
+  text-decoration: none;
+  top: 16px;
+  width: 40px;
+  z-index: 2;
+}
+.attachment-lightbox-close {
+  right: 16px;
+}
+.attachment-lightbox-download {
+  right: 64px;
+}
+.attachment-lightbox-close:hover,
+.attachment-lightbox-download:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+.attachment-lightbox-close:focus-visible,
+.attachment-lightbox-download:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .message.message-user .message-body {

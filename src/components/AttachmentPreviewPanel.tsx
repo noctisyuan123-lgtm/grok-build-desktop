@@ -55,6 +55,18 @@ export function AttachmentPreviewPanel({ attachment, onClose }: Props) {
     }
   }, [attachment, textAttachment]);
 
+  useEffect(() => {
+    if (!attachment) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [attachment, onClose]);
+
   const metadata = useMemo(() => {
     if (!attachment) return '';
     return `${attachmentKind(attachment)} · ${formatBytes(attachment.sizeBytes)}`;
@@ -64,11 +76,56 @@ export function AttachmentPreviewPanel({ attachment, onClose }: Props) {
   const isImage = attachment?.mimeType.startsWith('image/') ?? false;
   const isPdf = attachment?.mimeType === 'application/pdf';
 
+  // Codex / ChatGPT-style image lightbox: dimmed full-window scrim, centered
+  // contain image, floating close — not the right-side document panel.
+  if (isImage && attachment) {
+    return (
+      <div
+        aria-hidden={!open}
+        aria-label={t('attachmentPreview.title')}
+        className={`attachment-lightbox${open ? ' open' : ''}`}
+        role="dialog"
+      >
+        <button
+          aria-label={t('attachmentPreview.close')}
+          className="attachment-lightbox-scrim"
+          type="button"
+          onClick={onClose}
+        />
+        <button
+          aria-label={t('attachmentPreview.close')}
+          className="attachment-lightbox-close"
+          title={t('attachmentPreview.close')}
+          type="button"
+          onClick={onClose}
+        >
+          <X aria-hidden="true" size={18} />
+        </button>
+        <a
+          aria-label={t('attachmentPreview.download', { name: attachment.name })}
+          className="attachment-lightbox-download"
+          download={attachment.name}
+          href={attachment.dataUrl}
+          title={t('attachmentPreview.download', { name: attachment.name })}
+        >
+          <Download aria-hidden="true" size={16} />
+        </a>
+        <div className="attachment-lightbox-stage">
+          <img
+            alt={t('attachmentPreview.imageAlt', { name: attachment.name })}
+            className="attachment-lightbox-image"
+            src={attachment.dataUrl}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <aside
       aria-hidden={!open}
       aria-label={t('attachmentPreview.title')}
-      className={`attachment-preview-panel${open ? ' open' : ''}${isImage ? ' is-image' : ''}`}
+      className={`attachment-preview-panel${open ? ' open' : ''}`}
       role="dialog"
     >
       {attachment ? (
@@ -100,13 +157,7 @@ export function AttachmentPreviewPanel({ attachment, onClose }: Props) {
             </div>
           </header>
           <div className="attachment-preview-body">
-            {isImage ? (
-              <img
-                alt={t('attachmentPreview.imageAlt', { name: attachment.name })}
-                className="attachment-preview-image"
-                src={attachment.dataUrl}
-              />
-            ) : isPdf ? (
+            {isPdf ? (
               <iframe
                 className="attachment-preview-document"
                 src={attachment.dataUrl}

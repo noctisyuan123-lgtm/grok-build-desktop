@@ -575,13 +575,15 @@ export function Sidebar({
                     >
                       <Folders size={12} aria-hidden="true" />
                       <span>{t('sidebar.projects')}</span>
-                      <span className="project-list-count" aria-hidden="true">
-                        {historyView.projectGroups.length}
+                      <span className="project-list-trail" aria-hidden="true">
+                        <span className="project-list-count">
+                          {historyView.projectGroups.length}
+                        </span>
+                        <ChevronDown
+                          size={13}
+                          className={`chev${projectsCollapsed ? '' : ' open'}`}
+                        />
                       </span>
-                      <ChevronDown
-                        size={13}
-                        className={`chev${projectsCollapsed ? '' : ' open'}`}
-                      />
                     </button>
                     {!projectsCollapsed ? (
                       <div id="project-list-content">
@@ -641,13 +643,15 @@ export function Sidebar({
                     >
                       <History size={12} aria-hidden="true" />
                       <span>{t('sidebar.recent')}</span>
-                      <span className="project-list-count" aria-hidden="true">
-                        {historyView.ungrouped.length}
+                      <span className="project-list-trail" aria-hidden="true">
+                        <span className="project-list-count">
+                          {historyView.ungrouped.length}
+                        </span>
+                        <ChevronDown
+                          size={13}
+                          className={`chev${recentCollapsed ? '' : ' open'}`}
+                        />
                       </span>
-                      <ChevronDown
-                        size={13}
-                        className={`chev${recentCollapsed ? '' : ' open'}`}
-                      />
                     </button>
                     {!recentCollapsed ? (
                       <div id="recent-list-content">
