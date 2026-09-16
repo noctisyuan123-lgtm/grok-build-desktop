@@ -2094,15 +2094,32 @@ function App() {
           // User-only tail (no assistant yet).
           return index === latestIndex;
         }
-        if (next.role !== 'assistant' || next.status === 'streaming') return false;
-        const snap = next.runId ? streamStore.getRunSnapshot(next.runId) : undefined;
+        if (next.role !== 'assistant') return false;
+        // Wakeup / continue can append more assistants after the first reply.
+        // Gate undo on the tip of that streak so mid-turn bubbles stay clean.
+        let tip = index + 1;
+        while (tip + 1 < visibleMessages.length && visibleMessages[tip + 1]?.role === 'assistant') {
+          tip += 1;
+        }
+        const tipMessage = visibleMessages[tip];
+        if (!tipMessage || tipMessage.status === 'streaming') return false;
+        const snap = tipMessage.runId ? streamStore.getRunSnapshot(tipMessage.runId) : undefined;
         if (snap?.watching) return false;
         if (snap && isRunInFlight(snap)) return false;
         return true;
       }
-      // Assistant reply: undo the paired user turn when this reply is settled.
+      // Assistant reply: undo the paired user turn only on the settled tip of
+      // a consecutive assistant streak. A premature "done" followed by another
+      // assistant (idle wakeup / continue) must not keep Undo under the first
+      // bubble while Copy/Fork sit on the real tip.
       if (!message.content.trim() || message.status === 'streaming') return false;
-      const prev = visibleMessages[index - 1];
+      const following = visibleMessages[index + 1];
+      if (following?.role === 'assistant') return false;
+      let userIndex = index - 1;
+      while (userIndex >= 0 && visibleMessages[userIndex]?.role === 'assistant') {
+        userIndex -= 1;
+      }
+      const prev = visibleMessages[userIndex];
       if (prev?.role !== 'user' || !prev.content.trim()) return false;
       const snap = message.runId ? streamStore.getRunSnapshot(message.runId) : undefined;
       if (snap?.watching) return false;
