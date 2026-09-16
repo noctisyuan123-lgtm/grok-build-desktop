@@ -5,7 +5,7 @@ export const STALL_MS = 20_000;
 /** Tools can be silent longer than a model stream. */
 export const STALL_TOOL_MS = 90_000;
 /** Still silent after this → treat the ACP hang as a network failure. */
-export const GIVE_UP_MS = 60_000;
+export const GIVE_UP_MS = 120_000;
 export const GIVE_UP_TOOL_MS = 180_000;
 
 export type ConnectionAppearance = 'ok' | 'stalled' | 'reconnecting' | 'disconnected';

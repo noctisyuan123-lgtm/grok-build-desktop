@@ -2963,23 +2963,37 @@ async fn rewind_grok_session(
     if let Some(prompt) = undone.as_deref() {
         match truncate_local_grok_session(&session_id, prompt) {
             Ok(true) => {
-                // Conversation-only local truncate — restore workspace via shadow-git.
-                let snap_cwd = PathBuf::from(&cwd);
-                let snap_session = session_id.clone();
-                let snap_preview = Some(prompt.to_string());
-                let _ = tauri::async_runtime::spawn_blocking(move || {
-                    crate::runs::shadow_git::restore_undone_turn_best_effort(
-                        &snap_cwd,
-                        &snap_session,
-                        snap_preview.as_deref(),
-                    );
-                })
+                // Local JSONL truncate is not enough after a cold ACP restart:
+                // the truncated files may exist while session/load still fails
+                // with "unknown session id". Only claim in-place success when
+                // a fresh client can mount the head.
+                let load_ok = crate::runs::core::session_loadable(
+                    Path::new(&program),
+                    &cwd,
+                    &session_id,
+                )
                 .await;
-                return Ok(UndoSessionResult {
-                    rewound: true,
-                    session_id,
-                    rebased: false,
-                });
+                if load_ok {
+                    let snap_cwd = PathBuf::from(&cwd);
+                    let snap_session = session_id.clone();
+                    let snap_preview = Some(prompt.to_string());
+                    let _ = tauri::async_runtime::spawn_blocking(move || {
+                        crate::runs::shadow_git::restore_undone_turn_best_effort(
+                            &snap_cwd,
+                            &snap_session,
+                            snap_preview.as_deref(),
+                        );
+                    })
+                    .await;
+                    return Ok(UndoSessionResult {
+                        rewound: true,
+                        session_id,
+                        rebased: false,
+                    });
+                }
+                eprintln!(
+                    "[grok undo] local JSONL truncated but session/load failed; rebasing"
+                );
             }
             Ok(false) => {}
             Err(error) => eprintln!("[grok undo] local JSONL rewind failed: {error}"),
@@ -3004,6 +3018,13 @@ async fn rewind_grok_session(
             );
         })
         .await;
+    }
+    if let Some(queue) = app.try_state::<std::sync::Arc<RunQueue>>() {
+        // Replacement head: drop lane pointers at the undone session so the
+        // queue cannot --resume it after rebase.
+        if let Err(error) = queue.db().clear_lane_heads_for_session(&session_id).await {
+            eprintln!("[grok undo] clear lane head before rebase failed: {error}");
+        }
     }
     let replacement = crate::runs::core::create_rebased_session(
         Path::new(&program),
@@ -4444,6 +4465,148 @@ fn post_un_user_notification() -> bool {
     true
 }
 
+
+/// Generate a short session title via local Ollama (Q8 GGUF), then unload
+/// (`keep_alive: 0`). Failures surface as Err so the UI keeps the fallback.
+#[tauri::command]
+async fn generate_session_title(prompt: String, model: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || generate_session_title_blocking(prompt, model))
+        .await
+        .map_err(|e| format!("title worker join: {e}"))?
+}
+
+fn resolve_ollama_bin() -> PathBuf {
+    if let Ok(custom) = env::var("GROK_DESKTOP_OLLAMA_CMD") {
+        return PathBuf::from(custom);
+    }
+    let candidates = [
+        "/Users/untitled/homebrew/bin/ollama",
+        "/opt/homebrew/bin/ollama",
+        "/usr/local/bin/ollama",
+        "ollama",
+    ];
+    for c in candidates {
+        let p = PathBuf::from(c);
+        if c == "ollama" || p.is_file() {
+            return p;
+        }
+    }
+    PathBuf::from("ollama")
+}
+
+fn ensure_ollama_server(ollama: &Path) -> Result<(), String> {
+    // Cheap health check — if the daemon is up, /api/tags responds.
+    let health = Command::new("curl")
+        .args(["-fsS", "--max-time", "2", "http://127.0.0.1:11434/api/tags"])
+        .output();
+    if let Ok(out) = health {
+        if out.status.success() {
+            return Ok(());
+        }
+    }
+    // Start in background; ignore "already running" failures.
+    let _ = Command::new(ollama)
+        .arg("serve")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+    for _ in 0..40 {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        if let Ok(out) = Command::new("curl")
+            .args(["-fsS", "--max-time", "2", "http://127.0.0.1:11434/api/tags"])
+            .output()
+        {
+            if out.status.success() {
+                return Ok(());
+            }
+        }
+    }
+    Err("Ollama server did not become ready".into())
+}
+
+fn ensure_ollama_model(ollama: &Path, model: &str) -> Result<(), String> {
+    let listed = Command::new(ollama)
+        .args(["list"])
+        .output()
+        .map_err(|e| format!("ollama list failed: {e}"))?;
+    let list_txt = String::from_utf8_lossy(&listed.stdout);
+    // Match either the full tag or the bare name before ':'.
+    let bare = model.split(':').next().unwrap_or(model);
+    if list_txt.lines().any(|line| line.contains(model) || line.contains(bare)) {
+        return Ok(());
+    }
+    let pull = Command::new(ollama)
+        .args(["pull", model])
+        .output()
+        .map_err(|e| format!("ollama pull failed: {e}"))?;
+    if !pull.status.success() {
+        return Err(format!(
+            "ollama pull {}: {}",
+            model,
+            String::from_utf8_lossy(&pull.stderr)
+        ));
+    }
+    Ok(())
+}
+
+fn generate_session_title_blocking(prompt: String, model: String) -> Result<String, String> {
+    let prompt = prompt.trim().to_string();
+    let model = model.trim().to_string();
+    if prompt.is_empty() || model.is_empty() {
+        return Err("prompt and model are required".into());
+    }
+    let ollama = resolve_ollama_bin();
+    ensure_ollama_server(&ollama)?;
+    ensure_ollama_model(&ollama, &model)?;
+
+    // Prefer the HTTP generate API so we can set keep_alive: 0 and stream:false.
+    let body = serde_json::json!({
+        "model": model,
+        "prompt": prompt,
+        "stream": false,
+        "keep_alive": 0,
+        "options": {
+            "temperature": 0.2,
+            "num_predict": 24
+        }
+    });
+    let body_str = body.to_string();
+    let output = Command::new("curl")
+        .args([
+            "-fsS",
+            "--max-time",
+            "120",
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            &body_str,
+            "http://127.0.0.1:11434/api/generate",
+        ])
+        .output()
+        .map_err(|e| format!("ollama generate request failed: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "ollama generate failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("bad ollama JSON: {e}"))?;
+    let text = parsed
+        .get("response")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if text.is_empty() {
+        return Err("ollama returned an empty title".into());
+    }
+    Ok(text)
+}
+
+
 #[tauri::command]
 async fn get_cli_usage(
     queue: tauri::State<'_, std::sync::Arc<RunQueue>>,
@@ -5087,7 +5250,8 @@ pub fn run() {
             desktop::desktop_activate,
             show_completion_popup,
             open_completion_session,
-            get_cli_usage
+            get_cli_usage,
+            generate_session_title
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

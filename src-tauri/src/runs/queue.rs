@@ -186,6 +186,10 @@ impl RunQueue {
         self.tx.subscribe()
     }
 
+    pub fn db(&self) -> &Db {
+        &self.db
+    }
+
     async fn lane_guard(&self, lane_id: &str) -> Arc<Mutex<()>> {
         let mut guards = self.lane_guards.lock().await;
         guards
@@ -215,6 +219,10 @@ impl RunQueue {
             let mut parked = self.acp_hosts.lock().await;
             parked.drain().map(|(_, host)| host).collect::<Vec<_>>()
         });
+        // Prewarm ids are host-scoped. After eviction a fresh ACP process no
+        // longer owns those sessions — keeping the cache would let warm_direct
+        // skip session/load and session/prompt with "unknown session id".
+        self.prewarmed_sessions.lock().await.clear();
         for mut host in hosts {
             host.shutdown().await;
         }
@@ -825,27 +833,30 @@ impl RunQueue {
 
         let mut args: Vec<String> = serde_json::from_str(&rec.args_json).unwrap_or_default();
         // Follow-ups may be enqueued before the parent emits its session id.
-        // Resolve against lane identity (OpenCode-style), not only parent_run_id.
-        // Never silently bare-start a follow-up that named a parent.
+        // Only then may we inject --resume from lane identity. A bare start
+        // (Undo force-new, New Session, first turn) intentionally omits
+        // resume — never reattach a stale lane_heads id.
         let args_have_resume = args.windows(2).any(|pair| pair[0] == "--resume")
             || args.iter().any(|arg| arg == "-c");
         if !args_have_resume {
-            let resolved = self.resolve_followup_session(&rec).await;
-            if let Some(session_id) = resolved {
-                // Same-session append: never fork a new head for a follow-up.
-                args.retain(|arg| arg != "--fork-session");
-                args.push("--resume".to_string());
-                args.push(session_id);
-            } else if rec.parent_run_id.is_some() {
-                self.finalize(
-                    &rec.id,
-                    RunState::Failed,
-                    Some(
-                        "no session head to resume; refusing bare start".to_string(),
-                    ),
-                )
-                .await;
-                return;
+            if rec.parent_run_id.is_some() {
+                let resolved = self.resolve_followup_session(&rec).await;
+                if let Some(session_id) = resolved {
+                    // Same-session append: never fork a new head for a follow-up.
+                    args.retain(|arg| arg != "--fork-session");
+                    args.push("--resume".to_string());
+                    args.push(session_id);
+                } else {
+                    self.finalize(
+                        &rec.id,
+                        RunState::Failed,
+                        Some(
+                            "no session head to resume; refusing bare start".to_string(),
+                        ),
+                    )
+                    .await;
+                    return;
+                }
             }
         }
         let grok_path = self.inner.lock().await.grok_path.clone();
@@ -1331,21 +1342,25 @@ impl RunQueue {
 
 /// Decide whether a turn can skip ACP `session/load` and prompt directly.
 ///
-/// - Resume id already on the host (or matching prewarm cache) → warm direct.
-/// - Resume id present but not loaded → cold resume (caller uses session/load).
-/// - No resume id → use prewarmed empty session if any, else session/new.
+/// - Resume id already loaded on THIS host → warm direct.
+/// - Resume id present but not on this host → cold resume (session/load), even
+///   if a stale prewarm cache still names that id (host may have been evicted).
+/// - No resume id → use prewarmed empty session only if this host still owns it.
 pub(crate) fn warm_direct_session_id(
     resume_id: Option<&str>,
     host_has_loaded: impl Fn(&str) -> bool,
     prewarmed_id: Option<&str>,
 ) -> Option<String> {
     if let Some(id) = resume_id {
-        if host_has_loaded(id) || prewarmed_id == Some(id) {
+        if host_has_loaded(id) {
             return Some(id.to_string());
         }
+        let _ = prewarmed_id; // never skip load based on cache alone
         return None;
     }
-    prewarmed_id.map(str::to_string)
+    prewarmed_id
+        .filter(|id| host_has_loaded(id))
+        .map(str::to_string)
 }
 
 fn prewarm_session_key(
@@ -1423,9 +1438,10 @@ mod tests {
             warm_direct_session_id(Some("sess-a"), |id| loaded.contains(&id), None).as_deref(),
             Some("sess-a")
         );
+        // Stale prewarm cache alone must NOT skip session/load on a new host.
         assert_eq!(
-            warm_direct_session_id(Some("sess-a"), |_| false, Some("sess-a")).as_deref(),
-            Some("sess-a")
+            warm_direct_session_id(Some("sess-a"), |_| false, Some("sess-a")),
+            None
         );
         // Cold: resume present but not on host → force session/load path.
         assert_eq!(
@@ -1436,9 +1452,15 @@ mod tests {
 
     #[test]
     fn warm_direct_uses_prewarmed_empty_session_without_resume() {
+        let loaded = ["prewarm-1"];
         assert_eq!(
-            warm_direct_session_id(None, |_| false, Some("prewarm-1")).as_deref(),
+            warm_direct_session_id(None, |id| loaded.contains(&id), Some("prewarm-1")).as_deref(),
             Some("prewarm-1")
+        );
+        // Prewarm id from an evicted host is not warm-direct on a fresh host.
+        assert_eq!(
+            warm_direct_session_id(None, |_| false, Some("prewarm-1")),
+            None
         );
         assert_eq!(warm_direct_session_id(None, |_| false, None), None);
     }

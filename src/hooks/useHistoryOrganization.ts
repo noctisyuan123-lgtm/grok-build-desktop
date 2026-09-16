@@ -2,7 +2,7 @@
 // group / archive / delete metadata (persisted per conversation id), the
 // filter box, the transient action toast, and the derived recent/partitioned
 // row views. Extracted from App.tsx unchanged.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { upsertPrompt } from '../lib/prompts';
 import type { Tab, TabMessage } from '../lib/tabs';
 import type { ChatMessage, HistoryRow } from '../app/types';
@@ -10,7 +10,12 @@ import { storageKeys } from '../app/constants';
 import { loadIdMap, loadIdSet } from '../app/storage';
 import { timeLabel } from '../app/format';
 import { t } from '../i18n';
-import { deriveConversationTitle } from '../lib/conversationTitle';
+import {
+  resolveSessionTitle,
+  shouldScheduleFirstPromptProvider,
+  type SessionTitleSource,
+} from '../lib/sessionTitle';
+import { generateProviderSessionTitle } from '../lib/sessionTitleProvider';
 
 export interface HistoryOrganizationDeps {
   tabs: Tab[];
@@ -32,6 +37,19 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
   const [promptLabels, setPromptLabels] = useState<Record<string, string>>(() =>
     loadIdMap(storageKeys.historyLabels),
   );
+  // Provider titles (DeepSeek source=provider). User pins stay in promptLabels.
+  const [providerTitles, setProviderTitles] = useState<Record<string, string>>(() =>
+    loadIdMap(storageKeys.historyProviderTitles),
+  );
+  const [titleAttempts, setTitleAttempts] = useState<Set<string>>(() =>
+    loadIdSet(storageKeys.historyTitleAttempts),
+  );
+  const promptLabelsRef = useRef(promptLabels);
+  const providerTitlesRef = useRef(providerTitles);
+  const titleAttemptsRef = useRef(titleAttempts);
+  promptLabelsRef.current = promptLabels;
+  providerTitlesRef.current = providerTitles;
+  titleAttemptsRef.current = titleAttempts;
   const [promptGroups, setPromptGroups] = useState<Record<string, string>>(() =>
     loadIdMap(storageKeys.historyGroups),
   );
@@ -54,6 +72,12 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
   useEffect(() => {
     window.localStorage.setItem(storageKeys.historyLabels, JSON.stringify(promptLabels));
   }, [promptLabels]);
+  useEffect(() => {
+    window.localStorage.setItem(storageKeys.historyProviderTitles, JSON.stringify(providerTitles));
+  }, [providerTitles]);
+  useEffect(() => {
+    window.localStorage.setItem(storageKeys.historyTitleAttempts, JSON.stringify([...titleAttempts]));
+  }, [titleAttempts]);
   useEffect(() => {
     window.localStorage.setItem(storageKeys.historyGroups, JSON.stringify(promptGroups));
   }, [promptGroups]);
@@ -158,6 +182,17 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
       delete n[id];
       return n;
     });
+    setProviderTitles((p) => {
+      const n = { ...p };
+      delete n[id];
+      return n;
+    });
+    setTitleAttempts((p) => {
+      if (!p.has(id)) return p;
+      const n = new Set(p);
+      n.delete(id);
+      return n;
+    });
     setPromptGroups((p) => {
       const n = { ...p };
       delete n[id];
@@ -186,8 +221,12 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
         const lastTs = msgs.length
           ? Math.max(...msgs.map((m) => (m as { ts?: number }).ts ?? 0))
           : t.createdAt;
-        const fallback = deriveConversationTitle(fp);
-        const titleBase = promptLabels[t.id] ?? fallback;
+        const resolved = resolveSessionTitle({
+          firstPrompt: fp,
+          userLabel: promptLabels[t.id],
+          providerTitle: providerTitles[t.id],
+        });
+        const titleBase = resolved.title;
         return [
           {
             id: t.id,
@@ -219,6 +258,7 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
     historyFilter,
     pinnedPromptIds,
     promptLabels,
+    providerTitles,
     promptGroups,
     archivedPromptIds,
   ]);
@@ -253,9 +293,49 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
     return { pinned, groups, projectGroups, ungrouped, archived };
   }, [recentPrompts]);
 
+
+  /**
+   * DeepSeek first-prompt cadence: schedule one async Q8 title for a fresh
+   * non-fork session. User rename pins; failures keep the rule fallback.
+   */
+  function scheduleFirstPromptTitle(sessionId: string, firstPrompt: string, isFork: boolean) {
+    const source: SessionTitleSource | undefined = promptLabelsRef.current[sessionId]
+      ? 'user'
+      : providerTitlesRef.current[sessionId]
+        ? 'provider'
+        : undefined;
+    if (
+      !shouldScheduleFirstPromptProvider({
+        isFork,
+        alreadyAttempted: titleAttemptsRef.current.has(sessionId),
+        source,
+      })
+    ) {
+      return;
+    }
+    setTitleAttempts((prev) => {
+      if (prev.has(sessionId)) return prev;
+      const next = new Set(prev);
+      next.add(sessionId);
+      return next;
+    });
+    void (async () => {
+      const title = await generateProviderSessionTitle(firstPrompt);
+      if (!title) return;
+      // CAS against the latest pin — never overwrite a user rename.
+      if (promptLabelsRef.current[sessionId]?.trim()) return;
+      setProviderTitles((prev) => {
+        if (promptLabelsRef.current[sessionId]?.trim()) return prev;
+        if (prev[sessionId] === title) return prev;
+        return { ...prev, [sessionId]: title };
+      });
+    })();
+  }
+
   return {
     pinnedPromptIds,
     promptLabels,
+    providerTitles,
     promptGroups,
     archivedPromptIds,
     showArchived,
@@ -276,5 +356,6 @@ export function useHistoryOrganization(deps: HistoryOrganizationDeps) {
     commitRowEdit,
     savePromptToLibrary,
     removeConversationMeta,
+    scheduleFirstPromptTitle,
   };
 }

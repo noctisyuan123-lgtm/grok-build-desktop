@@ -192,10 +192,37 @@ fn ensure_shadow_repo(cwd: &Path) -> Result<PathBuf, String> {
     Ok(git)
 }
 
+
+/// Home / filesystem root must never be snapshotted: `git add -A` there
+/// triggers macOS Documents/Desktop/Downloads TCC dialogs and can hang the
+/// turn for minutes (the UI then looks "Disconnected" after 60s of silence).
+fn is_unsafe_snapshot_cwd(cwd: &Path) -> bool {
+    let Ok(canon) = cwd.canonicalize() else {
+        return true;
+    };
+    if canon == Path::new("/") {
+        return true;
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        if let Ok(home_canon) = PathBuf::from(home).canonicalize() {
+            if canon == home_canon {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Stage worktree (honoring .gitignore + shadow excludes) and return tree hash.
 pub fn track(cwd: &Path) -> Result<String, String> {
     if disabled() {
         return Err("shadow git disabled".into());
+    }
+    if is_unsafe_snapshot_cwd(cwd) {
+        return Err(format!(
+            "shadow git skipped for unsafe cwd: {}",
+            cwd.display()
+        ));
     }
     if !cwd.is_dir() {
         return Err(format!("cwd is not a directory: {}", cwd.display()));
@@ -559,6 +586,13 @@ pub fn capture_before_turn_best_effort(
     if disabled() {
         return;
     }
+    if is_unsafe_snapshot_cwd(cwd) {
+        eprintln!(
+            "[grok shadow-git] skipped unsafe cwd {} (home/root)",
+            cwd.display()
+        );
+        return;
+    }
     match capture_before_turn(cwd, session_id, run_id, prompt) {
         Ok(entry) => {
             eprintln!(
@@ -763,5 +797,19 @@ mod tests {
         assert_eq!(fs::read_to_string(cwd.join("created.txt")).unwrap(), "new");
 
         let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn skips_home_and_root_as_unsafe_cwd() {
+        let (_cwd, _base, _guard) = temp_pair();
+        assert!(is_unsafe_snapshot_cwd(Path::new("/")));
+        if let Some(home) = std::env::var_os("HOME") {
+            let home = PathBuf::from(home);
+            if home.is_dir() {
+                assert!(is_unsafe_snapshot_cwd(&home));
+                let err = track(&home).unwrap_err();
+                assert!(err.contains("unsafe cwd"), "{err}");
+            }
+        }
     }
 }

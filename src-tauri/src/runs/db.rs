@@ -489,6 +489,33 @@ impl Db {
         .await
         .map(|row| row.map(|(session_id,)| session_id))
     }
+
+    pub async fn clear_lane_head(&self, lane_id: &str) -> Result<(), sqlx::Error> {
+        if lane_id.is_empty() {
+            return Ok(());
+        }
+        sqlx::query("DELETE FROM lane_heads WHERE lane_id = ?")
+            .bind(lane_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Drop any lane head that still points at an undone / replaced session.
+    pub async fn clear_lane_heads_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), sqlx::Error> {
+        let session_id = session_id.trim();
+        if session_id.is_empty() {
+            return Ok(());
+        }
+        sqlx::query("DELETE FROM lane_heads WHERE session_id = ?")
+            .bind(session_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
 }
 
 

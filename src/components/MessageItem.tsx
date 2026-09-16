@@ -780,11 +780,21 @@ export function MarkdownSegment({
 }) {
   const html = useRunHtml(cacheKey);
   const htmlSource = useRunHtmlSource(cacheKey);
+  // Exact match only — never show HTML parsed for a different source string.
   const matchedHtml = htmlSource === undefined || htmlSource === text ? html : undefined;
   const safeHtml = useMemo(
-    () => (matchedHtml ? sanitizeHtml(matchedHtml) : matchedHtml),
+    () => (matchedHtml ? sanitizeHtml(matchedHtml) : undefined),
     [matchedHtml],
   );
+  // While the worker lags behind a live stream, keep the last good HTML for this
+  // cacheKey instead of flipping back to <pre> (remount + fade-in = flicker).
+  const stickyRef = useRef<{ key: string; html?: string }>({ key: cacheKey });
+  if (stickyRef.current.key !== cacheKey) {
+    stickyRef.current = { key: cacheKey, html: safeHtml };
+  } else if (safeHtml) {
+    stickyRef.current.html = safeHtml;
+  }
+  const displayHtml = safeHtml ?? stickyRef.current.html;
   useEffect(() => {
     import('../lib/markdownWorker')
       .then(({ scheduleMarkdownParse }) =>
@@ -792,15 +802,16 @@ export function MarkdownSegment({
       )
       .catch(() => {});
   }, [cacheKey, immediate, text]);
-  return safeHtml ? (
-    <MarkdownHtml
-      html={safeHtml}
-      owner={cacheKey}
-      className={`message-body markdown-body ${className}`}
-    />
-  ) : (
-    <pre className={`message-body streaming-raw ${className}`}>{text}</pre>
-  );
+  if (displayHtml) {
+    return (
+      <MarkdownHtml
+        html={displayHtml}
+        owner={cacheKey}
+        className={`message-body markdown-body ${className}`}
+      />
+    );
+  }
+  return <pre className={`message-body streaming-raw ${className}`}>{text}</pre>;
 }
 
 function compactionLabel(compaction: RunCompaction): string | null {

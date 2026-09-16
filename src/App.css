@@ -10963,8 +10963,8 @@ body,
 /* Do not narrow normal/transcript assistant responses — they share the full
    message column. Thought bodies stay compact for denser workflow reading. */
 .transcript-response.message-body {
-  animation: workflow-fade-in var(--workflow-fade-ms, 280ms) var(--workflow-ease-enter, ease-out)
-    both;
+  /* No enter animation: mid-respond HTML updates many times per stream; a
+     fade-in here restarts on remount and reads as constant flicker. */
   margin: 0;
   max-width: none;
 }
@@ -10988,8 +10988,7 @@ body,
 
 /* Exterior final body: fade once on mount (stable key = no re-fire per token). */
 .message-body.markdown-streaming:not(.transcript-response):not(.transcript-thought-body) {
-  animation: workflow-fade-in var(--workflow-fade-ms, 280ms) var(--workflow-ease-enter, ease-out)
-    both;
+  /* Streaming exterior answer also updates continuously — skip fade-in. */
 }
 
 .transcript-thought-body.message-body {

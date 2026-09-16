@@ -450,6 +450,48 @@ pub async fn rewind_last_user_turn_with_share(
         .await
 }
 
+/// True when a fresh ACP client can `session/load` this head.
+///
+/// Used after local JSONL truncate: files on disk are not enough if the grok
+/// process no longer knows the session (e.g. after app reinstall).
+pub async fn session_loadable(binary: &Path, cwd: &Path, session_id: &str) -> bool {
+    let session_id = session_id.trim();
+    if session_id.is_empty() {
+        return false;
+    }
+    let config = CoreConfig {
+        model: None,
+        reasoning_effort: None,
+        always_approve: false,
+        permission_mode: None,
+        experimental_memory: false,
+        web_search_disabled: false,
+        subagents_disabled: false,
+        review_only: false,
+        rules: None,
+        resume_session_id: Some(session_id.to_string()),
+        share_session: false,
+        fork_session: false,
+        prompt_blocks: None,
+    };
+    let Ok(mut host) = AcpHost::connect(binary, cwd, &config).await else {
+        return false;
+    };
+    let resolved_cwd = if cwd.is_absolute() && cwd.is_dir() {
+        cwd.to_path_buf()
+    } else {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/"))
+    };
+    let ok = host
+        .ensure_session_loaded(&resolved_cwd, &config, session_id)
+        .await
+        .is_ok();
+    host.shutdown().await;
+    ok
+}
+
 /// Create a durable replacement head after Undo.
 ///
 /// Grok 1.0 can list rewind points for a loaded session while still refusing

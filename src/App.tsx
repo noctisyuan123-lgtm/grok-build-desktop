@@ -156,13 +156,17 @@ function App() {
   // The textarea lives inside Composer (uncontrolled ref). We hold a
   // ComposerHandle so starter cards / history clicks / drafts can seed it.
   const composerRef = useRef<ComposerHandle | null>(null);
-  // After Undo, if engine rewind fails we keep a force-new plan: the next
-  // submit starts a fresh session and re-seeds only the still-visible
-  // pre-undo messages as model context. Successful Grok-native rewind clears
-  // this and stays on the same sessionHead.
+  // After Undo: force-new plan is only for rewind *failure*. Successful
+  // Grok-native rewind stays on the same sessionHead (CLI alignment); the
+  // next send resumes that truncated head. On failure we reseed visible
+  // turns via --rules into a fresh session. Rebase clears this and points
+  // sessionHead at the replacement id.
   const undoSessionPlanRef = useRef<{
     replayMessages: Array<{ role: 'user' | 'assistant'; content: string }>;
   } | null>(null);
+  // While a force-new Undo plan is pending, drop parentRunId so the queue
+  // cannot re-inject --resume from a stale parent / lane head.
+  const [blockEnqueueParent, setBlockEnqueueParent] = useState(false);
   // Older responses cannot safely use the session-level Grok id because it
   // may also contain later turns. Keep their exact visible branch as replay
   // context until the first new prompt.
@@ -365,7 +369,7 @@ function App() {
     sessionFirstPrompt,
     closeContextMenu: () => setContextMenu(null),
   });
-  const { recentPrompts, removeConversationMeta } = historyApi;
+  const { recentPrompts, removeConversationMeta, scheduleFirstPromptTitle } = historyApi;
   // Sidebar collapse for ⌘B — defaults to expanded.
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     return window.localStorage.getItem('grok-desktop-sidebar-collapsed') === '1';
@@ -1173,6 +1177,7 @@ function App() {
     completionRunOwnerRef.current.set(info.runId, ownerTabId);
     // Post-Undo re-seed has been consumed. Later turns resume the new session.
     undoSessionPlanRef.current = null;
+    setBlockEnqueueParent(false);
     if (forkSessionPlanRef.current?.tabId === ownerTabId) {
       forkSessionPlanRef.current = null;
     }
@@ -1221,7 +1226,17 @@ function App() {
       status: 'streaming' as const,
       meta: { model: activeModel, workflow: mode === 'coding' ? codingWorkflow : 'chat' },
     };
+    const priorFirstPrompt = sessionFirstPrompt(ownerTabId);
     appendTabMessages(ownerTabId, [userMessage, assistantMessage]);
+    // DeepSeek first-prompt titles: one async Q8 pass on a fresh non-fork session.
+    if (!priorFirstPrompt) {
+      const ownerTab = tabs.find((tab) => tab.id === ownerTabId);
+      scheduleFirstPromptTitle(
+        ownerTabId,
+        userMessage.content,
+        ownerTab?.forkIndex != null,
+      );
+    }
     if (persistedAttachments.length > 0 && hasTauriRuntime()) {
       void Promise.all(
         info.attachments.map((attachment) =>
@@ -1730,6 +1745,9 @@ function App() {
           content: message.content,
         })),
     };
+    // Optimistic: block parent inject until rewind outcome is known. Success
+    // clears this and keeps the same sessionHead; failure keeps force-new.
+    setBlockEnqueueParent(true);
     undoneUserContentRef.current = user.content;
 
     messagesRef.current = preserved;
@@ -1774,7 +1792,11 @@ function App() {
         _rewoundOk = await persistUndoToGrokSession(grokSessionId);
         if (!_rewoundOk) {
           // Keep undoSessionPlanRef so the next send force-news + replays.
+          // Drop the unreound head so we cannot --resume an untruncated session.
+          updateActiveTabMeta({ sessionHead: null });
           setSessionNotice(t('notices.undoRewindFailed'));
+        } else {
+          setBlockEnqueueParent(false);
         }
       }
     } finally {
@@ -1786,9 +1808,12 @@ function App() {
       undo: () => {
         // Conversation is already truncated in the engine — toast "Undo" only
         // restores the prior composer draft and optional AFTER file stash.
-        // Clear any force-new reseed plan so a follow-up resumes the (truncated)
-        // head instead of replaying rules into a replacement session.
-        undoSessionPlanRef.current = null;
+        // If rewind succeeded, clear any leftover force-new plan so a follow-up
+        // resumes the truncated same-session head (CLI alignment).
+        if (_rewoundOk) {
+          undoSessionPlanRef.current = null;
+          setBlockEnqueueParent(false);
+        }
         pendingUndoVisibleMessagesRef.current = null;
         const pendingWorkspace = undoWorkspaceRedoRef.current;
         undoWorkspaceRedoRef.current = null;
@@ -1943,6 +1968,7 @@ function App() {
       if (result.rewound || result.rebased) {
         // Shared grok session matches the UI. Stay on this head (CLI too).
         undoSessionPlanRef.current = null;
+        setBlockEnqueueParent(false);
         suppressLiveRehydrateRef.current = false;
         const nextSessionId = result.sessionId || sessionId;
         const rebased = result.rebased || nextSessionId !== sessionId;
@@ -1990,10 +2016,11 @@ function App() {
           if (wasLive) linkLiveSession(nextSessionId);
           else linkLiveSession(null);
         } else {
-          // In-place rewind: commitRevert already tightened the Desktop
-          // transcript (with runId / Worked-for / workflow). Skip export
-          // rehydrate here — it would rebuild bubbles without those fields.
+          // In-place rewind: same session id, truncated. Keep sessionHead so
+          // the next send resumes this head (CLI alignment). Skip export
+          // rehydrate — it would rebuild bubbles without runId / Worked-for.
           liveExportFingerprintRef.current = '';
+          updateActiveTabMeta({ sessionHead: nextSessionId });
         }
         if (wasLive) {
           // A second ACP session/load during rewind can leave the existing
@@ -2283,7 +2310,7 @@ function App() {
                 offline={!appOnline}
                 grokIsRunning={activeSessionIsRunning}
                 activeRunId={activeSessionRunId}
-                enqueueParentRunId={activeEnqueueParentRunId}
+                enqueueParentRunId={blockEnqueueParent ? null : activeEnqueueParentRunId}
                 beforeEnqueue={commitRevertIfNeeded}
                 laneId={activeTabId}
                 stopRun={stopRun}

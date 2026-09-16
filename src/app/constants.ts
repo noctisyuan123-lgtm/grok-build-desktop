@@ -54,6 +54,8 @@ export const storageKeys = {
   // History-organization (keyed by prompt/message id):
   historyPinned: 'grok-desktop-history-pinned-v1',
   historyLabels: 'grok-desktop-history-labels-v1',
+  historyProviderTitles: 'grok-desktop-history-provider-titles-v1',
+  historyTitleAttempts: 'grok-desktop-history-title-attempts-v1',
   historyGroups: 'grok-desktop-history-groups-v1',
   historyArchived: 'grok-desktop-history-archived-v1',
   historyDeleted: 'grok-desktop-history-deleted-v1',

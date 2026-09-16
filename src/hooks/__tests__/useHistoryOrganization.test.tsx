@@ -1,9 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { useHistoryOrganization } from '../useHistoryOrganization';
 import { storageKeys } from '../../app/constants';
 import type { Tab } from '../../lib/tabs';
 import type { ChatMessage } from '../../app/types';
+
+const generateMock = vi.hoisted(() => vi.fn(async () => 'Login Flake Fix'));
+vi.mock('../../lib/sessionTitleProvider', () => ({
+  generateProviderSessionTitle: generateMock,
+}));
 
 function message(
   id: string,
@@ -203,5 +208,79 @@ describe('metadata cleanup and library save', () => {
       await result.current.savePromptToLibrary('t1');
     });
     expect(result.current.historyNote).toBe("Couldn't save — Prompt Library unavailable");
+  });
+});
+
+describe('session title provider wiring', () => {
+  beforeEach(() => {
+    generateMock.mockReset();
+    generateMock.mockResolvedValue('Login Flake Fix');
+    window.localStorage.clear();
+  });
+
+  it('shows a provider title over the rule fallback once it lands', async () => {
+    const { result } = render();
+    expect(result.current.recentPrompts.find((r) => r.id === 't1')!.title).toBe(
+      'fix the flaky login test',
+    );
+    await act(async () => {
+      result.current.scheduleFirstPromptTitle('t1', 'fix the flaky login test', false);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(generateMock).toHaveBeenCalledOnce();
+    expect(result.current.recentPrompts.find((r) => r.id === 't1')!.title).toBe(
+      'Login Flake Fix',
+    );
+  });
+
+  it('skips the provider for forks and keeps the rule title', async () => {
+    const { result } = render();
+    await act(async () => {
+      result.current.scheduleFirstPromptTitle('t1', 'fix the flaky login test', true);
+      await Promise.resolve();
+    });
+    expect(generateMock).not.toHaveBeenCalled();
+  });
+
+  it('skips scheduling when the user already renamed the session', async () => {
+    const { result } = render();
+    act(() => result.current.startRename('t1'));
+    act(() => result.current.commitRowEdit('My pinned name'));
+    expect(result.current.recentPrompts.find((r) => r.id === 't1')!.title).toBe(
+      'My pinned name',
+    );
+    await act(async () => {
+      result.current.scheduleFirstPromptTitle('t1', 'fix the flaky login test', false);
+      await Promise.resolve();
+    });
+    expect(generateMock).not.toHaveBeenCalled();
+  });
+
+  it('CAS: a rename that lands during generation wins over the provider', async () => {
+    let resolveTitle!: (v: string) => void;
+    generateMock.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveTitle = resolve;
+        }),
+    );
+    const { result } = render();
+    await act(async () => {
+      result.current.scheduleFirstPromptTitle('t1', 'fix the flaky login test', false);
+      await Promise.resolve();
+    });
+    expect(generateMock).toHaveBeenCalledOnce();
+    act(() => result.current.startRename('t1'));
+    act(() => result.current.commitRowEdit('My pinned name'));
+    await act(async () => {
+      resolveTitle('Should Not Appear');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current.recentPrompts.find((r) => r.id === 't1')!.title).toBe(
+      'My pinned name',
+    );
+    expect(result.current.providerTitles.t1).toBeUndefined();
   });
 });
