@@ -377,7 +377,8 @@ export const en = {
   'titleBar.toLightTitle': 'Switch to light mode (⌘⇧L)',
   'titleBar.toDarkTitle': 'Switch to dark mode (⌘⇧L)',
   'titleBar.panelsAria': 'Open panels menu',
-  'titleBar.panelsTitle': 'Panels — Preview, Terminal',
+  'titleBar.panelsTitle': 'Panels — Preview, Terminal, Context Usage',
+  'titleBar.contextUsage': 'Context Usage',
 
   // ── Workspace status bar ──────────────────────────────────────────────────
   'workspace.ariaLabel': 'Workspace status',

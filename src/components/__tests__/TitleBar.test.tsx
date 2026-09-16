@@ -22,6 +22,8 @@ describe('TitleBar', () => {
         codingCwd="/tmp"
         anyPanelOpen={false}
         openPanelMenu={() => {}}
+        contextUsageOpen={false}
+        onContextUsageOpenChange={() => {}}
       />,
     );
     expect(document.querySelector('.window-titlebar .run-status-line')).toBeNull();

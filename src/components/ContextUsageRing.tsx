@@ -29,6 +29,11 @@ export interface ContextUsageRingProps {
   cwd: string;
   compact?: boolean;
   className?: string;
+  /** Controlled open state. When set with onOpenChange, the ring follows the parent. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** When false, only the popover is rendered (no titlebar/composer trigger). */
+  showTrigger?: boolean;
 }
 
 function ringAriaLabel(view: ContextUsageViewState, streaming: boolean): string {
@@ -70,9 +75,19 @@ export function ContextUsageRing({
   cwd,
   compact = false,
   className = '',
+  open: openProp,
+  onOpenChange,
+  showTrigger = true,
 }: ContextUsageRingProps) {
   const { view, streaming, refresh } = useContextUsage(messages, cwd);
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const controlled = openProp !== undefined;
+  const open = controlled ? Boolean(openProp) : uncontrolledOpen;
+  const setOpen = (next: boolean | ((prev: boolean) => boolean)) => {
+    const resolved = typeof next === 'function' ? next(open) : next;
+    if (!controlled) setUncontrolledOpen(resolved);
+    onOpenChange?.(resolved);
+  };
   const rootRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -84,6 +99,13 @@ export function ContextUsageRing({
     initialFocus: closeRef,
     onEscape: () => setOpen(false),
   });
+
+  // Refresh when the panel opens (menu or trigger). Skip the closed→idle path.
+  const wasOpenRef = useRef(false);
+  useEffect(() => {
+    if (open && !wasOpenRef.current) refresh();
+    wasOpenRef.current = open;
+  }, [open, refresh]);
 
   // Outside click closes the popover.
   useEffect(() => {
@@ -117,8 +139,7 @@ export function ContextUsageRing({
   const dashOffset = CIRCUMFERENCE * (1 - Math.min(100, Math.max(0, percent)) / 100);
   const label = ringAriaLabel(view, streaming);
 
-  return (
-    <div className={`context-usage${className ? ` ${className}` : ''}`} ref={rootRef}>
+  const ringButton = (
       <button
         ref={buttonRef}
         type="button"
@@ -129,11 +150,7 @@ export function ContextUsageRing({
         aria-controls={open ? popoverId : undefined}
         title={label}
         onClick={() => {
-          setOpen((v) => {
-            const next = !v;
-            if (next) refresh();
-            return next;
-          });
+          setOpen((v) => !v);
         }}
       >
         <svg
@@ -170,6 +187,11 @@ export function ContextUsageRing({
           </span>
         )}
       </button>
+  );
+
+  return (
+    <div className={`context-usage${className ? ` ${className}` : ''}`} ref={rootRef}>
+      {showTrigger ? ringButton : null}
 
       {open ? (
         <div

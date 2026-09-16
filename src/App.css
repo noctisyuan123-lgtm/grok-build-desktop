@@ -6203,6 +6203,19 @@ body[data-theme='light'] .hljs-comment {
   position: relative;
   width: auto;
 }
+.context-usage-menu-anchor {
+  height: 0;
+  margin: 0;
+  overflow: visible;
+  pointer-events: none;
+  position: absolute;
+  right: 16px;
+  top: 46px;
+  width: 0;
+}
+.context-usage-menu-anchor .context-usage-popover {
+  pointer-events: auto;
+}
 .context-usage-titlebar .context-usage-ring {
   height: 28px;
   padding: 0;

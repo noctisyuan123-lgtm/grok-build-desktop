@@ -11,7 +11,7 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { openPath, openUrl } from '@tauri-apps/plugin-opener';
-import { Globe2, TerminalSquare } from 'lucide-react';
+import { Globe2, TerminalSquare, Circle } from 'lucide-react';
 import './App.css';
 import { cancelRun, enqueueRun, ensureStreamListenersAttached, prewarmRun } from './lib/grok';
 import { onDocumentLinkClick } from './lib/externalLinks';
@@ -336,6 +336,7 @@ function App() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [attachmentPreview, setAttachmentPreview] = useState<ComposerAttachment | null>(null);
   const [contextOpen, setContextOpen] = useState(false);
+  const [contextUsageOpen, setContextUsageOpen] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   // Developer-utilities <details> (Browser / Absorb Repo).
@@ -1333,8 +1334,8 @@ function App() {
     if (next && target === 'preview') void refreshStaticPreview();
   }
 
-  // Top-right "panels" menu — Preview / Terminal. A ✓ marks the currently-open
-  // panel. Anchored under the button.
+  // Top-right "panels" menu — Preview / Terminal / Context Usage. A ✓ marks
+  // the currently-open panel. Anchored under the button.
   function openPanelMenu(e: React.MouseEvent) {
     e.preventDefault();
     const b = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -1353,6 +1354,12 @@ function App() {
           icon: <TerminalSquare size={15} />,
           shortcut: terminalOpen ? '✓' : undefined,
           onClick: () => togglePanel('terminal'),
+        },
+        {
+          label: t('titleBar.contextUsage'),
+          icon: <Circle size={15} />,
+          shortcut: contextUsageOpen ? '✓' : undefined,
+          onClick: () => setContextUsageOpen((open) => !open),
         },
       ],
     });
@@ -2254,13 +2261,15 @@ function App() {
             input, model chip, Preview/Context/Terminal/Tools/Settings, status
             pill) is gone — those all live in the sidebar, ⌘K palette, the
             bottom status bar, and Settings now. What stays here is just the
-            project chip (click → folder picker), a draggable spacer, session
-            usage, and panels. Stop replaces the composer send button while running. */}
+            project chip (click → folder picker), a draggable spacer, and panels
+            (Context Usage lives in the panels menu). Stop replaces the composer send button while running. */}
         <TitleBar
           messages={visibleMessages}
           codingCwd={codingCwd}
           anyPanelOpen={contextOpen || previewOpen || terminalOpen || toolsOpen}
           openPanelMenu={openPanelMenu}
+          contextUsageOpen={contextUsageOpen}
+          onContextUsageOpenChange={setContextUsageOpen}
         />
         <LiveRunHud messages={visibleMessages} />
         <SubagentUiProvider messages={visibleMessages}>
