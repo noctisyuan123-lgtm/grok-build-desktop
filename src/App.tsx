@@ -11,7 +11,7 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { openPath, openUrl } from '@tauri-apps/plugin-opener';
-import { Globe2, TerminalSquare, Circle } from 'lucide-react';
+import { Globe2, TerminalSquare } from 'lucide-react';
 import './App.css';
 import { cancelRun, enqueueRun, ensureStreamListenersAttached, prewarmRun } from './lib/grok';
 import { onDocumentLinkClick } from './lib/externalLinks';
@@ -42,6 +42,7 @@ import { AttachmentPreviewPanel } from './components/AttachmentPreviewPanel';
 import { TerminalDock } from './components/TerminalDock';
 import { Toolbelt } from './components/Toolbelt';
 import { TitleBar } from './components/TitleBar';
+import { ContextUsageRingGlyph } from './components/ContextUsageRing';
 import { LiveRunHud } from './components/StatusBar';
 import { ComposerSection } from './components/ComposerSection';
 import { SubagentRail, SubagentUiProvider } from './components/SubagentRail';
@@ -1357,7 +1358,9 @@ function App() {
         },
         {
           label: t('titleBar.contextUsage'),
-          icon: <Circle size={15} />,
+          icon: (
+            <ContextUsageRingGlyph messages={visibleMessages} cwd={codingCwd} />
+          ),
           shortcut: contextUsageOpen ? '✓' : undefined,
           onClick: () => setContextUsageOpen((open) => !open),
         },

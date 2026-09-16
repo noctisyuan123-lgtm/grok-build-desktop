@@ -54,8 +54,71 @@ function ringAriaLabel(view: ContextUsageViewState, streaming: boolean): string 
 }
 
 function toneClass(tone: ContextUsageTone | 'loading' | 'error'): string {
-  return `context-usage-ring tone-${tone}`;
+  return `tone-${tone}`;
 }
+
+function ringVisual(view: ContextUsageViewState, streaming: boolean) {
+  const percent = view.kind === 'ready' ? view.percent : 0;
+  const tone: ContextUsageTone | 'loading' | 'error' =
+    view.kind === 'ready'
+      ? view.tone
+      : view.kind === 'loading'
+        ? 'loading'
+        : view.kind === 'error'
+          ? 'error'
+          : 'empty';
+  const dashOffset = CIRCUMFERENCE * (1 - Math.min(100, Math.max(0, percent)) / 100);
+  return { percent, tone, dashOffset, label: ringAriaLabel(view, streaming), ready: view.kind === 'ready' };
+}
+
+/** Live progress ring glyph (no button) for menus / chrome that need the occupancy meter. */
+export function ContextUsageRingGlyph({
+  messages,
+  cwd,
+  className = '',
+}: {
+  messages: readonly ChatMessage[];
+  cwd: string;
+  className?: string;
+}) {
+  const { view, streaming } = useContextUsage(messages, cwd);
+  const { tone, dashOffset, ready } = ringVisual(view, streaming);
+  return (
+    <span
+      className={`context-usage-glyph ${toneClass(tone)}${streaming ? ' is-streaming' : ''}${className ? ` ${className}` : ''}`}
+      aria-hidden="true"
+    >
+      <svg
+        className="context-usage-svg"
+        width={RING_SIZE}
+        height={RING_SIZE}
+        viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`}
+      >
+        <circle
+          className="context-usage-track"
+          cx={RING_SIZE / 2}
+          cy={RING_SIZE / 2}
+          r={RADIUS}
+          fill="none"
+          strokeWidth={STROKE}
+        />
+        <circle
+          className="context-usage-progress"
+          cx={RING_SIZE / 2}
+          cy={RING_SIZE / 2}
+          r={RADIUS}
+          fill="none"
+          strokeWidth={STROKE}
+          strokeLinecap="round"
+          strokeDasharray={CIRCUMFERENCE}
+          strokeDashoffset={ready ? dashOffset : CIRCUMFERENCE}
+          transform={`rotate(-90 ${RING_SIZE / 2} ${RING_SIZE / 2})`}
+        />
+      </svg>
+    </span>
+  );
+}
+
 
 function segmentTokens(breakdown: ContextUsageBreakdown, key: BreakdownSegmentKey): number {
   switch (key) {
@@ -127,23 +190,13 @@ export function ContextUsageRing({
     }
   }, [view]);
 
-  const percent = view.kind === 'ready' ? view.percent : 0;
-  const tone: ContextUsageTone | 'loading' | 'error' =
-    view.kind === 'ready'
-      ? view.tone
-      : view.kind === 'loading'
-        ? 'loading'
-        : view.kind === 'error'
-          ? 'error'
-          : 'empty';
-  const dashOffset = CIRCUMFERENCE * (1 - Math.min(100, Math.max(0, percent)) / 100);
-  const label = ringAriaLabel(view, streaming);
+  const { tone, dashOffset, label, ready } = ringVisual(view, streaming);
 
   const ringButton = (
       <button
         ref={buttonRef}
         type="button"
-        className={`${toneClass(tone)}${streaming ? ' is-streaming' : ''}${open ? ' is-open' : ''}`}
+        className={`context-usage-ring ${toneClass(tone)}${streaming ? ' is-streaming' : ''}${open ? ' is-open' : ''}`}
         aria-label={label}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -177,7 +230,7 @@ export function ContextUsageRing({
             strokeWidth={STROKE}
             strokeLinecap="round"
             strokeDasharray={CIRCUMFERENCE}
-            strokeDashoffset={view.kind === 'ready' ? dashOffset : CIRCUMFERENCE}
+            strokeDashoffset={ready ? dashOffset : CIRCUMFERENCE}
             transform={`rotate(-90 ${RING_SIZE / 2} ${RING_SIZE / 2})`}
           />
         </svg>

@@ -6203,6 +6203,51 @@ body[data-theme='light'] .hljs-comment {
   position: relative;
   width: auto;
 }
+
+.context-usage-glyph {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 15px;
+  justify-content: center;
+  width: 15px;
+}
+.context-usage-glyph .context-usage-svg {
+  display: block;
+}
+.context-usage-glyph .context-usage-track {
+  stroke: var(--border-2);
+}
+.context-usage-glyph .context-usage-progress {
+  stroke: var(--text-3);
+  transition:
+    stroke-dashoffset 280ms var(--ease-out),
+    stroke 180ms ease;
+}
+.context-usage-glyph.tone-neutral .context-usage-progress {
+  stroke: var(--text-1);
+}
+.context-usage-glyph.tone-amber .context-usage-progress {
+  stroke: var(--warn);
+}
+.context-usage-glyph.tone-orange .context-usage-progress {
+  stroke: #c4894a;
+}
+.context-usage-glyph.tone-red .context-usage-progress {
+  stroke: var(--error);
+}
+.context-usage-glyph.tone-empty .context-usage-progress,
+.context-usage-glyph.tone-loading .context-usage-progress,
+.context-usage-glyph.tone-error .context-usage-progress {
+  stroke: var(--border-strong);
+  opacity: 0.55;
+}
+.context-usage-glyph.is-streaming .context-usage-track {
+  opacity: 0.85;
+}
+.context-usage-glyph.is-streaming .context-usage-progress {
+  animation: context-usage-pulse 1.6s var(--ease-in-out) infinite;
+}
 .context-usage-menu-anchor {
   height: 0;
   margin: 0;
