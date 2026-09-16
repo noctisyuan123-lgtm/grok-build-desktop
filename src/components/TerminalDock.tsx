@@ -1,11 +1,19 @@
-import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import { TerminalSquare, X } from 'lucide-react';
+import { Plus, TerminalSquare, X } from 'lucide-react';
 import { t } from '../i18n';
+import { createTerminalSessionId, nextTerminalTitle } from '../lib/terminalTabs';
 import { VS_CODE_TERMINAL_OPTIONS } from '../lib/vscodeTerminal';
 
 const TERMINAL_HEIGHT_KEY = 'grok-desktop-terminal-height';
@@ -17,14 +25,15 @@ interface TerminalOutputPayload {
   data: string;
 }
 
+interface TerminalTab {
+  id: string;
+  title: string;
+}
+
 function storedTerminalHeight(): number {
   const parsed = Number.parseInt(window.localStorage.getItem(TERMINAL_HEIGHT_KEY) ?? '', 10);
   if (!Number.isFinite(parsed)) return 260;
   return Math.min(MAX_TERMINAL_HEIGHT, Math.max(MIN_TERMINAL_HEIGHT, parsed));
-}
-
-function sessionId(): string {
-  return `terminal-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 9)}`;
 }
 
 function decodeTerminalBytes(encoded: string): Uint8Array {
@@ -45,6 +54,13 @@ function createTerminalWriter(terminal: Terminal) {
   };
 }
 
+function makeTab(existingTitles: readonly string[]): TerminalTab {
+  return {
+    id: createTerminalSessionId(),
+    title: nextTerminalTitle(existingTitles),
+  };
+}
+
 export interface TerminalDockProps {
   open: boolean;
   onClose: () => void;
@@ -52,19 +68,28 @@ export interface TerminalDockProps {
   workingDirectory: string;
 }
 
-export function TerminalDock({ open, onClose, cwd, workingDirectory }: TerminalDockProps) {
-  const heightRef = useRef(storedTerminalHeight());
+interface TerminalSessionPaneProps {
+  sessionId: string;
+  cwd: string;
+  active: boolean;
+}
+
+/**
+ * Owns one xterm + PTY lifecycle keyed by a stable sessionId.
+ * Stays mounted while the parent tab exists so switching tabs does not recreate PTYs.
+ */
+function TerminalSessionPane({ sessionId, cwd, active }: TerminalSessionPaneProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
   useEffect(() => {
-    document.documentElement.style.setProperty('--terminal-height', `${heightRef.current}px`);
-  }, []);
-
-  useEffect(() => {
-    if (!open || !hostRef.current) return;
-
     const host = hostRef.current;
-    const id = sessionId();
+    if (!host) return;
+
+    const id = sessionId;
     const terminal = new Terminal({
       ...VS_CODE_TERMINAL_OPTIONS,
       allowProposedApi: false,
@@ -75,6 +100,9 @@ export function TerminalDock({ open, onClose, cwd, workingDirectory }: TerminalD
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(host);
+    fitRef.current = fit;
+    terminalRef.current = terminal;
+
     // Prefer the WebGL renderer: the DOM renderer can drop colors in Tauri's
     // WebKit webview. Fall back to DOM if WebGL is unavailable.
     import('@xterm/addon-webgl')
@@ -95,7 +123,6 @@ export function TerminalDock({ open, onClose, cwd, workingDirectory }: TerminalD
     let started = false;
     let pendingInput = '';
     let writeChain = Promise.resolve();
-    let resizeObserver: ResizeObserver | null = null;
     const unlisteners: UnlistenFn[] = [];
 
     const reportTerminalError = (error: unknown) => {
@@ -115,7 +142,6 @@ export function TerminalDock({ open, onClose, cwd, workingDirectory }: TerminalD
 
     const focusTerminal = () => terminal.focus();
     host.addEventListener('pointerdown', focusTerminal);
-    terminal.focus();
 
     const disposables = [
       terminal.onData((data) => {
@@ -182,30 +208,122 @@ export function TerminalDock({ open, onClose, cwd, workingDirectory }: TerminalD
           cols: terminal.cols,
           rows: terminal.rows,
         });
-        terminal.focus();
+        if (active) terminal.focus();
       } catch (error) {
         reportTerminalError(error);
       }
     })();
 
-    if (typeof ResizeObserver !== 'undefined') {
-      resizeObserver = new ResizeObserver(fitTerminal);
-      resizeObserver.observe(host);
-    } else {
-      window.addEventListener('resize', fitTerminal);
-    }
+    const onWindowResize = () => fitTerminal();
+    // Dock chrome resize: parent dispatches this; only the active pane fits
+    // (inactive panes keep size via absolute stacking but stay cheap).
+    const onDockResize = () => {
+      if (!activeRef.current) return;
+      fitTerminal();
+    };
+    window.addEventListener('resize', onWindowResize);
+    window.addEventListener('terminal-dock-resize', onDockResize);
 
     return () => {
       disposed = true;
-      resizeObserver?.disconnect();
-      window.removeEventListener('resize', fitTerminal);
+      window.removeEventListener('resize', onWindowResize);
+      window.removeEventListener('terminal-dock-resize', onDockResize);
       host.removeEventListener('pointerdown', focusTerminal);
       unlisteners.forEach((unlisten) => unlisten());
       disposables.forEach((disposable) => disposable.dispose());
       if (started) void invoke('close_terminal_session', { sessionId: id });
+      fitRef.current = null;
+      terminalRef.current = null;
       terminal.dispose();
     };
-  }, [cwd, open]);
+    // sessionId is stable for the pane's lifetime; cwd is captured at mount
+    // (new tabs pick up the latest cwd; switching tabs must not recreate PTYs).
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional mount-once
+  }, [sessionId]);
+
+  // Fit + focus only the visible pane when it becomes active (or when shown).
+  useEffect(() => {
+    if (!active) return;
+    const fit = fitRef.current;
+    const terminal = terminalRef.current;
+    if (!fit || !terminal) return;
+    try {
+      fit.fit();
+    } catch {
+      /* layout may still be settling */
+    }
+    terminal.focus();
+  }, [active]);
+
+  return <div className="terminal-xterm" ref={hostRef} />;
+}
+
+export function TerminalDock({ open, onClose, cwd, workingDirectory }: TerminalDockProps) {
+  const heightRef = useRef(storedTerminalHeight());
+  const [tabs, setTabs] = useState<TerminalTab[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const panesRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--terminal-height', `${heightRef.current}px`);
+  }, []);
+
+  // Open → ensure one live tab before paint. Close → drop tabs so panes unmount / PTYs die.
+  useLayoutEffect(() => {
+    if (!open) {
+      setTabs([]);
+      setActiveId(null);
+      return;
+    }
+    setTabs((prev) => (prev.length > 0 ? prev : [makeTab([])]));
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || tabs.length === 0) return;
+    setActiveId((current) =>
+      current && tabs.some((tab) => tab.id === current) ? current : tabs[0].id,
+    );
+  }, [open, tabs]);
+
+  // Dock chrome resize: notify panes; only the active one fits.
+  useEffect(() => {
+    if (!open || !panesRef.current) return;
+    const root = panesRef.current;
+    const notify = () => window.dispatchEvent(new Event('terminal-dock-resize'));
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(notify);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [open]);
+
+  const addTab = useCallback(() => {
+    setTabs((prev) => {
+      const next = makeTab(prev.map((tab) => tab.title));
+      setActiveId(next.id);
+      return [...prev, next];
+    });
+  }, []);
+
+  const closeTab = useCallback(
+    (id: string) => {
+      setTabs((prev) => {
+        if (prev.length <= 1) {
+          onClose();
+          return prev;
+        }
+        const index = prev.findIndex((tab) => tab.id === id);
+        if (index < 0) return prev;
+        const next = prev.filter((tab) => tab.id !== id);
+        setActiveId((current) => {
+          if (current !== id) return current;
+          const neighbor = next[Math.max(0, index - 1)] ?? next[0];
+          return neighbor?.id ?? null;
+        });
+        return next;
+      });
+    },
+    [onClose],
+  );
 
   if (!open) return null;
 
@@ -232,6 +350,8 @@ export function TerminalDock({ open, onClose, cwd, workingDirectory }: TerminalD
     window.addEventListener('pointerup', stop, { once: true });
   }
 
+  const activeTab = tabs.find((tab) => tab.id === activeId) ?? tabs[0];
+
   return (
     <section className="terminal-dock" aria-label={t('terminal.title')}>
       <div
@@ -242,10 +362,54 @@ export function TerminalDock({ open, onClose, cwd, workingDirectory }: TerminalD
         role="separator"
       />
       <div className="terminal-toolbar">
-        <div className="terminal-tab" aria-current="page">
-          <TerminalSquare aria-hidden="true" size={14} />
-          <span>zsh</span>
-          <small>{workingDirectory}</small>
+        <div className="terminal-toolbar-start">
+          <div className="terminal-tab-list" role="tablist" aria-label={t('terminal.title')}>
+            {tabs.map((tab) => {
+              const selected = tab.id === (activeTab?.id ?? null);
+              return (
+                <div
+                  key={tab.id}
+                  className={`terminal-tab${selected ? ' is-active' : ''}`}
+                  role="tab"
+                  aria-selected={selected}
+                  {...(selected ? { 'aria-current': 'page' as const } : {})}
+                >
+                  <button
+                    type="button"
+                    className="terminal-tab-button"
+                    onClick={() => setActiveId(tab.id)}
+                  >
+                    <TerminalSquare aria-hidden="true" size={14} />
+                    <span>{tab.title}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="terminal-tab-close"
+                    aria-label={t('terminal.closeTab')}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      closeTab(tab.id);
+                    }}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            className="terminal-icon-button"
+            aria-label={t('terminal.new')}
+            onClick={addTab}
+          >
+            <Plus size={16} />
+          </button>
+          {activeTab ? (
+            <small className="terminal-cwd" title={workingDirectory}>
+              {workingDirectory}
+            </small>
+          ) : null}
         </div>
         <button
           aria-label={t('common.close')}
@@ -256,7 +420,18 @@ export function TerminalDock({ open, onClose, cwd, workingDirectory }: TerminalD
           <X size={16} />
         </button>
       </div>
-      <div className="terminal-xterm" ref={hostRef} />
+      <div className="terminal-panes" ref={panesRef}>
+        {tabs.map((tab) => (
+          <div
+            key={tab.id}
+            className={`terminal-pane${tab.id === activeId ? ' is-active' : ''}`}
+            role="tabpanel"
+            aria-hidden={tab.id !== activeId}
+          >
+            <TerminalSessionPane sessionId={tab.id} cwd={cwd} active={tab.id === activeId} />
+          </div>
+        ))}
+      </div>
     </section>
   );
 }

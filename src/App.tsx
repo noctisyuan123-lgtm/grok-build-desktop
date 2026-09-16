@@ -11,7 +11,7 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { openPath, openUrl } from '@tauri-apps/plugin-opener';
-import { Globe2, PanelRight, TerminalSquare } from 'lucide-react';
+import { Globe2, TerminalSquare } from 'lucide-react';
 import './App.css';
 import { cancelRun, enqueueRun, ensureStreamListenersAttached, prewarmRun } from './lib/grok';
 import { onDocumentLinkClick } from './lib/externalLinks';
@@ -1333,9 +1333,8 @@ function App() {
     if (next && target === 'preview') void refreshStaticPreview();
   }
 
-  // Top-right "panels" menu — Preview / Context / Terminal / Tools, each opens
-  // its panel (Claude-style). A ✓ marks the currently-open panel. Anchored
-  // under the button.
+  // Top-right "panels" menu — Preview / Terminal. A ✓ marks the currently-open
+  // panel. Anchored under the button.
   function openPanelMenu(e: React.MouseEvent) {
     e.preventDefault();
     const b = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -1348,12 +1347,6 @@ function App() {
           icon: <Globe2 size={15} />,
           shortcut: previewOpen ? '✓' : undefined,
           onClick: () => togglePanel('preview'),
-        },
-        {
-          label: 'Context inspector',
-          icon: <PanelRight size={15} />,
-          shortcut: contextOpen ? '✓' : undefined,
-          onClick: () => togglePanel('context'),
         },
         {
           label: 'Terminal',

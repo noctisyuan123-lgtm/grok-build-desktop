@@ -377,7 +377,7 @@ export const en = {
   'titleBar.toLightTitle': 'Switch to light mode (⌘⇧L)',
   'titleBar.toDarkTitle': 'Switch to dark mode (⌘⇧L)',
   'titleBar.panelsAria': 'Open panels menu',
-  'titleBar.panelsTitle': 'Panels — Preview, Context, Terminal',
+  'titleBar.panelsTitle': 'Panels — Preview, Terminal',
 
   // ── Workspace status bar ──────────────────────────────────────────────────
   'workspace.ariaLabel': 'Workspace status',
@@ -396,6 +396,8 @@ export const en = {
 
   // ── Terminal dock ─────────────────────────────────────────────────────────
   'terminal.title': 'Terminal',
+  'terminal.new': 'New terminal',
+  'terminal.closeTab': 'Close terminal',
 
   // ── Toolbelt (developer utilities) ────────────────────────────────────────
   'toolbelt.ariaLabel': 'Developer tools',

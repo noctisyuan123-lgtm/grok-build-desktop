@@ -23,8 +23,7 @@ export function TitleBar({ messages, codingCwd, anyPanelOpen, openPanelMenu }: T
           compact
           className="context-usage-titlebar"
         />
-        {/* Panels menu — Preview / Context / Terminal / Tools, each opens
-                its panel (Claude-Desktop-style). */}
+        {/* Panels menu — Preview / Terminal. */}
         <button
           className={`detail-toggle${anyPanelOpen ? ' active' : ''}`}
           type="button"
