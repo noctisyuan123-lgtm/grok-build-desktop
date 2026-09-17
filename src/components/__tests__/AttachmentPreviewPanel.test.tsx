@@ -21,6 +21,29 @@ describe('AttachmentPreviewPanel', () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it('renders a video player in the same lightbox as images', () => {
+    const attachment = {
+      id: 'video-1',
+      name: 'clip.mp4',
+      mimeType: 'video/mp4',
+      sizeBytes: 2048,
+      dataUrl: 'data:video/mp4;base64,AAAA',
+    };
+
+    const { container } = render(
+      <AttachmentPreviewPanel attachment={attachment} onClose={() => undefined} />,
+    );
+
+    expect(container.querySelector('.attachment-lightbox.open')).not.toBeNull();
+    expect(container.querySelector('.attachment-preview-panel')).toBeNull();
+    const video = container.querySelector('video.attachment-lightbox-video');
+    expect(video).not.toBeNull();
+    expect(video).toHaveAttribute('src', attachment.dataUrl);
+    expect(video).toHaveAttribute('controls');
+    expect(video).toHaveClass('attachment-lightbox-image');
+    expect(screen.queryByText('This file has no inline preview.')).toBeNull();
+  });
+
   it('renders an image with a download action', () => {
     const attachment = {
       id: 'image-1',

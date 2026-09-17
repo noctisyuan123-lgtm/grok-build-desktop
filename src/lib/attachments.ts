@@ -93,6 +93,62 @@ export function formatAttachmentSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const VIDEO_EXT = /\.(3gp|avi|m4v|mkv|mov|mp4|mpeg|mpg|ogv|webm|wmv)$/i;
+
+export function isVideoAttachment(attachment: { mimeType: string; name: string }): boolean {
+  if (attachment.mimeType.startsWith('video/')) return true;
+  if (attachment.mimeType && attachment.mimeType !== 'application/octet-stream') return false;
+  return VIDEO_EXT.test(attachment.name);
+}
+
+/** Disk rehydrate for one session. Keep in-memory just-sent bytes; add missing siblings. */
+export function mergeHydratedAttachments(
+  current: Record<string, ComposerAttachment[]>,
+  loaded: Array<{ messageId: string; attachment: ComposerAttachment } | null>,
+): Record<string, ComposerAttachment[]> {
+  const grouped: Record<string, ComposerAttachment[]> = {};
+  for (const item of loaded) {
+    if (!item) continue;
+    const bucket = grouped[item.messageId];
+    if (bucket) bucket.push(item.attachment);
+    else grouped[item.messageId] = [item.attachment];
+  }
+
+  const next = { ...current };
+  for (const messageId of Object.keys(grouped)) {
+    const incoming = grouped[messageId];
+    const existing = next[messageId];
+    if (!existing) {
+      next[messageId] = incoming;
+      continue;
+    }
+
+    const byId = new Map(existing.map((attachment) => [attachment.id, attachment]));
+    for (const attachment of incoming) {
+      const prev = byId.get(attachment.id);
+      if (!prev) {
+        byId.set(attachment.id, attachment);
+      } else if (!prev.dataUrl && attachment.dataUrl) {
+        byId.set(attachment.id, { ...prev, dataUrl: attachment.dataUrl });
+      }
+    }
+
+    const merged: ComposerAttachment[] = [];
+    const seen = new Set<string>();
+    for (const attachment of existing) {
+      merged.push(byId.get(attachment.id) ?? attachment);
+      seen.add(attachment.id);
+    }
+    for (const attachment of incoming) {
+      if (seen.has(attachment.id)) continue;
+      merged.push(attachment);
+      seen.add(attachment.id);
+    }
+    next[messageId] = merged;
+  }
+  return next;
+}
+
 /** Convert our preview-friendly data URL into the ACP content block schema
  * accepted by Grok CLI's --prompt-json flag. ACP wants raw base64 in `data`
  * / `blob`; it does not accept Responses API `input_image` blocks. */

@@ -74,6 +74,7 @@ import { t } from './i18n';
 import { makeId } from './app/format';
 import { buildConversationReplayBlock, buildGrokArgs } from './app/grokArgs';
 import {
+  mergeHydratedAttachments,
   toPersistedAttachmentRef,
   type ComposerAttachment,
   type PersistedAttachmentRef,
@@ -1304,16 +1305,7 @@ function App() {
       }),
     ).then((loaded) => {
       if (cancelled) return;
-      setMessageAttachments((current) => {
-        const next = { ...current };
-        for (const item of loaded) {
-          if (!item) continue;
-          // A just-sent attachment has the authoritative in-memory data URL;
-          // disk hydration should only fill a missing entry.
-          if (!next[item.messageId]) next[item.messageId] = [item.attachment];
-        }
-        return next;
-      });
+      setMessageAttachments((current) => mergeHydratedAttachments(current, loaded));
     });
     return () => {
       cancelled = true;

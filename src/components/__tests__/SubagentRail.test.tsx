@@ -123,16 +123,65 @@ describe('SubagentRail', () => {
   it('collapses to a compact card and restores from the header', async () => {
     const user = userEvent.setup();
     streamStore.patchRun('run-1', { state: 'running', traces: [agent()] });
+    const messages = [message('run-1')];
     render(
-      <SubagentUiProvider messages={[message('run-1')]}>
-        <SubagentRail onStopTask={() => {}} />
+      <SubagentUiProvider messages={messages}>
+        <SubagentRail messages={messages} onStopTask={() => {}} />
       </SubagentUiProvider>,
     );
 
     await user.click(screen.getByRole('button', { name: 'Collapse activity' }));
     expect(screen.queryByText('Active')).toBeNull();
-    expect(screen.getByText('1 working')).toBeInTheDocument();
+    const counts = document.querySelector('.subagent-rail-counts');
+    expect(counts?.querySelectorAll('.subagent-rail-count')).toHaveLength(2);
+    expect(counts?.querySelectorAll('.subagent-rail-count-num')[0]).toHaveTextContent('1');
+    expect(counts?.querySelectorAll('.subagent-rail-count-num')[1]).toHaveTextContent('0');
+    expect(screen.getByText('agents')).toBeInTheDocument();
+    expect(screen.getByText('tasks')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Expand activity' }));
     expect(screen.getByText('Active')).toBeInTheDocument();
+  });
+
+  it('stacks agent and task counts while collapsed, then restores Tasks and Active', async () => {
+    const user = userEvent.setup();
+    const messages = [message('run-1')];
+    streamStore.patchRun('run-1', {
+      state: 'running',
+      traces: [
+        agent(),
+        {
+          key: 'tool:sleep',
+          kind: 'tool',
+          label: 'Wait for build',
+          command: 'sleep 60',
+          status: 'running',
+          startedAt: Date.now(),
+          endedAt: null,
+        },
+      ],
+    });
+    render(
+      <SubagentUiProvider messages={messages}>
+        <SubagentRail messages={messages} onStopTask={() => {}} />
+      </SubagentUiProvider>,
+    );
+
+    expect(screen.getByText('Active')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Tasks/ })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Collapse activity' }));
+    expect(screen.queryByText('Active')).toBeNull();
+    expect(screen.queryByRole('heading', { name: /Tasks/ })).toBeNull();
+    const counts = document.querySelector('.subagent-rail-counts');
+    expect(counts).not.toBeNull();
+    expect(counts!.querySelectorAll('.subagent-rail-count')).toHaveLength(2);
+    expect(counts!.querySelectorAll('.subagent-rail-count-num')[0]).toHaveTextContent('1');
+    expect(counts!.querySelectorAll('.subagent-rail-count-num')[1]).toHaveTextContent('1');
+    expect(screen.getByText('agents')).toBeInTheDocument();
+    expect(screen.getByText('tasks')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Expand activity' }));
+    expect(screen.getByText('Active')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Tasks/ })).toBeInTheDocument();
   });
 });

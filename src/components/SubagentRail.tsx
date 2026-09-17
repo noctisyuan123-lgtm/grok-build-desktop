@@ -17,6 +17,7 @@ import {
   partitionSessionSubagents,
   type SessionSubagent,
 } from '../lib/sessionSubagents';
+import { collectSessionTasks, collectWatchingMonitors } from '../lib/sessionTasks';
 import { t } from '../i18n';
 import { SubagentInspector } from './SubagentFloat';
 import { SubagentUiContext, useSubagentUi, type SubagentOpenTarget } from './subagentUiContext';
@@ -124,14 +125,52 @@ export function SubagentRail({
     return () => ui.registerIgnoreNode('rail', null);
   }, [ui]);
 
+  const taskFingerprint = useSyncExternalStore(
+    streamStore.subscribe,
+    () =>
+      JSON.stringify(
+        messages.map((message) => {
+          const snap = streamStore.getRunSnapshot(message.runId ?? '');
+          return {
+            watching: snap?.watching ?? false,
+            watchingLabel: snap?.watchingLabel ?? null,
+            watchingStartedAt: snap?.watchingStartedAt ?? null,
+            traces: (snap?.traces ?? []).map(
+              ({ key, kind, label, command, status, startedAt, endedAt }) => ({
+                key,
+                kind,
+                label,
+                command,
+                status,
+                startedAt,
+                endedAt,
+              }),
+            ),
+          };
+        }),
+      ),
+    () => '[]',
+  );
+  const taskCount = useMemo(() => {
+    void taskFingerprint;
+    const now = Date.now();
+    const live = new Map(
+      messages.map((message) => [
+        message.runId ?? `msg:${message.id}`,
+        streamStore.getRunSnapshot(message.runId ?? '')?.traces ?? [],
+      ]),
+    );
+    return (
+      collectWatchingMonitors(messages, now).length +
+      collectSessionTasks(messages, live, now).length
+    );
+  }, [messages, taskFingerprint]);
+
   if (!ui) return null;
 
   const { active, done } = partitionSessionSubagents(ui.items);
   const collapsed = ui.collapsed;
-  const summary =
-    collapsed && active.length > 0
-      ? t('subagent.railWorkingCount', { count: active.length })
-      : `${ui.items.length} agents`;
+  const agentCount = ui.items.length;
 
   return (
     <aside
@@ -147,7 +186,25 @@ export function SubagentRail({
         onClick={() => ui.setCollapsed(!collapsed)}
       >
         <span className="subagent-rail-title">{t('subagent.railTitle')}</span>
-        <span className="subagent-rail-count">{summary}</span>
+        {collapsed ? (
+          <span
+            className="subagent-rail-counts"
+            aria-label={`${t('subagent.railAgentCount', { count: agentCount })}, ${t('subagent.railTaskCount', { count: taskCount })}`}
+          >
+            <span className="subagent-rail-count">
+              <span className="subagent-rail-count-num">{agentCount}</span>
+              <span className="subagent-rail-count-label">{t('subagent.railAgentLabel')}</span>
+            </span>
+            <span className="subagent-rail-count">
+              <span className="subagent-rail-count-num">{taskCount}</span>
+              <span className="subagent-rail-count-label">{t('subagent.railTaskLabel')}</span>
+            </span>
+          </span>
+        ) : (
+          <span className="subagent-rail-count">
+            {t('subagent.railAgentCount', { count: agentCount })}
+          </span>
+        )}
       </button>
       {collapsed ? null : (
         <div className="subagent-rail-body">

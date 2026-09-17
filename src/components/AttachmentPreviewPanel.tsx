@@ -1,6 +1,6 @@
 import { Download, FileText, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import type { ComposerAttachment } from '../lib/attachments';
+import { isVideoAttachment, type ComposerAttachment } from '../lib/attachments';
 import { t } from '../i18n';
 
 interface Props {
@@ -75,10 +75,11 @@ export function AttachmentPreviewPanel({ attachment, onClose }: Props) {
   const open = Boolean(attachment);
   const isImage = attachment?.mimeType.startsWith('image/') ?? false;
   const isPdf = attachment?.mimeType === 'application/pdf';
+  const isVideo = attachment ? isVideoAttachment(attachment) : false;
 
-  // Codex / ChatGPT-style image lightbox: dimmed full-window scrim, centered
-  // contain image, floating close — not the right-side document panel.
-  if (isImage && attachment) {
+  // Codex / ChatGPT-style lightbox: dimmed full-window scrim, centered
+  // contain media, floating close — not the right-side document panel.
+  if ((isImage || isVideo) && attachment) {
     return (
       <div
         aria-hidden={!open}
@@ -111,11 +112,21 @@ export function AttachmentPreviewPanel({ attachment, onClose }: Props) {
           <Download aria-hidden="true" size={16} />
         </a>
         <div className="attachment-lightbox-stage">
-          <img
-            alt={t('attachmentPreview.imageAlt', { name: attachment.name })}
-            className="attachment-lightbox-image"
-            src={attachment.dataUrl}
-          />
+          {isVideo ? (
+            <video
+              aria-label={t('attachmentPreview.imageAlt', { name: attachment.name })}
+              className="attachment-lightbox-image attachment-lightbox-video"
+              controls
+              playsInline
+              src={attachment.dataUrl}
+            />
+          ) : (
+            <img
+              alt={t('attachmentPreview.imageAlt', { name: attachment.name })}
+              className="attachment-lightbox-image"
+              src={attachment.dataUrl}
+            />
+          )}
         </div>
       </div>
     );

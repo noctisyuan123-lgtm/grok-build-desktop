@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown } from 'lucide-react';
+import { ArrowDown, FileText } from 'lucide-react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { MessageItem, MarkdownSegment } from './MessageItem';
 import { LongTextMessage } from './LongTextMessage';
@@ -10,7 +10,11 @@ import { useSessionActiveRunProgress } from '../hooks/useActiveRun';
 import { t } from '../i18n';
 import type { TraceEvent } from '../lib/traceParser';
 import type { TranscriptSegment } from '../lib/streamStore';
-import type { ComposerAttachment } from '../lib/attachments';
+import {
+  formatAttachmentSize,
+  isVideoAttachment,
+  type ComposerAttachment,
+} from '../lib/attachments';
 import type { ChatMessageStatus } from '../app/types';
 
 const AT_BOTTOM_PX = 24;
@@ -61,6 +65,63 @@ interface Props {
 
 function scrollerAtBottom(el: HTMLElement): boolean {
   return el.scrollHeight - el.clientHeight - el.scrollTop <= AT_BOTTOM_PX;
+}
+
+function attachmentChipKind(attachment: ComposerAttachment): 'image' | 'video' | 'file' {
+  if (attachment.mimeType.startsWith('image/')) return 'image';
+  if (isVideoAttachment(attachment)) return 'video';
+  return 'file';
+}
+
+function AttachmentChip({
+  attachment,
+  onClick,
+}: {
+  attachment: ComposerAttachment;
+  onClick?: (attachment: ComposerAttachment) => void;
+}) {
+  const kind = attachmentChipKind(attachment);
+  const sizeLabel = attachment.sizeBytes > 0 ? formatAttachmentSize(attachment.sizeBytes) : null;
+  return (
+    <button
+      aria-label={`Preview ${attachment.name}`}
+      className={`message-attachment-trigger is-${kind}`}
+      title={`Preview ${attachment.name}`}
+      type="button"
+      onClick={() => onClick?.(attachment)}
+    >
+      {kind === 'image' ? (
+        <img className="message-attachment-image" src={attachment.dataUrl} alt={attachment.name} />
+      ) : kind === 'video' ? (
+        <>
+          <span className="message-attachment-video-wrap">
+            <video
+              className="message-attachment-video"
+              src={attachment.dataUrl}
+              muted
+              playsInline
+              preload="metadata"
+            />
+            <span className="message-attachment-play" aria-hidden="true" />
+          </span>
+          <span className="message-attachment-meta">
+            <span className="message-attachment-name">{attachment.name}</span>
+            {sizeLabel ? <span className="message-attachment-size">{sizeLabel}</span> : null}
+          </span>
+        </>
+      ) : (
+        <>
+          <span className="message-attachment-icon">
+            <FileText size={14} />
+          </span>
+          <span className="message-attachment-meta">
+            <span className="message-attachment-name">{attachment.name}</span>
+            {sizeLabel ? <span className="message-attachment-size">{sizeLabel}</span> : null}
+          </span>
+        </>
+      )}
+    </button>
+  );
 }
 
 export function MessageList({
@@ -276,26 +337,11 @@ export function MessageList({
                 {msg.attachments?.length ? (
                   <div className="message-attachments" aria-label="Attachments">
                     {msg.attachments.map((attachment) => (
-                      <button
-                        aria-label={`Preview ${attachment.name}`}
-                        className={`message-attachment-trigger${
-                          attachment.mimeType.startsWith('image/') ? ' is-image' : ' is-file'
-                        }`}
+                      <AttachmentChip
                         key={attachment.id}
-                        title={`Preview ${attachment.name}`}
-                        type="button"
-                        onClick={() => onAttachmentClick?.(attachment)}
-                      >
-                        {attachment.mimeType.startsWith('image/') ? (
-                          <img
-                            className="message-attachment-image"
-                            src={attachment.dataUrl}
-                            alt={attachment.name}
-                          />
-                        ) : (
-                          <span className="message-attachment-file">{attachment.name}</span>
-                        )}
-                      </button>
+                        attachment={attachment}
+                        onClick={onAttachmentClick}
+                      />
                     ))}
                   </div>
                 ) : null}

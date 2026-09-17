@@ -6044,6 +6044,32 @@ body[data-theme='light'] .hljs-comment {
   font-weight: 500;
 }
 
+.subagent-rail.is-collapsed .subagent-rail-toggle {
+  align-items: center;
+}
+
+.subagent-rail-counts {
+  column-gap: 6px;
+  display: grid;
+  grid-template-columns: max-content auto;
+  justify-items: start;
+  line-height: 1.25;
+  row-gap: 1px;
+}
+
+/* One shared number column so 1 / 10 line up, not the trailing "s". */
+.subagent-rail-counts .subagent-rail-count {
+  display: contents;
+}
+
+.subagent-rail-count-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.subagent-rail-count-label {
+  min-width: 0;
+}
+
 .subagent-rail.is-live .subagent-rail-count {
   color: var(--grok-text-1);
 }
@@ -8926,15 +8952,20 @@ select:focus-visible {
   justify-content: flex-end;
   margin-bottom: 8px;
   max-width: min(74%, 920px);
+  min-width: 0;
+  width: auto;
 }
 
 .message-attachment-trigger {
   appearance: none;
+  background: transparent;
   border: 0;
   cursor: zoom-in;
-  display: block;
+  display: flex;
+  flex: 0 1 auto;
   margin: 0;
-  max-width: 100%;
+  max-width: 230px;
+  min-width: 0;
   padding: 0;
 }
 
@@ -8943,9 +8974,28 @@ select:focus-visible {
   outline-offset: 3px;
 }
 
+.message-attachment-trigger.is-image {
+  flex-shrink: 0;
+  max-width: none;
+}
+
+.message-attachment-trigger.is-video,
 .message-attachment-trigger.is-file {
+  align-items: center;
+  background: #222;
+  border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 10px;
   cursor: pointer;
+  gap: 7px;
+  max-width: 230px;
+  min-height: 42px;
+  overflow: hidden;
+  padding: 5px 8px 5px 5px;
+}
+
+.message-attachment-trigger.is-video {
+  cursor: zoom-in;
+  max-width: 240px;
 }
 
 .message-attachment-image {
@@ -8953,23 +9003,93 @@ select:focus-visible {
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 12px;
   display: block;
+  flex-shrink: 0;
   height: 88px;
   object-fit: cover;
   width: 88px;
 }
 
+.message-attachment-video-wrap {
+  background: #202020;
+  border-radius: 8px;
+  flex: 0 0 88px;
+  height: 88px;
+  overflow: hidden;
+  position: relative;
+  width: 88px;
+}
+
+.message-attachment-video {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.message-attachment-play {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.32);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  pointer-events: none;
+  position: absolute;
+}
+
+.message-attachment-play::after {
+  border-color: transparent transparent transparent #fff;
+  border-style: solid;
+  border-width: 6px 0 6px 10px;
+  content: '';
+  height: 0;
+  margin-left: 2px;
+  width: 0;
+}
+
+.message-attachment-icon {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.045);
+  border-radius: 5px;
+  color: var(--text-2);
+  display: flex;
+  flex: 0 0 30px;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+
+.message-attachment-meta {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.message-attachment-name {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-attachment-size {
+  color: var(--text-3);
+  font-size: 9px;
+}
+
 .message-attachment-trigger:hover .message-attachment-image,
-.message-attachment-trigger:hover .message-attachment-file {
+.message-attachment-trigger:hover.is-video,
+.message-attachment-trigger:hover.is-file {
   border-color: var(--accent);
 }
 
 .message-attachment-file {
-  background: #222;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 10px;
-  color: var(--text-muted);
-  font-size: 12px;
-  padding: 7px 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .attachment-preview-panel {
@@ -8986,7 +9106,13 @@ select:focus-visible {
   right: 14px;
   top: 70px;
   width: min(460px, calc(100% - 28px));
-  z-index: 24;
+  /* Above Agents/Tasks rail (90); below image lightbox (220) and modals (300+). */
+  z-index: 200;
+}
+
+/* Expanded rail is a cousin inside .conversation-panel; collapsed is max-content. */
+.app-shell.has-task-rail .conversation-panel:has(.subagent-rail:not(.is-collapsed)) ~ .attachment-preview-panel {
+  right: calc(var(--task-rail-width, 320px) + 28px);
 }
 
 .attachment-preview-panel.open {
@@ -9065,6 +9191,14 @@ select:focus-visible {
   background: #fff;
   border: 0;
   min-height: 520px;
+  width: 100%;
+}
+
+.attachment-preview-video {
+  background: #000;
+  display: block;
+  max-height: 100%;
+  max-width: 100%;
   width: 100%;
 }
 
@@ -9173,6 +9307,9 @@ select:focus-visible {
   user-select: none;
   width: auto;
 }
+.attachment-lightbox-video {
+  background: #000;
+}
 @keyframes attachment-lightbox-zoom {
   from { opacity: 0; transform: scale(0.98); }
   to { opacity: 1; transform: scale(1); }
@@ -9226,7 +9363,7 @@ select:focus-visible {
 }
 
 /* Codex-style long paste disclosure: keep the transcript compact, then open
-   the original text in an editor-like, line-numbered surface on demand. */
+   the original text as conversation markdown on demand. */
 .long-text-pill {
   align-items: center;
   background: #292929;
@@ -9333,43 +9470,16 @@ select:focus-visible {
   color: var(--conversation-text);
 }
 
-.long-text-code {
-  display: grid;
-  font-family:
-    'JetBrains Mono Variable', 'SF Mono', Monaco, Menlo, Consolas, 'Liberation Mono', monospace;
-  font-size: 13px;
-  grid-template-columns: auto minmax(max-content, 1fr);
-  line-height: 1.65;
+.long-text-markdown {
+  color: var(--conversation-text);
   min-height: 0;
   overflow: auto;
+  padding: 18px 28px 28px;
 }
 
-.long-text-line-numbers,
-.long-text-content {
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  color: #f0f0f0;
-  margin: 0;
-  min-height: 100%;
-  padding: 12px 20px;
-  white-space: pre;
-}
-
-.long-text-line-numbers {
-  background: #181818;
-  color: #858585;
-  padding-left: 18px;
-  padding-right: 14px;
-  position: sticky;
-  left: 0;
-  text-align: right;
-  user-select: none;
-  z-index: 1;
-}
-
-.long-text-content {
-  padding-left: 10px;
+.long-text-markdown > .message-body {
+  max-width: none;
+  width: 100%;
 }
 
 .theme-light .long-text-pill {
@@ -9383,9 +9493,7 @@ select:focus-visible {
 }
 
 .theme-light .long-text-viewer,
-.theme-light .long-text-line-numbers,
-:root[data-theme='light'] .long-text-viewer,
-:root[data-theme='light'] .long-text-line-numbers {
+:root[data-theme='light'] .long-text-viewer {
   background: #fbfaf7;
 }
 
@@ -9400,14 +9508,9 @@ select:focus-visible {
   background: #fbfaf7;
 }
 
-.theme-light .long-text-content,
-:root[data-theme='light'] .long-text-content {
+.theme-light .long-text-markdown,
+:root[data-theme='light'] .long-text-markdown {
   color: #24221e;
-}
-
-.theme-light .long-text-line-numbers,
-:root[data-theme='light'] .long-text-line-numbers {
-  color: #8d8981;
 }
 
 .message.message-assistant {
@@ -10130,6 +10233,10 @@ body,
   max-width: 100%;
   width: 100%;
 }
+.message-attachments {
+  max-width: min(74%, 920px);
+  width: auto;
+}
 .context-usage-ring,
 .context-usage-ring:hover,
 .context-usage-ring.is-open {
@@ -10716,13 +10823,20 @@ body,
   border: 1px solid var(--border-2);
   box-shadow: 0 1px 2px rgba(31, 29, 25, 0.06);
 }
-.theme-light .message-attachment-image {
+.theme-light .message-attachment-image,
+.theme-light .message-attachment-video-wrap {
   background: var(--bg-2);
   border-color: var(--border-2);
 }
+.theme-light .message-attachment-trigger.is-video,
+.theme-light .message-attachment-trigger.is-file,
 .theme-light .message-attachment-file {
   background: var(--bg-3);
   border-color: var(--border);
+}
+.theme-light .message-attachment-icon {
+  background: rgba(31, 29, 25, 0.06);
+  color: var(--text-2);
 }
 .theme-light .message-worked {
   border-bottom-color: rgba(31, 29, 25, 0.12);

@@ -186,6 +186,59 @@ describe('MessageList session isolation', () => {
     expect(onAttachmentClick).toHaveBeenCalledWith(attachment);
   });
 
+  it('renders a video thumb and an image together without a full-width file-only chip', () => {
+    const longName =
+      '2026-07-22 18-59-09_VibeCoding大赏 _ 如果降....#数据可视化 #粒子特效_video.mp4';
+    const video = {
+      id: 'video-1',
+      name: longName,
+      mimeType: 'video/mp4',
+      sizeBytes: 4096,
+      dataUrl: 'data:video/mp4;base64,AAAA',
+    };
+    const image = {
+      id: 'image-1',
+      name: 'frame.png',
+      mimeType: 'image/png',
+      sizeBytes: 128,
+      dataUrl: 'data:image/png;base64,BBBB',
+    };
+    const onAttachmentClick = vi.fn();
+
+    const { container } = render(
+      <VirtuosoMockContext.Provider value={{ viewportHeight: 800, itemHeight: 64 }}>
+        <MessageList
+          messages={[
+            {
+              id: 'user-mix',
+              runId: '',
+              role: 'user',
+              userText: 'Both files',
+              attachments: [video, image],
+            },
+          ]}
+          onAttachmentClick={onAttachmentClick}
+        />
+      </VirtuosoMockContext.Provider>,
+    );
+
+    const videoEl = container.querySelector('video.message-attachment-video') as HTMLVideoElement | null;
+    const imageEl = container.querySelector('img.message-attachment-image');
+    expect(videoEl).toBeTruthy();
+    expect(imageEl).toBeTruthy();
+    expect(videoEl?.muted).toBe(true);
+    expect(videoEl?.getAttribute('preload')).toBe('metadata');
+    expect(videoEl?.controls).toBe(false);
+
+    const videoChip = screen.getByRole('button', { name: `Preview ${longName}` });
+    expect(videoChip.querySelector(':scope > .message-attachment-file:only-child')).toBeNull();
+    expect(videoChip.querySelector('.message-attachment-name')).toHaveTextContent(longName);
+    expect(videoChip).toHaveClass('is-video');
+
+    fireEvent.click(videoChip);
+    expect(onAttachmentClick).toHaveBeenCalledWith(video);
+  });
+
   it('does not install a polling scroll loop while a response streams', () => {
     const setIntervalSpy = vi.spyOn(window, 'setInterval');
     streamStore.patchRun('run-streaming', { state: 'running', textChars: 12 });
