@@ -437,6 +437,7 @@ export function MessageList({
           // DOM while scrolling; this keeps the callback bound to the message
           // represented by this render rather than an index or mutable lookup.
           const assistantId = msg.id;
+          const isTranscriptTip = index === messages.length - 1;
           const followsAssistant =
             index > 0 && messages[index - 1]?.role === 'assistant'
               ? ' message-assistant-followup'
@@ -459,6 +460,7 @@ export function MessageList({
                 canFork={Boolean(msg.canFork)}
                 showFork={Boolean(msg.showFork)}
                 showCopy={msg.showCopy !== false}
+                isTranscriptTip={isTranscriptTip}
                 onUndo={
                   assistantId && onUndoAssistant ? () => onUndoAssistant(assistantId) : undefined
                 }

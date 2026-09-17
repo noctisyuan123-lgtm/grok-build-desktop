@@ -59,6 +59,12 @@ export interface RunSnapshot {
   /** ACP session that owns the parent turn; child sessions are kept on traces. */
   rootSessionId?: string | null;
   error: string | null;
+  /**
+   * Network Retry / Continue was used. The run stays `failed` for history,
+   * but the recovery chrome hides so a live follow-up is not stacked under
+   * a stale "Connection lost" / Retry label.
+   */
+  failureDismissed?: boolean;
   /** Authoritative token totals emitted by Grok; null until the first usage line. */
   usage: RunUsage | null;
   /** Auto-compaction status for the current turn, if any. */
@@ -264,6 +270,7 @@ class StreamStore {
       sessionId: null,
       rootSessionId: null,
       error: null,
+      failureDismissed: false,
       usage: null,
       compaction: null,
       traces: [],

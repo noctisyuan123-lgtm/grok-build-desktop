@@ -31,6 +31,8 @@ interface Props {
   status?: ChatMessageStatus;
   onRetryTurn?: () => void;
   onContinueTurn?: () => void;
+  /** False once a later turn exists — recovery chrome is only for the tip. */
+  isTranscriptTip?: boolean;
 }
 
 function MessageItemImpl({
@@ -50,6 +52,7 @@ function MessageItemImpl({
   status,
   onRetryTurn,
   onContinueTurn,
+  isTranscriptTip = true,
 }: Props) {
   const snap = useRunSnapshot(runId);
   const html = useRunHtml(runId);
@@ -245,7 +248,7 @@ function MessageItemImpl({
       {/* A failed/cancelled run must say so in the message area — the only
           other surface (StatusBar suffix) resets to "idle" as soon as the
           queue moves on, leaving a silent empty bubble. */}
-      {snap.state === 'failed' ? (
+      {snap.state === 'failed' && isTranscriptTip && !snap.failureDismissed ? (
         <NetworkFailureBlock
           error={snap.error}
           hasPartial={

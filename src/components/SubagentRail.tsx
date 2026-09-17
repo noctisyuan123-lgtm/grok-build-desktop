@@ -171,6 +171,8 @@ export function SubagentRail({
   const { active, done } = partitionSessionSubagents(ui.items);
   const collapsed = ui.collapsed;
   const agentCount = ui.items.length;
+  const hasActivity = agentCount > 0 || taskCount > 0;
+  const countsLabel = `${t('subagent.railAgentCount', { count: agentCount })}, ${t('subagent.railTaskCount', { count: taskCount })}`;
 
   return (
     <aside
@@ -187,22 +189,17 @@ export function SubagentRail({
       >
         <span className="subagent-rail-title">{t('subagent.railTitle')}</span>
         {collapsed ? (
-          <span
-            className="subagent-rail-counts"
-            aria-label={`${t('subagent.railAgentCount', { count: agentCount })}, ${t('subagent.railTaskCount', { count: taskCount })}`}
-          >
-            <span className="subagent-rail-count">
-              <span className="subagent-rail-count-num">{agentCount}</span>
-              <span className="subagent-rail-count-label">{t('subagent.railAgentLabel')}</span>
-            </span>
-            <span className="subagent-rail-count">
-              <span className="subagent-rail-count-num">{taskCount}</span>
-              <span className="subagent-rail-count-label">{t('subagent.railTaskLabel')}</span>
-            </span>
-          </span>
+          hasActivity ? (
+            <span className="subagent-rail-activity-dot" role="status" aria-label={countsLabel} />
+          ) : null
         ) : (
-          <span className="subagent-rail-count">
-            {t('subagent.railAgentCount', { count: agentCount })}
+          <span className="subagent-rail-counts">
+            <span className="subagent-rail-count">
+              {t('subagent.railAgentCount', { count: agentCount })}
+            </span>
+            <span className="subagent-rail-count">
+              {t('subagent.railTaskCount', { count: taskCount })}
+            </span>
           </span>
         )}
       </button>

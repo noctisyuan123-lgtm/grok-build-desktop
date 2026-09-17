@@ -5999,7 +5999,9 @@ body[data-theme='light'] .hljs-comment {
 
 .subagent-rail.is-collapsed {
   max-height: none;
-  padding: 6px 8px;
+  min-width: 0;
+  overflow: visible;
+  padding: 5px 10px;
   width: max-content;
 }
 
@@ -6046,28 +6048,35 @@ body[data-theme='light'] .hljs-comment {
 
 .subagent-rail.is-collapsed .subagent-rail-toggle {
   align-items: center;
+  gap: 0;
+  justify-content: center;
+  padding: 0;
 }
 
 .subagent-rail-counts {
-  column-gap: 6px;
-  display: grid;
-  grid-template-columns: max-content auto;
-  justify-items: start;
-  line-height: 1.25;
-  row-gap: 1px;
+  align-items: baseline;
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  white-space: nowrap;
 }
 
-/* One shared number column so 1 / 10 line up, not the trailing "s". */
-.subagent-rail-counts .subagent-rail-count {
-  display: contents;
+.subagent-rail-activity-dot {
+  /* Same Codex blue as conversation markdown links (.app-shell --accent). */
+  background: var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px #242424;
+  height: 8px;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  top: 0;
+  transform: translate(28%, -28%);
+  width: 8px;
 }
 
-.subagent-rail-count-num {
-  font-variant-numeric: tabular-nums;
-}
-
-.subagent-rail-count-label {
-  min-width: 0;
+.theme-light .subagent-rail-activity-dot {
+  box-shadow: 0 0 0 2px #f6f3ec;
 }
 
 .subagent-rail.is-live .subagent-rail-count {

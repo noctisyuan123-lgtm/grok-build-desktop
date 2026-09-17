@@ -222,7 +222,9 @@ describe('MessageList session isolation', () => {
       </VirtuosoMockContext.Provider>,
     );
 
-    const videoEl = container.querySelector('video.message-attachment-video') as HTMLVideoElement | null;
+    const videoEl = container.querySelector(
+      'video.message-attachment-video',
+    ) as HTMLVideoElement | null;
     const imageEl = container.querySelector('img.message-attachment-image');
     expect(videoEl).toBeTruthy();
     expect(imageEl).toBeTruthy();
@@ -237,6 +239,38 @@ describe('MessageList session isolation', () => {
 
     fireEvent.click(videoChip);
     expect(onAttachmentClick).toHaveBeenCalledWith(video);
+  });
+
+  it('hides Continue on a disconnected turn once a follow-up assistant is live', () => {
+    streamStore.patchRun('run-lost', {
+      state: 'failed',
+      error: 'ECONNRESET',
+      text: 'half a reply',
+      textChars: 12,
+      startedAt: 1,
+      endedAt: 2,
+    });
+    streamStore.patchRun('run-continue', {
+      state: 'running',
+      startedAt: Date.now(),
+    });
+
+    renderList([
+      { id: 'user-1', runId: 'user-1', role: 'user', userText: 'Prompt' },
+      {
+        id: 'assistant-lost',
+        runId: 'run-lost',
+        role: 'assistant',
+        fallbackText: 'half a reply',
+      },
+      { id: 'assistant-continue', runId: 'run-continue', role: 'assistant' },
+    ]);
+
+    expect(
+      screen.queryByText('Connection lost mid-response. The text above may be incomplete.'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Working for/ })).toBeInTheDocument();
   });
 
   it('does not install a polling scroll loop while a response streams', () => {

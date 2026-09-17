@@ -130,19 +130,24 @@ describe('SubagentRail', () => {
       </SubagentUiProvider>,
     );
 
+    expect(screen.getByText('1 agents')).toBeInTheDocument();
+    expect(screen.getByText('0 tasks')).toBeInTheDocument();
+
     await user.click(screen.getByRole('button', { name: 'Collapse activity' }));
     expect(screen.queryByText('Active')).toBeNull();
-    const counts = document.querySelector('.subagent-rail-counts');
-    expect(counts?.querySelectorAll('.subagent-rail-count')).toHaveLength(2);
-    expect(counts?.querySelectorAll('.subagent-rail-count-num')[0]).toHaveTextContent('1');
-    expect(counts?.querySelectorAll('.subagent-rail-count-num')[1]).toHaveTextContent('0');
-    expect(screen.getByText('agents')).toBeInTheDocument();
-    expect(screen.getByText('tasks')).toBeInTheDocument();
+    expect(screen.queryByText('1 agents')).toBeNull();
+    expect(screen.queryByText('0 tasks')).toBeNull();
+    expect(document.querySelector('.subagent-rail-counts')).toBeNull();
+    const dot = document.querySelector('.subagent-rail-activity-dot');
+    expect(dot).toBeInTheDocument();
+    expect(dot).toHaveAttribute('aria-label', '1 agents, 0 tasks');
     await user.click(screen.getByRole('button', { name: 'Expand activity' }));
     expect(screen.getByText('Active')).toBeInTheDocument();
+    expect(screen.getByText('1 agents')).toBeInTheDocument();
+    expect(screen.getByText('0 tasks')).toBeInTheDocument();
   });
 
-  it('stacks agent and task counts while collapsed, then restores Tasks and Active', async () => {
+  it('uses an activity dot while collapsed, then restores Tasks and Active', async () => {
     const user = userEvent.setup();
     const messages = [message('run-1')];
     streamStore.patchRun('run-1', {
@@ -169,19 +174,38 @@ describe('SubagentRail', () => {
     expect(screen.getByText('Active')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /Tasks/ })).toBeInTheDocument();
 
+    expect(screen.getByText('1 agents')).toBeInTheDocument();
+    expect(screen.getByText('1 tasks')).toBeInTheDocument();
+    expect(document.querySelector('.subagent-rail-counts')?.children).toHaveLength(2);
+
     await user.click(screen.getByRole('button', { name: 'Collapse activity' }));
     expect(screen.queryByText('Active')).toBeNull();
     expect(screen.queryByRole('heading', { name: /Tasks/ })).toBeNull();
-    const counts = document.querySelector('.subagent-rail-counts');
-    expect(counts).not.toBeNull();
-    expect(counts!.querySelectorAll('.subagent-rail-count')).toHaveLength(2);
-    expect(counts!.querySelectorAll('.subagent-rail-count-num')[0]).toHaveTextContent('1');
-    expect(counts!.querySelectorAll('.subagent-rail-count-num')[1]).toHaveTextContent('1');
-    expect(screen.getByText('agents')).toBeInTheDocument();
-    expect(screen.getByText('tasks')).toBeInTheDocument();
+    expect(screen.queryByText('1 agents')).toBeNull();
+    expect(screen.queryByText('1 tasks')).toBeNull();
+    expect(document.querySelector('.subagent-rail-counts')).toBeNull();
+    const dot = document.querySelector('.subagent-rail-activity-dot');
+    expect(dot).toBeInTheDocument();
+    expect(dot).toHaveAttribute('aria-label', '1 agents, 1 tasks');
 
     await user.click(screen.getByRole('button', { name: 'Expand activity' }));
     expect(screen.getByText('Active')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /Tasks/ })).toBeInTheDocument();
+    expect(screen.getByText('1 agents')).toBeInTheDocument();
+    expect(screen.getByText('1 tasks')).toBeInTheDocument();
+  });
+
+  it('hides the collapsed activity dot when the rail is empty', async () => {
+    const user = userEvent.setup();
+    render(
+      <SubagentUiProvider messages={[]}>
+        <SubagentRail onStopTask={() => {}} />
+      </SubagentUiProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Collapse activity' }));
+    expect(document.querySelector('.subagent-rail-activity-dot')).toBeNull();
+    expect(screen.queryByText('0 agents')).toBeNull();
+    expect(screen.queryByText('0 tasks')).toBeNull();
   });
 });

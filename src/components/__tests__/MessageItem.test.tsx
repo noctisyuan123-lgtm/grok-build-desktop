@@ -1282,6 +1282,46 @@ describe('MessageItem rendering states', () => {
     expect(onContinueTurn).toHaveBeenCalledTimes(1);
   });
 
+  it('hides connection-lost recovery after Retry/Continue has started', () => {
+    applyRunEvent('r-net-dismissed', { type: 'text', data: 'half a reply' });
+    applyStateChange('r-net-dismissed', {
+      state: 'Failed',
+      error: 'ECONNRESET',
+      startedAt: 1,
+      endedAt: 2,
+    });
+    streamStore.patchRun('r-net-dismissed', { failureDismissed: true });
+    render(
+      <MessageItem runId="r-net-dismissed" fallbackText="half a reply" onContinueTurn={() => {}} />,
+    );
+    expect(
+      screen.queryByText('Connection lost mid-response. The text above may be incomplete.'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
+  });
+
+  it('hides network recovery chrome when this turn is no longer the transcript tip', () => {
+    applyRunEvent('r-net-old', { type: 'text', data: 'half a reply' });
+    applyStateChange('r-net-old', {
+      state: 'Failed',
+      error: 'ECONNRESET',
+      startedAt: 1,
+      endedAt: 2,
+    });
+    render(
+      <MessageItem
+        runId="r-net-old"
+        fallbackText="half a reply"
+        isTranscriptTip={false}
+        onContinueTurn={() => {}}
+      />,
+    );
+    expect(
+      screen.queryByText('Connection lost mid-response. The text above may be incomplete.'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
+  });
+
   it('shows Working for immediately instead of a starting placeholder', () => {
     applyStateChange('r-waiting', { state: 'Running', startedAt: Date.now() });
     const { container } = render(<MessageItem runId="r-waiting" />);

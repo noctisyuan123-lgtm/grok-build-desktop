@@ -520,12 +520,14 @@ function App() {
       }
     }
     if (!userText.trim()) return;
+    streamStore.patchRun(runId, { failureDismissed: true });
     composerRef.current?.setValue(userText);
     void composerRef.current?.submit();
   }
 
   async function continueNetworkTurn(_messageId: string, runId: string) {
     const prompt = t('message.continuePrompt');
+    streamStore.patchRun(runId, { failureDismissed: true });
     try {
       const result = await enqueueRun({
         prompt,
@@ -544,6 +546,7 @@ function App() {
         meta: { model: activeModel, workflow: mode === 'coding' ? codingWorkflow : 'chat' },
       });
     } catch (error) {
+      streamStore.patchRun(runId, { failureDismissed: false });
       setSessionNotice(
         t('composerSection.sendFailed', {
           message: error instanceof Error ? error.message : String(error),
