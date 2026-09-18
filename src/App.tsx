@@ -27,6 +27,7 @@ import { playCompletionSound, primeCompletionSound } from './lib/completionSound
 import { showCompletionPopup } from './lib/completionPopup';
 import { isBackgroundSessionRun } from './lib/completionNotification';
 import { mergeStreamIntoMessages } from './lib/mergeStreamMessages';
+import { resolveWakeupLane } from './lib/wakeupLane';
 import { MessageList, type MessageRef } from './components/MessageList';
 import type { ComposerFolder, ComposerHandle } from './components/Composer';
 import { QueueDock } from './components/QueueDock';
@@ -459,8 +460,14 @@ function App() {
       (event) => {
         const runId = event.payload?.runId;
         if (!runId) return;
-        const { activeTabId } = completionSessionRef.current;
-        const laneId = event.payload?.laneId || activeTabId;
+        const { activeTabId, tabs } = completionSessionRef.current;
+        const laneId = resolveWakeupLane({
+          laneId: event.payload?.laneId,
+          sessionId: event.payload?.sessionId,
+          activeTabId,
+          tabs,
+        });
+        if (!laneId) return;
         markWakeupRun(runId, event.payload?.sessionId);
         completionRunOwnerRef.current.set(runId, laneId);
         const pending = {
@@ -940,7 +947,7 @@ function App() {
         noteLiveSession(null);
       }
       await invoke('open_grok_cli', {
-        cwd: codingCwd.trim() || null,
+        cwd: laneEffectiveCwd(activeTabId),
         sessionId,
       });
       setSessionNotice(
@@ -1124,6 +1131,18 @@ function App() {
     });
   }
 
+  // Grok keys sessions on the cwd each run is enqueued with ('' included —
+  // the backend resolves it to HOME). Session-scoped calls for a lane
+  // (rewind, prewarm) must pass that exact enqueue cwd; a different directory
+  // binds replacement sessions where the lane's following runs can never load.
+  function laneEffectiveCwd(tabId: string | null | undefined): string {
+    if (tabId && tabId !== activeTabId) {
+      return tabs.find((tab) => tab.id === tabId)?.cwd ?? codingCwd;
+    }
+    // Active lane: the Composer enqueues with codingCwd verbatim (no trim).
+    return codingCwd;
+  }
+
   // Grok Core needs roughly a process + ACP initialize before it can accept
   // the first prompt. Warm the active lane while the user is looking at the
   // app so Send only waits for the actual session/prompt request. The queue
@@ -1134,9 +1153,10 @@ function App() {
     // full args (rules replay blobs) must not thrash prewarm or drop the live
     // ACP host — still pass full buildRunArgs() so resume/load works.
     const args = buildRunArgs();
+    const laneCwd = laneEffectiveCwd(activeTabId);
     const key = [
       activeTabId,
-      codingCwd,
+      laneCwd,
       mode,
       activeModel,
       reasoningEffort,
@@ -1148,7 +1168,7 @@ function App() {
     if (prewarmKeyRef.current === key) return;
     prewarmKeyRef.current = key;
     let cancelled = false;
-    void prewarmRun({ cwd: codingCwd, args, laneId: activeTabId }).catch((error) => {
+    void prewarmRun({ cwd: laneCwd, args, laneId: activeTabId }).catch((error) => {
       if (cancelled || prewarmKeyRef.current !== key) return;
       // Prewarm is best-effort; the normal enqueue path remains authoritative.
       prewarmKeyRef.current = '';
@@ -1605,14 +1625,26 @@ function App() {
 
   // Keep tab.sessionHead aligned with the latest known engine identity.
   useEffect(() => {
-    const head =
+    const newestSessionId =
       [...messages]
         .reverse()
         .find((message) => message.role === 'assistant' && message.meta?.sessionId)?.meta
-        ?.sessionId ??
-      (rebasedSessionHeadRef.current?.tabId === activeTabId
-        ? rebasedSessionHeadRef.current.sessionId
-        : null) ??
+        ?.sessionId ?? null;
+    // A rebased head is only a stand-in until a real turn reports its own
+    // session id; then the real id wins and the stand-in must stop steering
+    // buildRunArgs (buildRunArgs still prefers the rebased id immediately
+    // after the rewind, while the visible bubble carries the pre-rewind id).
+    if (
+      rebasedSessionHeadRef.current?.tabId === activeTabId &&
+      newestSessionId &&
+      newestSessionId !== rebasedSessionHeadRef.current.sessionId
+    ) {
+      rebasedSessionHeadRef.current = null;
+    }
+    const activeRebased = rebasedSessionHeadRef.current;
+    const head =
+      newestSessionId ??
+      (activeRebased?.tabId === activeTabId ? activeRebased.sessionId : null) ??
       liveSessionId;
     if (head && head !== tabSessionHead) {
       updateActiveTabMeta({ sessionHead: head });
@@ -1992,7 +2024,7 @@ function App() {
         rebased: boolean;
       }>('rewind_grok_session', {
         sessionId,
-        cwd: codingCwd.trim() || null,
+        cwd: laneEffectiveCwd(activeTabId),
         undoPrompt: undoneUserContentRef.current,
         replayContext: buildConversationReplayBlock(undoPlan?.replayMessages ?? []) ?? '',
       });
@@ -2058,7 +2090,7 @@ function App() {
           // TUI unable to paint the next assistant turn. Reopen a clean CLI.
           try {
             await invoke('open_grok_cli', {
-              cwd: codingCwd.trim() || null,
+              cwd: laneEffectiveCwd(activeTabId),
               sessionId: nextSessionId,
             });
           } catch {
@@ -2090,13 +2122,18 @@ function App() {
       latestMessage?.role === 'assistant' &&
       latestMessage.status === 'streaming' &&
       (!latestSnapshot || isRunInFlight(latestSnapshot));
-    const tipCopyForkReady = Boolean(
-      latestMessage?.role === 'assistant' &&
-      latestMessage.status !== 'streaming' &&
-      Boolean(latestMessage.content.trim()) &&
-      !activeSessionIsRunning &&
-      !latestMessageIsLive,
-    );
+    // Last assistant of a consecutive streak (one user round, including
+    // continue/wakeup follow-ups). Earlier rounds keep their own actions.
+    const assistantRoundActionsAt = (index: number): boolean => {
+      const message = visibleMessages[index];
+      if (!message || message.role !== 'assistant') return false;
+      if (!message.content.trim() || message.status === 'streaming') return false;
+      if (visibleMessages[index + 1]?.role === 'assistant') return false;
+      const snap = message.runId ? streamStore.getRunSnapshot(message.runId) : undefined;
+      if (snap?.watching) return false;
+      if (snap && isRunInFlight(snap)) return false;
+      return true;
+    };
     const latestUserIndex =
       latestMessage?.role === 'assistant' && latestMessage.status !== 'streaming'
         ? latestIndex - 1
@@ -2115,10 +2152,11 @@ function App() {
     const sessionIdleForUndo = !activeSessionIsRunning && !latestMessageIsLive;
 
     const turnCanUndoAt = (index: number): boolean => {
-      if (!sessionIdleForUndo || !sessionHeadForUndo) return false;
+      if (!sessionHeadForUndo) return false;
       const message = visibleMessages[index];
       if (!message) return false;
       if (message.role === 'user') {
+        if (!sessionIdleForUndo) return false;
         if (!message.content.trim()) return false;
         const next = visibleMessages[index + 1];
         if (!next) {
@@ -2139,22 +2177,16 @@ function App() {
         if (snap && isRunInFlight(snap)) return false;
         return true;
       }
-      // Assistant reply: undo the paired user turn only on the settled tip of
-      // a consecutive assistant streak. A premature "done" followed by another
-      // assistant (idle wakeup / continue) must not keep Undo under the first
-      // bubble while Copy/Fork sit on the real tip.
-      if (!message.content.trim() || message.status === 'streaming') return false;
-      const following = visibleMessages[index + 1];
-      if (following?.role === 'assistant') return false;
+      // Copy / Fork / Undo sit on the last respond of each user round.
+      // Continue/wakeup bubbles after a premature "done" hide the previous
+      // assistant's actions until that round's real tip settles.
+      if (!assistantRoundActionsAt(index)) return false;
       let userIndex = index - 1;
       while (userIndex >= 0 && visibleMessages[userIndex]?.role === 'assistant') {
         userIndex -= 1;
       }
       const prev = visibleMessages[userIndex];
       if (prev?.role !== 'user' || !prev.content.trim()) return false;
-      const snap = message.runId ? streamStore.getRunSnapshot(message.runId) : undefined;
-      if (snap?.watching) return false;
-      if (snap && isRunInFlight(snap)) return false;
       return true;
     };
 
@@ -2192,21 +2224,9 @@ function App() {
             id: m.id,
             canUndo: turnCanUndoAt(index),
             showUndo: turnCanUndoAt(index),
-            // Copy/Fork on every settled assistant reply. The live tip still
-            // waits for tipCopyForkReady; older bubbles stay available even
-            // while a later turn is running (fork replays from that point).
-            canFork:
-              Boolean(m.content.trim()) &&
-              m.status !== 'streaming' &&
-              (index !== latestIndex || tipCopyForkReady),
-            showFork:
-              Boolean(m.content.trim()) &&
-              m.status !== 'streaming' &&
-              (index !== latestIndex || tipCopyForkReady),
-            showCopy:
-              Boolean(m.content.trim()) &&
-              m.status !== 'streaming' &&
-              (index !== latestIndex || tipCopyForkReady),
+            canFork: assistantRoundActionsAt(index),
+            showFork: assistantRoundActionsAt(index),
+            showCopy: assistantRoundActionsAt(index),
           },
     );
   }, [

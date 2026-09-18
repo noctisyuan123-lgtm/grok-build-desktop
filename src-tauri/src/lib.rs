@@ -1890,14 +1890,10 @@ fn open_grok_cli_blocking(cwd: Option<String>, session_id: Option<String>) -> Re
     // Same binary resolution as the run queue so interactive CLI finds grok
     // even when the user's login PATH is thin.
     let program = env::var("GROK_DESKTOP_GROK_CMD").unwrap_or_else(|_| default_grok_binary());
-    // Empty Desktop cwd must not fall back to the app source tree for a
-    // shipped .app — use $HOME like other shell helpers.
-    let cwd = cwd
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(default_shell_cwd);
+    // Sessions are keyed by cwd: enqueue/prewarm and rewind resolve the lane's
+    // raw cwd through `resolve_session_cwd` ('' → HOME). The TUI must `cd` and
+    // `--resume` from that same directory or session/load cannot find the head.
+    let cwd = crate::runs::core::resolve_session_cwd(Path::new(cwd.as_deref().unwrap_or("")));
     let session = session_id
         .as_deref()
         .map(str::trim)
@@ -2931,7 +2927,12 @@ async fn rewind_grok_session(
     })
     .await
     .map_err(|error| format!("stop Desktop Grok CLI join failed: {error}"))??;
-    let cwd = normalized_cwd(cwd);
+    // Sessions are keyed by cwd. Runs (enqueue + prewarm) resolve the lane's
+    // raw cwd through `resolve_session_cwd` — chat lanes enqueue '' and land
+    // on HOME. Rewind must resolve the same way: `normalized_cwd` maps '' /
+    // null to project_root, which would session/load and rebase replacement
+    // sessions where the lane's next run can never load them.
+    let cwd = crate::runs::core::resolve_session_cwd(Path::new(cwd.as_deref().unwrap_or("")));
     let undone = undo_prompt
         .as_deref()
         .map(str::trim)

@@ -4,7 +4,7 @@
 // boot render, composer submit → queued run → streamed reply, stop, session
 // tabs, sidebar/history, the ⌘K palette, settings, panels, and undo.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { VirtuosoMockContext } from 'react-virtuoso';
 import App from '../App';
@@ -44,7 +44,7 @@ function setup(overrides: Record<string, CommandHandler> = {}) {
 type Ctx = ReturnType<typeof setup>;
 
 function composerTextarea(): HTMLTextAreaElement {
-  return screen.getByPlaceholderText(t('mode.coding.placeholder')) as HTMLTextAreaElement;
+  return convo().getByRole('textbox') as HTMLTextAreaElement;
 }
 
 /** Queries scoped to the conversation panel — the sidebar HISTORY rows repeat
@@ -272,6 +272,8 @@ describe('composer submit → queued run → streamed reply', () => {
       await tauri.emitRunEvent(wakeupId, { type: 'text', data: '还在看…' });
     });
     expect(await convo().findByText('还在看…')).toBeInTheDocument();
+    expect(convo().queryByRole('button', { name: t('message.copy') })).not.toBeInTheDocument();
+    expect(convo().queryByRole('button', { name: t('message.fork') })).not.toBeInTheDocument();
 
     const before = tauri.calls.filter((call) => call.cmd === 'enqueue_run').length;
     await submitPrompt(ctx, '检查一下是否已经齐全能直接跑了');
@@ -371,6 +373,9 @@ describe('composer submit → queued run → streamed reply', () => {
     await waitFor(() => expect(ctx.tauri.commands()).toContain('open_grok_cli'));
     const openCli = [...ctx.tauri.calls].reverse().find((call) => call.cmd === 'open_grok_cli')!;
     expect(openCli.args.sessionId).toBe('shared-session');
+    // Chat lanes enqueue '' — the handoff must pass it verbatim so the TUI
+    // opens where the session is bound (backend resolves '' to HOME).
+    expect(openCli.args.cwd).toBe('');
     expect(ctx.tauri.runIds).toHaveLength(1);
 
     // Linking starts the Desktop listener immediately; the shared export is
@@ -590,6 +595,8 @@ describe('composer submit → queued run → streamed reply', () => {
       const opens = ctx.tauri.calls.filter((call) => call.cmd === 'open_grok_cli');
       expect(opens).toHaveLength(opensBeforeUndo + 1);
       expect(opens.at(-1)?.args.sessionId).toBe('rebased-session');
+      // Reopen after rebase stays on the lane cwd, not null / another dir.
+      expect(opens.at(-1)?.args.cwd).toBe('');
     });
     const rewind = [...ctx.tauri.calls]
       .reverse()
@@ -643,6 +650,7 @@ describe('composer submit → queued run → streamed reply', () => {
     await waitFor(() => {
       const open = [...ctx.tauri.calls].reverse().find((call) => call.cmd === 'open_grok_cli');
       expect(open?.args.sessionId).toBe('empty-rebased-session');
+      expect(open?.args.cwd).toBe('');
     });
     await waitFor(() => expect(ctx.tauri.runIds).toHaveLength(2));
     const enqueue = [...ctx.tauri.calls].reverse().find((call) => call.cmd === 'enqueue_run')!;
@@ -1095,6 +1103,183 @@ describe('composer submit → queued run → streamed reply', () => {
     // The prompt is still there for a retry.
     expect(composerTextarea().value).toBe('Doomed prompt');
   });
+
+  it('resumes the rebased head after a rewind, then the real id the next turn reports', async () => {
+    const ctx = await bootApp({
+      rewind_grok_session: () => ({
+        rewound: false,
+        sessionId: 'rebased-session',
+        rebased: true,
+      }),
+    });
+    const first = await submitPrompt(ctx, 'Keep this context');
+    await act(async () => {
+      await ctx.tauri.streamReply(first, ['Context kept.']);
+    });
+    const second = await submitPrompt(ctx, 'Undo this turn');
+    await act(async () => {
+      await ctx.tauri.streamReply(second, ['Undo this answer.']);
+    });
+    await waitFor(() => {
+      expect(document.querySelectorAll('.message-assistant').length).toBe(2);
+    });
+
+    const undoButtons = await convo().findAllByRole('button', { name: t('message.undoResponse') });
+    const enabledUndo = [...undoButtons]
+      .reverse()
+      .find((button) => !(button as HTMLButtonElement).disabled);
+    await ctx.user.click(enabledUndo!);
+    expect(convo().queryByText('Undo this answer.')).not.toBeInTheDocument();
+
+    // (a) The rebased head steers the very next send. The rewind restored the
+    // prompt to the composer; wait for the edit lock to lift, then resubmit it.
+    await screen.findByText(t('notices.undoRebasedAfterAdvance'));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: t('composer.send') })).toBeEnabled();
+    });
+    await ctx.user.keyboard('{Enter}');
+    await waitFor(() => expect(ctx.tauri.runIds).toHaveLength(3));
+    const resumedArgs = [...ctx.tauri.calls]
+      .reverse()
+      .find((call) => call.cmd === 'enqueue_run')!.args.args as string[];
+    expect(resumedArgs[resumedArgs.indexOf('--resume') + 1]).toBe('rebased-session');
+
+    // The replacement run reports its own session id on the tip bubble…
+    const third = ctx.tauri.runIds[2]!;
+    await act(async () => {
+      await ctx.tauri.emitQueue(third, []);
+      await ctx.tauri.emitRunState(third, 'Running', { startedAt: Date.now() });
+      await ctx.tauri.emitRunEvent(third, { type: 'text', data: 'Real head reply.' });
+      await ctx.tauri.emitRunEvent(third, {
+        type: 'end',
+        stopReason: 'EndTurn',
+        sessionId: 'real-session-2',
+        requestId: 'q-3',
+      });
+      await ctx.tauri.emitRunState(third, 'Done', { endedAt: Date.now() });
+      await ctx.tauri.emitQueue(null, []);
+    });
+    expect(await convo().findByText('Real head reply.')).toBeInTheDocument();
+
+    // (b) …and the following send resumes the real id, not the stale rebase.
+    await submitPrompt(ctx, 'Follow the real head');
+    await waitFor(() => expect(ctx.tauri.runIds).toHaveLength(4));
+    const nextArgs = [...ctx.tauri.calls]
+      .reverse()
+      .find((call) => call.cmd === 'enqueue_run')!.args.args as string[];
+    expect(nextArgs[nextArgs.indexOf('--resume') + 1]).toBe('real-session-2');
+  });
+
+  it('rewinds with the lane cwd its runs were enqueued with (empty stays "", not null)', async () => {
+    const ctx = await bootApp({
+      rewind_grok_session: (args) => ({
+        rewound: true,
+        sessionId: String(args.sessionId),
+        rebased: false,
+      }),
+    });
+    const runId = await submitPrompt(ctx, 'Rewind cwd check');
+    await act(async () => {
+      await ctx.tauri.streamReply(runId, ['Rewind cwd answer.']);
+    });
+    await waitFor(() => {
+      expect(document.querySelector('.message-assistant')).toHaveTextContent('Rewind cwd answer.');
+    });
+
+    await ctx.user.click(await convo().findByRole('button', { name: t('message.undoResponse') }));
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
+    const enqueue = ctx.tauri.calls.find((call) => call.cmd === 'enqueue_run')!;
+    const rewind = [...ctx.tauri.calls]
+      .reverse()
+      .find((call) => call.cmd === 'rewind_grok_session')!;
+    // Chat lanes enqueue with '' (backend resolves it); the rewind must send
+    // the exact same lane cwd instead of null / another workspace directory.
+    expect(enqueue.args.cwd).toBe('');
+    expect(rewind.args.cwd).toBe('');
+    expect(rewind.args.cwd).toBe(enqueue.args.cwd);
+  });
+
+  it('opens the /cli handoff with the lane cwd its runs enqueue with', async () => {
+    const ctx = await bootApp();
+    const { user } = ctx;
+
+    // jsdom drops a typed leading '/' before the ProseMirror editor sees it;
+    // paste drives the same submit path so the handoff args stay observable.
+    composerTextarea().focus();
+    fireEvent.paste(composerTextarea(), { clipboardData: { getData: () => '/cli' } });
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('open_grok_cli'));
+    const chatOpen = [...ctx.tauri.calls].reverse().find((call) => call.cmd === 'open_grok_cli')!;
+    // Chat lanes enqueue '' — the handoff must pass it verbatim so the TUI
+    // opens where the session is bound (backend resolves '' to HOME).
+    expect(chatOpen.args.cwd).toBe('');
+
+    await user.click(screen.getByRole('button', { name: t('emptyState.workspaceAria') }));
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('pick_project_folder'));
+    composerTextarea().focus();
+    fireEvent.paste(composerTextarea(), { clipboardData: { getData: () => '/cli' } });
+    await user.keyboard('{Enter}');
+    await waitFor(() => {
+      const opens = ctx.tauri.calls.filter((call) => call.cmd === 'open_grok_cli');
+      expect(opens.at(-1)?.args.cwd).toBe('/mock/project');
+    });
+  });
+
+  it('rewinds with the picked workspace cwd its runs were enqueued with', async () => {
+    const ctx = await bootApp({
+      rewind_grok_session: (args) => ({
+        rewound: true,
+        sessionId: String(args.sessionId),
+        rebased: false,
+      }),
+    });
+    const { user } = ctx;
+    await user.click(screen.getByRole('button', { name: t('emptyState.workspaceAria') }));
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('pick_project_folder'));
+
+    const runId = await submitPrompt(ctx, 'Workspace rewind check');
+    await act(async () => {
+      await ctx.tauri.streamReply(runId, ['Workspace rewind answer.']);
+    });
+    await waitFor(() => {
+      expect(document.querySelector('.message-assistant')).toHaveTextContent(
+        'Workspace rewind answer.',
+      );
+    });
+
+    await ctx.user.click(await convo().findByRole('button', { name: t('message.undoResponse') }));
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
+    const enqueue = ctx.tauri.calls.find((call) => call.cmd === 'enqueue_run')!;
+    const rewind = [...ctx.tauri.calls]
+      .reverse()
+      .find((call) => call.cmd === 'rewind_grok_session')!;
+    expect(enqueue.args.cwd).toBe('/mock/project');
+    expect(rewind.args.cwd).toBe('/mock/project');
+    expect(rewind.args.cwd).toBe(enqueue.args.cwd);
+  });
+
+  it('prewarms the active lane with the same cwd its runs enqueue with', async () => {
+    const ctx = await bootApp();
+    const { tauri, user } = ctx;
+    await waitFor(() => expect(tauri.commands()).toContain('prewarm_run'));
+    const bootPrewarm = tauri.calls.find((call) => call.cmd === 'prewarm_run')!;
+    expect(bootPrewarm.args.cwd).toBe('');
+    expect(String(bootPrewarm.args.laneId).length).toBeGreaterThan(0);
+
+    // A new workspace changes the lane cwd → the debounce key re-warms.
+    await user.click(screen.getByRole('button', { name: t('emptyState.workspaceAria') }));
+    await waitFor(() => {
+      const prewarms = tauri.calls.filter((call) => call.cmd === 'prewarm_run');
+      expect(prewarms.at(-1)?.args.cwd).toBe('/mock/project');
+    });
+
+    await submitPrompt(ctx, 'Prewarm cwd check');
+    const enqueue = tauri.calls.find((call) => call.cmd === 'enqueue_run')!;
+    const prewarm = tauri.calls.filter((call) => call.cmd === 'prewarm_run').at(-1)!;
+    expect(enqueue.args.cwd).toBe('/mock/project');
+    expect(prewarm.args.cwd).toBe(enqueue.args.cwd);
+    expect(prewarm.args.laneId).toBe(enqueue.args.laneId);
+  });
 });
 
 describe('session tabs and history', () => {
@@ -1125,7 +1310,7 @@ describe('session tabs and history', () => {
     expect(enqueue.args.args).toContain('--fork-session');
   });
 
-  it('exposes Copy and Fork only on the finished conversation tip', async () => {
+  it('exposes Copy and Fork on each round tip, not continue bubbles in the same round', async () => {
     const ctx = await bootApp();
     const { tauri, user } = ctx;
 
@@ -1141,15 +1326,16 @@ describe('session tabs and history', () => {
       await tauri.streamReply(secondRun, ['Later response']);
     });
 
-    // Intermediate assistant replies no longer offer Copy/Fork — only the tip.
-    expect(convo().getAllByRole('button', { name: t('message.fork') })).toHaveLength(1);
-    expect(convo().getAllByRole('button', { name: t('message.copy') })).toHaveLength(1);
+    // Two user rounds → two round tips. Continue/wakeup in one round still
+    // keeps a single Copy/Fork pair on that round's last assistant.
+    expect(convo().getAllByRole('button', { name: t('message.fork') })).toHaveLength(2);
+    expect(convo().getAllByRole('button', { name: t('message.copy') })).toHaveLength(2);
     const assistants = document.querySelectorAll('.message-assistant');
     expect(assistants).toHaveLength(2);
-    expect(assistants[0]!.querySelector('[aria-label="' + t('message.fork') + '"]')).toBeNull();
+    expect(assistants[0]!.querySelector('[aria-label="' + t('message.fork') + '"]')).toBeTruthy();
     expect(assistants[1]!.querySelector('[aria-label="' + t('message.fork') + '"]')).toBeTruthy();
 
-    await user.click(convo().getByRole('button', { name: t('message.fork') }));
+    await user.click(assistants[1]!.querySelector('[aria-label="' + t('message.fork') + '"]')!);
     expect(await convo().findByText('Later turn to exclude')).toBeInTheDocument();
     expect(await convo().findByText('Later response')).toBeInTheDocument();
   });

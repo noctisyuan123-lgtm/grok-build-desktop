@@ -308,3 +308,52 @@ OpenCode undo：`revert{messageID, partID?, …}`；消息不删；下次 prompt
 - sst/opencode：`packages/opencode/src/session/{session,revert,prompt}.ts`
 - 本仓库：`docs/architecture.md`，`src/App.tsx`，`src/app/grokArgs.ts`，
   `src-tauri/src/runs/{queue,core,db}.rs`，`src/lib/tabs.ts`
+
+---
+
+## 9. 追记：2026-09-18 cwd 撕裂事故（一次对话裂成 6+ 个 CLI session）
+
+### 9.1 事故
+
+一个 GUI 对话在一次 Undo + 后续追问后被拆成 6+ 个 grok CLI session，其中
+`01a0b515-c87f` / `01a0b516-609d` 为**仓库根目录绑定的空 phantom session**
+（`chat_history.jsonl` 仅系统提示）。grok 按 **cwd 严格解析 session 身份**：
+跨 cwd 的 `session/load` 一律 `-32603 FS_NOT_FOUND`。
+
+### 9.2 根因（三处叠加）
+
+1. **rewind 与 runs 的 cwd 不一致**：前端 rewind 传 `codingCwd.trim() || null`，
+   chat lane 的 `codingCwd` 为 `''`，于是 rewind 发 `null`，Rust
+   `normalized_cwd` 兜底到 project_root；而 runs 用 `''` enqueue，
+   `resolve_session_cwd` 兜底到 HOME。rebase / 替换 session 因此建在
+   project_root，lane 后续 runs（HOME）永远 load 不到。
+2. **rebased head 永不清除**：`rebasedSessionHeadRef` 一旦钉住，真实 run
+   上报的新 session id 无法推翻它，后续每次发送都续接 phantom。
+3. **load 失败静默新建**（`core.rs` `run_turn`）：`--resume` 的
+   `session/load` 失败后 `eprintln!` + `new_session` 兜底，每次发送
+   都在 HOME 新建空 session（6+ 裂变的直接来源）。
+
+### 9.3 对齐原则（TUI 语义）
+
+- **每 lane 单一 resolved cwd**：enqueue / prewarm / rewind 三条路径必须对
+  同一 lane 解析出同一目录（chat lane = `''` → HOME）。
+- **显式响亮失败**：grok 没有静默 fallback；resume 不上就 Failed + 报错，
+  禁止静默 fork / 新建。
+- **真实 head 压过 stale rebased**：首个真实 turn 上报 session id 后，
+  rebased 占位身份立即作废。
+
+### 9.4 代码落点
+
+1. `src-tauri/src/runs/core.rs`：新增 `resolve_session_cwd`（≈473）统一替换
+   7 处重复的 HOME 兜底（connect / load / new / prewarm / rewind / rebase /
+   loadable）；`run_turn` load 失败改经 `resume_load_failure`（≈320、1095）
+   **响亮返回 Err**（含 session id + resolved cwd），不再静默 `new_session`。
+2. `src/App.tsx`：新增 `laneEffectiveCwd`（≈1138）；rewind（≈2027）与
+   prewarm（≈1156、1171）改传 lane 的 enqueue cwd 原文（无 trim / `||null`）；
+   head-sync effect（≈1637–1643）在真实 run 上报不同 session id 时清除
+   `rebasedSessionHeadRef`（`buildRunArgs` 优先级不变）。
+3. `src-tauri/src/lib.rs` `rewind_grok_session`（≈2939，cross-review 补刀）：
+   cwd 改经 `resolve_session_cwd` 解析——原 `normalized_cwd` 把 `''`/null 兜到
+   project_root，只改前端无法闭合三条路径的语义。
+4. 测试：`resolve_session_cwd_*`、`resume_load_failure_*`（`core.rs` ≈2251+）；
+   `src/__tests__/App.test.tsx` 4 例（rebased head 让位 / 三路径 cwd 一致）。

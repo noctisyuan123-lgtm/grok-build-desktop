@@ -188,6 +188,7 @@ export function installTauriAppMock(overrides: Record<string, CommandHandler> = 
     close_terminal_session: () => null,
     run_doctor: () => toolRun('doctor', 'All checks passed.'),
     start_grok_login: () => toolRun('grok login', 'Login window opened.'),
+    generate_session_title: () => 'Mock title',
     consume_desktop_handoff: () => null,
     open_grok_cli: () => null,
     open_grok_desktop: () => null,

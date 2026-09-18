@@ -313,6 +313,22 @@ fn reject_unloaded_shared_session(
     Ok(())
 }
 
+/// What a failed `session/load` means for a resumed turn. Grok resolves
+/// sessions by cwd, so a failed load must surface loudly instead of silently
+/// forking a replacement session the rest of the lane would never rejoin.
+/// Shared leaders fail closed with their own wording.
+fn resume_load_failure(
+    config: &CoreConfig,
+    session_id: &str,
+    cwd: &str,
+    load_error: &str,
+) -> String {
+    if let Err(shared_error) = reject_unloaded_shared_session(config, session_id, load_error) {
+        return shared_error;
+    }
+    format!("failed to resume session {session_id} under {cwd}: {load_error}")
+}
+
 
 /// Restore workspace files captured on a grok rewind point.
 ///
@@ -450,6 +466,19 @@ pub async fn rewind_last_user_turn_with_share(
         .await
 }
 
+/// One resolved cwd for the host's `current_dir`, `session/new`, and
+/// `session/load`. Grok keys sessions on this path, so every operation for a
+/// run must send the same value. Chat lanes enqueue with an empty/relative
+/// path; HOME keeps those sessions resumable under one stable directory.
+pub(crate) fn resolve_session_cwd(cwd: &Path) -> PathBuf {
+    if cwd.is_absolute() && cwd.is_dir() {
+        return cwd.to_path_buf();
+    }
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
 /// True when a fresh ACP client can `session/load` this head.
 ///
 /// Used after local JSONL truncate: files on disk are not enough if the grok
@@ -477,13 +506,7 @@ pub async fn session_loadable(binary: &Path, cwd: &Path, session_id: &str) -> bo
     let Ok(mut host) = AcpHost::connect(binary, cwd, &config).await else {
         return false;
     };
-    let resolved_cwd = if cwd.is_absolute() && cwd.is_dir() {
-        cwd.to_path_buf()
-    } else {
-        std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/"))
-    };
+    let resolved_cwd = resolve_session_cwd(cwd);
     let ok = host
         .ensure_session_loaded(&resolved_cwd, &config, session_id)
         .await
@@ -522,13 +545,7 @@ pub async fn create_rebased_session(
         prompt_blocks: None,
     };
     let mut host = AcpHost::connect(binary, cwd, &config).await?;
-    let resolved_cwd = if cwd.is_absolute() && cwd.is_dir() {
-        cwd.to_path_buf()
-    } else {
-        std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/"))
-    };
+    let resolved_cwd = resolve_session_cwd(cwd);
     let session_id = host
         .new_session(&resolved_cwd.to_string_lossy(), &config)
         .await?;
@@ -708,13 +725,7 @@ impl AcpHost {
         // it emits initialize/session responses.
         #[cfg(unix)]
         process::cleanup_stale_grok_lock();
-        let resolved_cwd = if cwd.is_dir() {
-            cwd.to_path_buf()
-        } else {
-            std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("."))
-        };
+        let resolved_cwd = resolve_session_cwd(cwd);
         let mut command = Command::new(binary);
         command
             .args(config.launch_args())
@@ -807,13 +818,7 @@ impl AcpHost {
         if self.loaded_sessions.contains(session_id) {
             return Ok(session_id.to_string());
         }
-        let resolved_cwd = if cwd.is_absolute() && cwd.is_dir() {
-            cwd.to_path_buf()
-        } else {
-            std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("/"))
-        };
+        let resolved_cwd = resolve_session_cwd(cwd);
         let cwd = resolved_cwd.to_string_lossy();
         match self
             .request(
@@ -855,13 +860,7 @@ impl AcpHost {
         cwd: &Path,
         config: &CoreConfig,
     ) -> Result<String, String> {
-        let resolved_cwd = if cwd.is_absolute() && cwd.is_dir() {
-            cwd.to_path_buf()
-        } else {
-            std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("/"))
-        };
+        let resolved_cwd = resolve_session_cwd(cwd);
         self.new_session(&resolved_cwd.to_string_lossy(), config)
             .await
     }
@@ -897,13 +896,7 @@ impl AcpHost {
         config: &CoreConfig,
         undone_preview: Option<&str>,
     ) -> Result<RewindResult, String> {
-        let resolved_cwd = if cwd.is_absolute() && cwd.is_dir() {
-            cwd.to_path_buf()
-        } else {
-            std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("/"))
-        };
+        let resolved_cwd = resolve_session_cwd(cwd);
         let cwd = resolved_cwd.to_string_lossy();
         // On the shared leader the TUI already holds this session. A second
         // session/load replays the transcript into the pager and the next
@@ -1067,15 +1060,10 @@ impl AcpHost {
         self.suppressed_idle_wakeups = 0;
         // The chat surface is allowed to enqueue with an empty repository
         // path. ACP requires an absolute cwd for every session operation, so
-        // use the same safe fallback as process startup instead of forwarding
-        // an empty/relative path and failing session/new with -32602.
-        let resolved_cwd = if cwd.is_absolute() && cwd.is_dir() {
-            cwd.to_path_buf()
-        } else {
-            std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("/"))
-        };
+        // use the same resolved fallback as process startup instead of
+        // forwarding an empty/relative path and failing session/new with
+        // -32602.
+        let resolved_cwd = resolve_session_cwd(cwd);
         let cwd = resolved_cwd.to_string_lossy();
         let session_id = if let Some(id) = prewarmed_session_id {
             id.to_string()
@@ -1101,11 +1089,10 @@ impl AcpHost {
                         loaded
                     }
                     Err(error) => {
-                        reject_unloaded_shared_session(config, id, &error)?;
-                        eprintln!(
-                            "[grok core] session/load failed; creating a new session: {error}"
-                        );
-                        self.new_session(&cwd, config).await?
+                        // Grok resolves sessions by cwd, so a failed load must
+                        // surface instead of silently forking a replacement
+                        // session the rest of the lane would never rejoin.
+                        return Err(resume_load_failure(config, id, &cwd, &error));
                     }
                 }
             }
@@ -2258,6 +2245,63 @@ mod tests {
             reject_unloaded_shared_session(&isolated, "isolated-session", "not found"),
             Ok(())
         );
+    }
+
+    #[test]
+    fn resolve_session_cwd_keeps_absolute_existing_dirs() {
+        let dir = std::env::temp_dir().join(format!(
+            "grok-session-cwd-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(resolve_session_cwd(&dir), dir);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_session_cwd_falls_back_to_home_for_lane_cwds() {
+        // Chat lanes enqueue with an empty path; relative and non-existent
+        // absolute paths are equally unusable for ACP session identity, so
+        // every caller must agree on one fallback directory.
+        let expected = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        assert_eq!(resolve_session_cwd(Path::new("")), expected);
+        assert_eq!(resolve_session_cwd(Path::new("does-not-exist")), expected);
+        let missing = std::env::temp_dir().join(format!(
+            "grok-session-cwd-missing-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&missing);
+        assert_eq!(resolve_session_cwd(&missing), expected);
+    }
+
+    #[test]
+    fn resume_load_failure_is_loud_and_names_session_and_cwd() {
+        let isolated = CoreConfig::from_legacy_args(&["--resume".into(), "phantom-session".into()]);
+        let error = resume_load_failure(&isolated, "phantom-session", "/home/you", "FS_NOT_FOUND");
+        // The failure must name the unresumable id and the cwd it was bound
+        // to — the incident was a silent fork into an unreachable session.
+        assert!(error.contains("failed to resume session phantom-session under /home/you"));
+        assert!(error.contains("FS_NOT_FOUND"));
+
+        // Shared leaders keep failing closed with their own wording.
+        let shared = CoreConfig::from_legacy_args(&[
+            "--resume".into(),
+            "live-session".into(),
+            "--share-session".into(),
+        ]);
+        let shared_error = resume_load_failure(&shared, "live-session", "/home/you", "not loaded");
+        assert!(shared_error.contains("refusing to prompt an unbound ACP client"));
     }
 
     #[test]
