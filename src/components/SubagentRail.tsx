@@ -180,6 +180,9 @@ export function SubagentRail({
       className={`subagent-rail${collapsed ? ' is-collapsed' : ''}${active.length ? ' is-live' : ''}`}
       aria-label={t('subagent.railTitle')}
     >
+      {collapsed && hasActivity ? (
+        <span className="subagent-rail-activity-dot" role="status" aria-label={countsLabel} />
+      ) : null}
       <button
         type="button"
         className="subagent-rail-toggle"
@@ -188,11 +191,7 @@ export function SubagentRail({
         onClick={() => ui.setCollapsed(!collapsed)}
       >
         <span className="subagent-rail-title">{t('subagent.railTitle')}</span>
-        {collapsed ? (
-          hasActivity ? (
-            <span className="subagent-rail-activity-dot" role="status" aria-label={countsLabel} />
-          ) : null
-        ) : (
+        {collapsed ? null : (
           <span className="subagent-rail-counts">
             <span className="subagent-rail-count">
               {t('subagent.railAgentCount', { count: agentCount })}

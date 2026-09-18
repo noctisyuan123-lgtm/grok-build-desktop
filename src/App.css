@@ -6062,7 +6062,9 @@ body[data-theme='light'] .hljs-comment {
 }
 
 .subagent-rail-activity-dot {
-  /* Same Codex blue as conversation markdown links (.app-shell --accent). */
+  /* Same Codex blue as conversation markdown links (.app-shell --accent).
+     Sit on the rail chrome, not inside the header flex, so collapse does
+     not slide the badge from the title row to the corner. */
   background: var(--accent);
   border-radius: 50%;
   box-shadow: 0 0 0 2px #242424;
@@ -6071,8 +6073,9 @@ body[data-theme='light'] .hljs-comment {
   position: absolute;
   right: 0;
   top: 0;
-  transform: translate(28%, -28%);
+  transform: translate(50%, -50%);
   width: 8px;
+  z-index: 2;
 }
 
 .theme-light .subagent-rail-activity-dot {

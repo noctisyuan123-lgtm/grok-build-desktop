@@ -138,9 +138,12 @@ describe('SubagentRail', () => {
     expect(screen.queryByText('1 agents')).toBeNull();
     expect(screen.queryByText('0 tasks')).toBeNull();
     expect(document.querySelector('.subagent-rail-counts')).toBeNull();
-    const dot = document.querySelector('.subagent-rail-activity-dot');
+    const rail = screen.getByRole('complementary', { name: 'Agents & Tasks' });
+    const toggle = screen.getByRole('button', { name: 'Expand activity' });
+    const dot = rail.querySelector('.subagent-rail-activity-dot');
     expect(dot).toBeInTheDocument();
     expect(dot).toHaveAttribute('aria-label', '1 agents, 0 tasks');
+    expect(toggle.contains(dot)).toBe(false);
     await user.click(screen.getByRole('button', { name: 'Expand activity' }));
     expect(screen.getByText('Active')).toBeInTheDocument();
     expect(screen.getByText('1 agents')).toBeInTheDocument();
@@ -184,9 +187,12 @@ describe('SubagentRail', () => {
     expect(screen.queryByText('1 agents')).toBeNull();
     expect(screen.queryByText('1 tasks')).toBeNull();
     expect(document.querySelector('.subagent-rail-counts')).toBeNull();
-    const dot = document.querySelector('.subagent-rail-activity-dot');
+    const rail = screen.getByRole('complementary', { name: 'Agents & Tasks' });
+    const toggle = screen.getByRole('button', { name: 'Expand activity' });
+    const dot = rail.querySelector('.subagent-rail-activity-dot');
     expect(dot).toBeInTheDocument();
     expect(dot).toHaveAttribute('aria-label', '1 agents, 1 tasks');
+    expect(toggle.contains(dot)).toBe(false);
 
     await user.click(screen.getByRole('button', { name: 'Expand activity' }));
     expect(screen.getByText('Active')).toBeInTheDocument();
