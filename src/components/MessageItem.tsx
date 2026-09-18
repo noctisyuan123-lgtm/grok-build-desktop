@@ -327,32 +327,26 @@ export function TranscriptMessage({
   showCopy?: boolean;
 }) {
   const liveElapsed = useElapsed(live ? startedAt : null, null);
-  // While live, only the transcript tail may sit below the work rail: an
-  // intermediate response followed by a tool returns into chronological order.
-  // After completion the latest response always renders outside "Worked for",
-  // even when trailing bookkeeping/activity arrived later.
+  // Live stays one chronological column (Codex/Cursor): responds never leave
+  // the rail, so a mid cannot collapse Working for or jump to the final slot.
+  // After completion the latest response renders outside "Worked for", even
+  // when trailing bookkeeping/activity arrived later.
   const { finalIndex, finalText } = resolveFinalResponse(
     transcript,
     live,
     responseTerminalReady,
     fallbackText,
   );
-  // A new response folds the process in the same render as its first token.
-  // A subsequent tool/thought starts a new activity stage. Manual disclosure
-  // choices persist for the current stage, including further response tokens.
-  const disclosureStage = live
-    ? finalIndex >= 0
-      ? `response:${transcript[finalIndex]?.key}`
-      : 'activity'
-    : 'settled';
+  // Manual disclosure persists for the live activity stage. Do not retarget
+  // the stage when a respond starts — that used to collapse the rail.
+  const disclosureStage = live ? 'activity' : 'settled';
   const [disclosure, setDisclosure] = useState<{ stage: string; open: boolean } | null>(null);
   const expanded =
-    disclosure?.stage === disclosureStage
-      ? disclosure.open
-      : live && finalIndex < 0 && autoExpandWork;
+    disclosure?.stage === disclosureStage ? disclosure.open : live && autoExpandWork;
   const setExpanded = (update: (value: boolean) => boolean) =>
     setDisclosure({ stage: disclosureStage, open: update(expanded) });
   const header = live ? `Working for ${formatWorkedDuration(liveElapsed ?? 0)}` : workedLabel;
+  const hasLiveResponses = live && transcript.some((segment) => segment.kind === 'response');
   // Render-only phase groups: intermediate responses close a workflow phase and
   // fold its thought/tool records into one summary above the response. Stored
   // transcript order is never rewritten.
@@ -386,22 +380,22 @@ export function TranscriptMessage({
             </button>
           ) : null}
           <CompactionHint compaction={compaction} />
-          {header && expanded ? (
+          {header && (expanded || hasLiveResponses) ? (
             <div className="transcript-segments">
               {phases.map((phase, phaseIndex) => {
                 const hasClosedResponse = phase.response?.kind === 'response';
                 // Exterior final answer sits outside the work rail (finalText).
                 const isExteriorFinal =
-                  hasClosedResponse && finalIndex >= 0 && phase.responseIndex === finalIndex;
+                  !live &&
+                  hasClosedResponse &&
+                  finalIndex >= 0 &&
+                  phase.responseIndex === finalIndex;
                 // Three independent gates (do not collapse them into one):
                 // 1) collapseActivity — a respond closes the phase, so fold the
                 //    preceding thought/tools into a disclosure (live or settled).
-                // 2) foldResponseIntoPhase — only when the run is *settled* with a
-                //    real final, bury prior mid-responds inside that disclosure.
-                //    While live, a trailing respond is only a *provisional*
-                //    exterior (`finalIndex >= 0`); earlier mids must stay
-                //    readable in the rail — otherwise each new mid hides all
-                //    previous ones until the next tool/thought lands.
+                // 2) foldResponseIntoPhase — only when settled, bury prior mids
+                //    inside Worked for. While live, every mid stays readable
+                //    beside its folded process (Codex/Cursor timeline).
                 // 3) showResponseInRail — mid-respond beside folded process.
                 const collapseActivity = phase.activity.length > 0 && hasClosedResponse;
                 const foldResponseIntoPhase =
@@ -426,25 +420,31 @@ export function TranscriptMessage({
                   <div key={phaseKey} className="transcript-phase-block">
                     {collapseActivity ? (
                       <>
-                        {renderCollapsedPhase({
-                          runId,
-                          phase,
-                          traces,
-                          live,
-                          foldResponseIntoPhase,
-                          responseNode: foldResponseIntoPhase ? responseNode : null,
-                          phaseEditStats,
-                        })}
+                        {expanded
+                          ? renderCollapsedPhase({
+                              runId,
+                              phase,
+                              traces,
+                              live,
+                              foldResponseIntoPhase,
+                              responseNode: foldResponseIntoPhase ? responseNode : null,
+                              phaseEditStats,
+                            })
+                          : null}
                         {/* Live / pre-final: process folded, mid-respond stays readable. */}
                         {showResponseInRail ? responseNode : null}
                       </>
                     ) : (
                       <>
-                        {phase.activity.map(({ segment }) =>
-                          renderWorkflowSegment(runId, segment, traces, live),
-                        )}
+                        {expanded
+                          ? phase.activity.map(({ segment }) =>
+                              renderWorkflowSegment(runId, segment, traces, live),
+                            )
+                          : null}
                         {/* Intermediate response with no preceding activity. */}
-                        {showResponseInRail || foldResponseIntoPhase ? responseNode : null}
+                        {showResponseInRail || (foldResponseIntoPhase && expanded)
+                          ? responseNode
+                          : null}
                       </>
                     )}
                   </div>
@@ -671,14 +671,9 @@ function resolveFinalResponse(
   fallbackText?: string,
 ): { finalIndex: number; finalText: string } {
   if (live) {
-    const trailing = transcript.at(-1);
-    if (trailing?.kind === 'response') {
-      return { finalIndex: transcript.length - 1, finalText: trailing.text };
-    }
-    if (transcript.some((segment) => segment.kind === 'response')) {
-      return { finalIndex: -1, finalText: '' };
-    }
-    return { finalIndex: -1, finalText: fallbackText || '' };
+    // Trailing text is not a final until `end`. Promoting it early collapses
+    // Working for and then has to jump the same words back into the rail.
+    return { finalIndex: -1, finalText: '' };
   }
 
   // `done` is not enough: streamStore deliberately records it before the

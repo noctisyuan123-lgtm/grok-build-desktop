@@ -77,10 +77,10 @@ describe('MessageList session isolation', () => {
     expect(screen.queryByRole('button', { name: 'Undo response' })).not.toBeInTheDocument();
   });
 
-  it('sends an edited prompt with Enter and keeps Shift+Enter for newlines', async () => {
+  it('loads the prompt into the composer instead of an in-bubble editor', async () => {
     const user = userEvent.setup();
     const onEditUser = vi.fn();
-    render(
+    const { container } = render(
       <VirtuosoMockContext.Provider value={{ viewportHeight: 800, itemHeight: 64 }}>
         <MessageList
           messages={[
@@ -94,30 +94,17 @@ describe('MessageList session isolation', () => {
             },
           ]}
           onEditUser={onEditUser}
+          editingUserId="user-edit"
         />
       </VirtuosoMockContext.Provider>,
     );
 
     await user.click(screen.getByRole('button', { name: 'Edit prompt' }));
-    const input = screen.getByRole('textbox', { name: 'Edit prompt text' }) as HTMLTextAreaElement;
-    expect(input).toHaveFocus();
-    expect(input.selectionStart).toBe('Original prompt'.length);
-    expect(input.selectionEnd).toBe('Original prompt'.length);
-    // Clicks after the initial focus must not snap the caret back to the end.
-    input.setSelectionRange(0, 4);
-    fireEvent.click(input);
-    expect(input.selectionStart).toBe(0);
-    expect(input.selectionEnd).toBe(4);
-    await user.clear(input);
-    await user.type(input, 'first line');
-    await user.keyboard('{Shift>}{Enter}{/Shift}');
-    await user.type(input, 'second line');
-
-    expect(onEditUser).not.toHaveBeenCalled();
-    expect(input).toHaveValue('first line\nsecond line');
-
-    await user.keyboard('{Enter}');
-    expect(onEditUser).toHaveBeenCalledWith('user-edit', 'first line\nsecond line');
+    expect(onEditUser).toHaveBeenCalledWith('user-edit', 'Original prompt');
+    expect(screen.queryByRole('textbox', { name: 'Edit prompt text' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Send edit' })).not.toBeInTheDocument();
+    expect(screen.getByText('Original prompt')).toBeInTheDocument();
+    expect(container.querySelector('.message-user.is-editing')).toBeInTheDocument();
   });
 
   it('keys Virtuoso rows by stable message id so session switches do not reuse the wrong run', () => {

@@ -183,6 +183,10 @@ function App() {
   }, []);
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const [turnMutationBusy, setTurnMutationBusy] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const editingUserIdRef = useRef<string | null>(null);
+  editingUserIdRef.current = editingUserId;
+  const editingDraftBackupRef = useRef<string | null>(null);
   // Live CLI↔Desktop link is opt-in via /cli or /desktop only — never restore
   // from localStorage on boot (that was resuming the old head into New Session).
   const [liveSessionId, setLiveSessionId] = useState<string | null>(null);
@@ -1865,9 +1869,8 @@ function App() {
     }
   }
 
-  async function editLatestTurn(messageId: string, nextText: string) {
-    if (activeSessionIsRunning || !nextText.trim()) return;
-    if (turnMutationBusy) return;
+  function beginComposerEdit(messageId: string, text: string) {
+    if (activeSessionIsRunning || turnMutationBusy || !text.trim()) return;
     const selectedIndex = messages.findIndex((message) => message.id === messageId);
     if (selectedIndex < 0) return;
     const selected = messages[selectedIndex];
@@ -1878,6 +1881,38 @@ function App() {
     const isUserOnlyTail = assistant == null && selectedIndex === messages.length - 1;
     if (!isUserOnlyTail && assistantIndex !== messages.length - 1) return;
     if (assistant?.status === 'streaming') return;
+    if (!editingUserIdRef.current) {
+      editingDraftBackupRef.current = composerRef.current?.getValue() ?? '';
+    }
+    setEditingUserId(messageId);
+    composerRef.current?.setValue(text);
+    composerRef.current?.focus();
+    setDrafts((current) => ({ ...current, [mode]: text }));
+  }
+
+  function cancelComposerEdit() {
+    if (!editingUserIdRef.current) return;
+    const backup = editingDraftBackupRef.current ?? '';
+    editingDraftBackupRef.current = null;
+    setEditingUserId(null);
+    composerRef.current?.setValue(backup);
+    composerRef.current?.focus();
+    setDrafts((current) => ({ ...current, [mode]: backup }));
+  }
+
+  async function rewindLatestTurnForEdit(messageId: string): Promise<boolean> {
+    if (activeSessionIsRunning) return false;
+    if (turnMutationBusy) return false;
+    const selectedIndex = messages.findIndex((message) => message.id === messageId);
+    if (selectedIndex < 0) return false;
+    const selected = messages[selectedIndex];
+    if (selected?.role !== 'user') return false;
+    const assistantIndex = selectedIndex + 1;
+    const assistant =
+      messages[assistantIndex]?.role === 'assistant' ? messages[assistantIndex] : null;
+    const isUserOnlyTail = assistant == null && selectedIndex === messages.length - 1;
+    if (!isUserOnlyTail && assistantIndex !== messages.length - 1) return false;
+    if (assistant?.status === 'streaming') return false;
     setTurnMutationBusy(true);
 
     const snapshot = messages;
@@ -1926,24 +1961,22 @@ function App() {
 
     if (!hasTauriRuntime() && !sessionId) {
       suppressLiveRehydrateRef.current = false;
-      composerRef.current?.setValue(nextText.trim());
-      await composerRef.current?.submit();
+      composerRef.current?.setAttachedFolder(restoredFolder);
       setTurnMutationBusy(false);
-      return;
+      return true;
     }
     if (!sessionId) {
       restore();
-      return;
+      return false;
     }
     const rewound = await persistUndoToGrokSession(sessionId, { resumeInPlace: true });
     if (!rewound) {
       restore();
-      return;
+      return false;
     }
-    composerRef.current?.setValue(nextText.trim());
     composerRef.current?.setAttachedFolder(restoredFolder);
-    await composerRef.current?.submit();
     setTurnMutationBusy(false);
+    return true;
   }
 
   async function persistUndoToGrokSession(
@@ -2292,9 +2325,8 @@ function App() {
                     onUndoAssistant={undoLatestTurn}
                     onUndoUser={undoLatestTurn}
                     onForkAssistant={forkAssistantResponse}
-                    onEditUser={(messageId, text) => {
-                      void editLatestTurn(messageId, text);
-                    }}
+                    onEditUser={beginComposerEdit}
+                    editingUserId={editingUserId}
                     onRetryTurn={retryNetworkTurn}
                     onContinueTurn={(messageId, runId) => {
                       void continueNetworkTurn(messageId, runId);
@@ -2339,7 +2371,18 @@ function App() {
                 grokIsRunning={activeSessionIsRunning}
                 activeRunId={activeSessionRunId}
                 enqueueParentRunId={blockEnqueueParent ? null : activeEnqueueParentRunId}
-                beforeEnqueue={commitRevertIfNeeded}
+                beforeEnqueue={async (laneId) => {
+                  await commitRevertIfNeeded(laneId);
+                  const editId = editingUserIdRef.current;
+                  if (!editId) return;
+                  const ok = await rewindLatestTurnForEdit(editId);
+                  editingUserIdRef.current = null;
+                  setEditingUserId(null);
+                  editingDraftBackupRef.current = null;
+                  if (!ok) throw new Error(t('message.editFailed'));
+                }}
+                editingUserId={editingUserId}
+                onCancelEdit={cancelComposerEdit}
                 laneId={activeTabId}
                 stopRun={stopRun}
                 emptyState={

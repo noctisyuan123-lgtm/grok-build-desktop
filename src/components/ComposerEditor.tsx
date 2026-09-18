@@ -102,6 +102,7 @@ interface Props {
   onMentionScan?: (mention: { start: number; query: string } | null) => void;
   onBlurMarkdown?: (markdown: string) => void;
   onSubmitEnter?: (delivery: 'queue' | 'interrupt') => void;
+  onCancel?: () => void;
 }
 
 export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function ComposerEditor(
@@ -115,6 +116,7 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
     onMentionScan,
     onBlurMarkdown,
     onSubmitEnter,
+    onCancel,
   },
   outerRef,
 ) {
@@ -124,6 +126,8 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
   placeholderRef.current = placeholder;
   const onSubmitEnterRef = useRef(onSubmitEnter);
   onSubmitEnterRef.current = onSubmitEnter;
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
   const onMarkdownChangeRef = useRef(onMarkdownChange);
   onMarkdownChangeRef.current = onMarkdownChange;
   const onMentionScanRef = useRef(onMentionScan);
@@ -175,6 +179,11 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
               if (pickerOpenRef.current) return true;
               if (this.editor.view.composing) return true;
               onSubmitEnterRef.current?.('queue');
+              return true;
+            },
+            Escape: () => {
+              if (!onCancelRef.current) return false;
+              onCancelRef.current();
               return true;
             },
           };

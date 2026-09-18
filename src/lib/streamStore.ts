@@ -408,6 +408,8 @@ export function applyRunEvent(
         const last = nextTranscript.at(-1);
         if (last?.kind === 'response') {
           scheduleMarkdownParse(exteriorMarkdownKey(runId, nextTranscript.length - 1), last.text);
+          // Live in-rail mid uses `${runId}:${segment.key}` until settle.
+          scheduleMarkdownParse(`${runId}:${last.key}`, last.text);
         }
       })
       .catch(() => {

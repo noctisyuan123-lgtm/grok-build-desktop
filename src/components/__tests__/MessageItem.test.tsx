@@ -94,7 +94,7 @@ describe('MessageItem sanitization', () => {
   it('copies a fenced code block through the VS Code preview control', async () => {
     const user = userEvent.setup();
     applyRunEvent('copy-code', { type: 'text', data: 'code' });
-    streamStore.setHtml(exteriorMarkdownKey('copy-code', 0), renderMarkdown('```sh\necho ok\n```'));
+    streamStore.setHtml('copy-code:response:0', renderMarkdown('```sh\necho ok\n```'));
     render(<MessageItem runId="copy-code" />);
 
     await user.click(screen.getByRole('button', { name: 'Copy code block' }));
@@ -107,7 +107,7 @@ describe('MessageItem sanitization', () => {
     const user = userEvent.setup();
     applyRunEvent('copy-table', { type: 'text', data: 'table' });
     streamStore.setHtml(
-      exteriorMarkdownKey('copy-table', 0),
+      'copy-table:response:0',
       renderMarkdown('| Name | Status |\n| --- | --- |\n| alpha | ok |'),
     );
     render(<MessageItem runId="copy-table" />);
@@ -792,7 +792,7 @@ describe('MessageItem rendering states', () => {
     expect(container.querySelector('.transcript-response')).toBeNull();
   });
 
-  it('folds prior mid-responds on a new response and keeps them available in Work for)', async () => {
+  it('keeps every live mid readable beside folded process without collapsing Working for', async () => {
     applyStateChange('live-multi-mid', { state: 'Running', startedAt: Date.now() });
     render(
       <MessageItem
@@ -815,8 +815,6 @@ describe('MessageItem rendering states', () => {
             startedAt: 3_000,
             endedAt: 3_300,
           },
-          // Trailing respond is provisional exterior while live — prior mids
-          // must remain in the work rail, not disappear into folded phases.
           { key: 'response:4', kind: 'response', text: 'Mid two: still residual.' },
         ]}
         fallbackTraces={[
@@ -832,29 +830,39 @@ describe('MessageItem rendering states', () => {
       />,
     );
 
-    expect(screen.queryByText('Mid one: checking weclaw.')).toBeNull();
-    expect(screen.getByText('Mid two: still residual.')).toBeInTheDocument();
     const work = screen.getByRole('button', { name: /Working for/ });
-    expect(work).toHaveAttribute('aria-expanded', 'false');
-    await userEvent.click(work);
-    // Opening Work for restores earlier responses in chronological order.
+    expect(work).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('Mid one: checking weclaw.')).toBeInTheDocument();
     expect(screen.getByText('Mid two: still residual.')).toBeInTheDocument();
-    // Process before each closed mid still folds.
     expect(screen.getByRole('button', { name: 'Thought briefly' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Thought and used 1 tool' })).toBeInTheDocument();
-    // Prior mid is not buried inside a collapsed phase body.
+    expect(screen.queryByRole('button', { name: /Responded/ })).toBeNull();
     expect(
       screen.getByText('Mid one: checking weclaw.').closest('.transcript-phase-body'),
     ).toBeNull();
+    expect(
+      screen.getByText('Mid two: still residual.').closest('.transcript-phase-body'),
+    ).toBeNull();
+
+    await userEvent.click(work);
+    expect(work).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByText('Mid one: checking weclaw.')).toBeInTheDocument();
+    expect(screen.getByText('Mid two: still residual.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Thought briefly' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Thought and used 1 tool' })).toBeNull();
   });
 
-  it('moves an intermediate response back into the work rail when a tool starts', async () => {
+  it('keeps a live response in the rail when a tool starts after it', async () => {
     applyStateChange('response-then-tool', { state: 'Running', startedAt: Date.now() });
     applyRunEvent('response-then-tool', { type: 'text', data: "I'll inspect it." });
     const { container } = render(<MessageItem runId="response-then-tool" autoExpandWork />);
 
-    expect(container.querySelector('.markdown-streaming')).toHaveTextContent("I'll inspect it.");
+    expect(container.querySelector('.markdown-streaming')).toBeNull();
+    expect(container.querySelector('.transcript-response')).toHaveTextContent("I'll inspect it.");
+    expect(screen.getByRole('button', { name: /Working for/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
 
     await act(async () => {
       applyRunEvent(
@@ -872,9 +880,13 @@ describe('MessageItem rendering states', () => {
     expect(container.querySelector('.markdown-streaming')).toBeNull();
     expect(container.querySelector('.transcript-response')).toHaveTextContent("I'll inspect it.");
     expect(screen.getByRole('button', { name: /Read 1 file/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Working for/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
   });
 
-  it('folds the preceding workflow as soon as the final response starts streaming', async () => {
+  it('folds only the preceding process when a live response starts, not Working for', async () => {
     applyStateChange('response-starts', { state: 'Running', startedAt: Date.now() });
     applyRunEvent('response-starts', { type: 'thought', data: 'inspect first' });
     applyRunEvent(
@@ -895,16 +907,11 @@ describe('MessageItem rendering states', () => {
     });
 
     const work = screen.getByRole('button', { name: /Working for/ });
-    expect(work).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByRole('button', { name: 'Thought and used 1 tool' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Thought briefly' })).toBeNull();
-    expect(screen.getByText('Here is the first sentence.')).toBeInTheDocument();
-    await userEvent.click(work);
-    await act(async () => {
-      applyRunEvent('response-starts', { type: 'text', data: ' More detail.' });
-    });
     expect(work).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('button', { name: 'Thought and used 1 tool' })).toBeInTheDocument();
+    expect(screen.getByText('Here is the first sentence.')).toBeInTheDocument();
+    expect(screen.getByText('Here is the first sentence.').closest('.transcript-work')).not.toBeNull();
+    expect(work).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('keeps thought→tools→thought visible until a response starts', () => {
@@ -1334,11 +1341,15 @@ describe('MessageItem rendering states', () => {
 
   it('renders parsed markdown while the run is still streaming', () => {
     applyRunEvent('r3', { type: 'text', data: '# heading' });
-    streamStore.setHtml(exteriorMarkdownKey('r3', 0), '<h1>heading</h1>');
+    streamStore.setHtml('r3:response:0', '<h1>heading</h1>');
     const { container } = render(<MessageItem runId="r3" />);
+    expect(screen.getByRole('button', { name: /Working for/ })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
     expect(container.querySelector('h1')).toHaveTextContent('heading');
     expect(container.querySelector('pre.streaming-raw')).toBeNull();
-    expect(container.querySelector('.markdown-streaming')).toBeInTheDocument();
+    expect(container.querySelector('.transcript-response')).toBeInTheDocument();
   });
 
   it('announces a failed run in the message area', () => {

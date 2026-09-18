@@ -5,7 +5,6 @@ import { MessageItem, MarkdownSegment } from './MessageItem';
 import { LongTextMessage } from './LongTextMessage';
 import { MessageActions } from './MessageActions';
 import { isLongUserText } from '../lib/longText';
-import { shouldLiveRenderMarkdown } from '../lib/liveMarkdown';
 import { useSessionActiveRunProgress } from '../hooks/useActiveRun';
 import { t } from '../i18n';
 import type { TraceEvent } from '../lib/traceParser';
@@ -57,7 +56,10 @@ interface Props {
   onUndoAssistant?: (messageId: string) => void;
   onUndoUser?: (messageId: string) => void;
   onForkAssistant?: (messageId: string) => void;
+  /** Load this prompt into the composer for editing (not inline in the bubble). */
   onEditUser?: (messageId: string, text: string) => void;
+  /** Prompt currently being edited in the composer — bubble stays visible. */
+  editingUserId?: string | null;
   onAttachmentClick?: (attachment: ComposerAttachment) => void;
   onRetryTurn?: (messageId: string, runId: string) => void;
   onContinueTurn?: (messageId: string, runId: string) => void;
@@ -132,6 +134,7 @@ export function MessageList({
   onUndoUser,
   onForkAssistant,
   onEditUser,
+  editingUserId = null,
   onAttachmentClick,
   onRetryTurn,
   onContinueTurn,
@@ -142,12 +145,6 @@ export function MessageList({
   const [showJump, setShowJump] = useState(false);
   // The message currently flashing after a history-click jump.
   const [flashId, setFlashId] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingText, setEditingText] = useState('');
-  const editInputRef = useRef<HTMLTextAreaElement | null>(null);
-  const editFocusInitializedForRef = useRef<string | null>(null);
-  const editingIdRef = useRef<string | null>(null);
-  editingIdRef.current = editingId;
   // Whether the viewport is pinned to the bottom. We only auto-follow
   // streaming text while this is true, so a user who scrolls up to read
   // history is never yanked back down.
@@ -162,50 +159,6 @@ export function MessageList({
   );
   const activeProgress = useSessionActiveRunProgress(sessionRunIds);
   const activeBelongsHere = activeProgress !== '';
-
-  useEffect(() => {
-    if (editingId && !messages.some((message) => message.id === editingId)) {
-      setEditingId(null);
-      setEditingText('');
-    }
-  }, [editingId, messages]);
-
-  const startEditing = useCallback((message: MessageRef) => {
-    if (!message.id || !message.canEdit) return;
-    editFocusInitializedForRef.current = null;
-    setEditingId(message.id);
-    setEditingText(message.userText ?? '');
-  }, []);
-
-  const cancelEditing = useCallback(() => {
-    editFocusInitializedForRef.current = null;
-    setEditingId(null);
-    setEditingText('');
-  }, []);
-
-  const registerEditInput = useCallback((input: HTMLTextAreaElement | null) => {
-    editInputRef.current = input;
-    const id = editingIdRef.current;
-    if (!input || !id || editFocusInitializedForRef.current === id) return;
-    editFocusInitializedForRef.current = id;
-    // The callback can run after Virtuoso attaches the row. Defer one
-    // microtask so the initial edit still focuses, but never overwrite a
-    // selection if the user has already clicked inside the textarea.
-    queueMicrotask(() => {
-      if (editingIdRef.current !== id || editInputRef.current !== input) return;
-      if (document.activeElement === input) return;
-      input.focus();
-      const end = input.value.length;
-      input.setSelectionRange(end, end);
-    });
-  }, []);
-
-  const submitEditing = useCallback(() => {
-    const text = editingText.trim();
-    if (!editingId || !text || !onEditUser) return;
-    onEditUser(editingId, text);
-    cancelEditing();
-  }, [cancelEditing, editingId, editingText, onEditUser]);
 
   const bindScroller = useCallback((node: HTMLElement | Window | null) => {
     const el = node instanceof HTMLElement ? node : null;
@@ -331,9 +284,12 @@ export function MessageList({
         itemContent={(index, msg) => {
           const flash = msg.id && msg.id === flashId ? ' message-flash' : '';
           if (msg.role === 'user') {
-            const isEditing = msg.id === editingId;
+            const isEditing = Boolean(msg.id && msg.id === editingUserId);
             return (
-              <div className={`message message-user${flash}`} data-message-id={msg.id}>
+              <div
+                className={`message message-user${flash}${isEditing ? ' is-editing' : ''}`}
+                data-message-id={msg.id}
+              >
                 {msg.attachments?.length ? (
                   <div className="message-attachments" aria-label="Attachments">
                     {msg.attachments.map((attachment) => (
@@ -345,65 +301,7 @@ export function MessageList({
                     ))}
                   </div>
                 ) : null}
-                {isEditing ? (
-                  <div className="message-edit-box">
-                    <div className={`message-edit-live${shouldLiveRenderMarkdown(editingText) ? ' is-live-md' : ''}`}>
-                      {shouldLiveRenderMarkdown(editingText) ? (
-                        <div className="message-edit-live-surface" aria-hidden="true">
-                          <MarkdownSegment
-                            cacheKey={`user-edit:${msg.id || msg.runId || 'anon'}`}
-                            text={editingText}
-                            className="composer-markdown-preview"
-                            immediate
-                          />
-                        </div>
-                      ) : null}
-                      <textarea
-                        ref={registerEditInput}
-                        aria-label={t('message.editPromptInput')}
-                        className="message-edit-input"
-                        value={editingText}
-                        onChange={(event) => setEditingText(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Escape') {
-                            event.preventDefault();
-                            cancelEditing();
-                            return;
-                          }
-                          // Edit follows the Composer convention: Enter commits,
-                          // Shift+Enter inserts a newline. Keep IME composition
-                          // untouched so Enter does not submit half-composed text.
-                          const native = event.nativeEvent as KeyboardEvent;
-                          if (
-                            event.key === 'Enter' &&
-                            !event.shiftKey &&
-                            !event.metaKey &&
-                            !event.ctrlKey &&
-                            !native.isComposing &&
-                            native.keyCode !== 229
-                          ) {
-                            event.preventDefault();
-                            submitEditing();
-                          }
-                        }}
-                        rows={Math.min(8, Math.max(3, editingText.split('\n').length))}
-                      />
-                    </div>
-                    <div className="message-edit-controls">
-                      <button className="message-edit-cancel" type="button" onClick={cancelEditing}>
-                        {t('message.editCancel')}
-                      </button>
-                      <button
-                        className="message-edit-send"
-                        type="button"
-                        onClick={submitEditing}
-                        disabled={!editingText.trim()}
-                      >
-                        {t('message.editSend')}
-                      </button>
-                    </div>
-                  </div>
-                ) : msg.userText ? (
+                {msg.userText ? (
                   isLongUserText(msg.userText) ? (
                     <LongTextMessage text={msg.userText} />
                   ) : (
@@ -413,23 +311,23 @@ export function MessageList({
                     />
                   )
                 ) : null}
-                {!isEditing ? (
-                  <MessageActions
-                    sourceText={msg.userText ?? ''}
-                    canUndo={Boolean(msg.canUndo)}
-                    showUndo={Boolean(msg.showUndo)}
-                    onUndo={msg.id && onUndoUser ? () => onUndoUser(msg.id!) : undefined}
-                    canEdit={Boolean(msg.canEdit)}
-                    showEdit={Boolean(msg.showEdit)}
-                    onEdit={msg.id ? () => startEditing(msg) : undefined}
-                    toolbarLabel={t('message.promptActions')}
-                    copyLabel={t('message.copyPrompt')}
-                    editLabel={t('message.editPrompt')}
-                    editDisabledLabel={t('message.editPromptLatestOnly')}
-                    undoLabel={t('message.undoPrompt')}
-                    undoDisabledLabel={t('message.undoPromptLatestOnly')}
-                  />
-                ) : null}
+                <MessageActions
+                  sourceText={msg.userText ?? ''}
+                  canUndo={Boolean(msg.canUndo)}
+                  showUndo={Boolean(msg.showUndo)}
+                  onUndo={msg.id && onUndoUser ? () => onUndoUser(msg.id!) : undefined}
+                  canEdit={Boolean(msg.canEdit)}
+                  showEdit={Boolean(msg.showEdit)}
+                  onEdit={
+                    msg.id && onEditUser ? () => onEditUser(msg.id!, msg.userText ?? '') : undefined
+                  }
+                  toolbarLabel={t('message.promptActions')}
+                  copyLabel={t('message.copyPrompt')}
+                  editLabel={t('message.editPrompt')}
+                  editDisabledLabel={t('message.editPromptLatestOnly')}
+                  undoLabel={t('message.undoPrompt')}
+                  undoDisabledLabel={t('message.undoPromptLatestOnly')}
+                />
               </div>
             );
           }

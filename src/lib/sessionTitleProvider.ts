@@ -7,7 +7,7 @@ import {
   normalizeProviderTitle,
 } from './sessionTitle';
 
-/** Ask the local Q8 title model (via Tauri → Ollama, keep_alive 0). */
+/** Ask the local OpenCode title model (via Tauri → Ollama chat, keep_alive 0). */
 export async function generateProviderSessionTitle(userText: string): Promise<string | null> {
   const prompt = buildTitlePrompt(userText);
   if (!prompt.trim()) return null;

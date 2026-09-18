@@ -10,7 +10,7 @@ import {
 export type SessionTask = TraceEvent & { runId: string; source?: 'tool' | 'monitor' };
 
 /** Wait/download-class work is a HUD task immediately; everything else waits 5s. */
-const IMMEDIATE_TASK = /\b(sleep|wait|download|curl|wget)\b/i;
+const IMMEDIATE_TASK = /\b(sleep|wait|download|curl|wget)\b|get task output/i;
 
 export function taskCommand(trace: TraceEvent): string | undefined {
   return trace.command ?? commandFromRaw(trace.raw) ?? unwrapExecuteBody(trace.label);
@@ -71,4 +71,16 @@ export function collectWatchingMonitors(
     });
   }
   return items;
+}
+
+/** Header count and the Tasks list must use this same set. */
+export function collectActiveTaskItems(
+  messages: readonly ChatMessage[],
+  live: ReadonlyMap<string, readonly TraceEvent[]>,
+  now: number,
+): SessionTask[] {
+  return [...collectWatchingMonitors(messages, now), ...collectSessionTasks(messages, live, now)].sort(
+    (a, b) =>
+      Number(b.status === 'running') - Number(a.status === 'running') || b.startedAt - a.startedAt,
+  );
 }

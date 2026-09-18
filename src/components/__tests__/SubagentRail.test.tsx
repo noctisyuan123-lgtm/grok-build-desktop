@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SubagentRail, SubagentUiProvider } from '../SubagentRail';
@@ -199,6 +199,62 @@ describe('SubagentRail', () => {
     expect(screen.getByRole('heading', { name: /Tasks/ })).toBeInTheDocument();
     expect(screen.getByText('1 agents')).toBeInTheDocument();
     expect(screen.getByText('1 tasks')).toBeInTheDocument();
+  });
+
+  it('keeps the header task count equal to the Tasks list as tools cross five seconds', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const startedAt = Date.now();
+    const messages = [message('run-task')];
+    streamStore.patchRun('run-task', {
+      state: 'running',
+      traces: [
+        {
+          key: 'tool:out',
+          kind: 'tool',
+          label: 'Get task output: call-1bc',
+          status: 'running',
+          startedAt,
+          endedAt: null,
+        },
+        {
+          key: 'tool:dl',
+          kind: 'tool',
+          label: 'Download Q8_0 GGUF via curl',
+          command: 'curl -L https://example.com/a.bin -o a.bin',
+          status: 'running',
+          startedAt,
+          endedAt: null,
+        },
+        {
+          key: 'tool:read',
+          kind: 'tool',
+          label: 'Read src/App.tsx',
+          status: 'running',
+          startedAt,
+          endedAt: null,
+        },
+      ],
+    });
+    try {
+      render(
+        <SubagentUiProvider messages={messages}>
+          <SubagentRail messages={messages} onStopTask={() => {}} />
+        </SubagentUiProvider>,
+      );
+      expect(screen.getByText('2 tasks')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /Tasks/ })).toHaveTextContent('2');
+      expect(screen.queryByText('Read src/App.tsx')).toBeNull();
+
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+      });
+      expect(screen.getByText('3 tasks')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /Tasks/ })).toHaveTextContent('3');
+      expect(screen.getByText('Read src/App.tsx')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('hides the collapsed activity dot when the rail is empty', async () => {

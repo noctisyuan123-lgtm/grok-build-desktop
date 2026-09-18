@@ -36,6 +36,15 @@ function renderComposer(overrides: Partial<Parameters<typeof Composer>[0]> = {})
 }
 
 describe('Composer submit', () => {
+  it('cancels in-composer prompt editing on Escape', async () => {
+    const onCancelEdit = vi.fn();
+    const user = userEvent.setup();
+    const { textarea } = renderComposer({ onCancelEdit, initialValue: 'edit me' });
+    textarea.focus();
+    await user.keyboard('{Escape}');
+    expect(onCancelEdit).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the editor surface contenteditable', () => {
     const { textarea, container } = renderComposer();
     expect(textarea).toHaveAttribute('contenteditable', 'true');

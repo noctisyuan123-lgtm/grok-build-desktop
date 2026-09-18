@@ -55,6 +55,8 @@ export interface ComposerSectionProps {
   emptyState?: ReactNode;
   offline?: boolean;
   beforeEnqueue?: (laneId?: string) => Promise<void>;
+  editingUserId?: string | null;
+  onCancelEdit?: () => void;
 }
 
 export function ComposerSection({
@@ -81,6 +83,8 @@ export function ComposerSection({
   emptyState,
   offline = false,
   beforeEnqueue,
+  editingUserId = null,
+  onCancelEdit,
 }: ComposerSectionProps) {
   const {
     reasoningEffort,
@@ -149,6 +153,16 @@ export function ComposerSection({
           .filter((id): id is string => Boolean(id))}
       />
       {emptyState}
+      {editingUserId ? (
+        <div className="composer-edit-banner" role="status">
+          <span>{t('message.editingInComposer')}</span>
+          {onCancelEdit ? (
+            <button className="composer-edit-cancel" type="button" onClick={onCancelEdit}>
+              {t('message.editCancel')}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <Composer
         ref={composerRef}
         cwd={codingCwd}
@@ -170,6 +184,7 @@ export function ComposerSection({
         onError={(message) => setSessionNotice(t('composerSection.sendFailed', { message }))}
         onStop={grokIsRunning && activeRunId ? () => stopRun(activeRunId) : undefined}
         onHostSlash={onHostSlash}
+        onCancelEdit={onCancelEdit}
         controls={
           <div className="composer-compact-controls" ref={menuRef}>
             <div className="cmp-wrap">

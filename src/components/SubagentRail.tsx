@@ -17,7 +17,7 @@ import {
   partitionSessionSubagents,
   type SessionSubagent,
 } from '../lib/sessionSubagents';
-import { collectSessionTasks, collectWatchingMonitors } from '../lib/sessionTasks';
+import { useSessionTaskItems } from '../hooks/useSessionTaskItems';
 import { t } from '../i18n';
 import { SubagentInspector } from './SubagentFloat';
 import { SubagentUiContext, useSubagentUi, type SubagentOpenTarget } from './subagentUiContext';
@@ -125,46 +125,8 @@ export function SubagentRail({
     return () => ui.registerIgnoreNode('rail', null);
   }, [ui]);
 
-  const taskFingerprint = useSyncExternalStore(
-    streamStore.subscribe,
-    () =>
-      JSON.stringify(
-        messages.map((message) => {
-          const snap = streamStore.getRunSnapshot(message.runId ?? '');
-          return {
-            watching: snap?.watching ?? false,
-            watchingLabel: snap?.watchingLabel ?? null,
-            watchingStartedAt: snap?.watchingStartedAt ?? null,
-            traces: (snap?.traces ?? []).map(
-              ({ key, kind, label, command, status, startedAt, endedAt }) => ({
-                key,
-                kind,
-                label,
-                command,
-                status,
-                startedAt,
-                endedAt,
-              }),
-            ),
-          };
-        }),
-      ),
-    () => '[]',
-  );
-  const taskCount = useMemo(() => {
-    void taskFingerprint;
-    const now = Date.now();
-    const live = new Map(
-      messages.map((message) => [
-        message.runId ?? `msg:${message.id}`,
-        streamStore.getRunSnapshot(message.runId ?? '')?.traces ?? [],
-      ]),
-    );
-    return (
-      collectWatchingMonitors(messages, now).length +
-      collectSessionTasks(messages, live, now).length
-    );
-  }, [messages, taskFingerprint]);
+  const { items: taskItems, now: taskNow } = useSessionTaskItems(messages);
+  const taskCount = taskItems.length;
 
   if (!ui) return null;
 
@@ -204,7 +166,7 @@ export function SubagentRail({
       </button>
       {collapsed ? null : (
         <div className="subagent-rail-body">
-          <LongTaskList messages={messages} onStop={onStopTask} />
+          <LongTaskList items={taskItems} now={taskNow} onStop={onStopTask} />
           {active.length > 0 ? (
             <RailSection
               title={t('subagent.railActive')}

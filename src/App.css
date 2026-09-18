@@ -5471,6 +5471,30 @@ body[data-theme='light'] .hljs-comment {
   position: relative;
 }
 
+.composer-edit-banner {
+  align-items: center;
+  color: var(--text-muted, var(--muted-text, #9a9a9a));
+  display: flex;
+  font-size: 12px;
+  gap: 10px;
+  justify-content: space-between;
+  margin: 0 14px 8px;
+}
+
+.composer-edit-cancel {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.message.message-user.is-editing .message-body {
+  opacity: 0.72;
+}
+
 .message-list-shell {
   display: flex;
   flex: 1 1 auto;

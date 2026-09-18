@@ -109,6 +109,8 @@ interface Props {
   onHostSlash?: (raw: string) => boolean | Promise<boolean>;
   /** Device is offline — keep the draft, do not enqueue. */
   offline?: boolean;
+  /** Escape while editing a prior prompt in this composer. */
+  onCancelEdit?: () => void;
 }
 
 /** Listbox id shared by the editor (aria-controls) and the FilePicker. */
@@ -132,6 +134,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     onStop,
     onHostSlash,
     offline = false,
+    onCancelEdit,
   }: Props,
   outerRef,
 ) {
@@ -635,6 +638,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             onSubmitEnter={(delivery) => {
               void submit(delivery === 'interrupt', delivery);
             }}
+            onCancel={onCancelEdit}
           />
         </div>
         <div className="composer-inline-bar">

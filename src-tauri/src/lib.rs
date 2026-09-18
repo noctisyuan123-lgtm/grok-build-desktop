@@ -4466,7 +4466,53 @@ fn post_un_user_notification() -> bool {
 }
 
 
-/// Generate a short session title via local Ollama (Q8 GGUF), then unload
+/// OpenCode title-agent system prompt (kth8 LFM2.5-230M-OpenCode-Title-Generator).
+const TITLE_AGENT_SYSTEM: &str = r#"You are a title generator. You output ONLY a thread title. Nothing else.
+
+<task>
+Generate a brief title that would help the user find this conversation later.
+
+Follow all rules in <rules>
+Use the <examples> so you know what a good title looks like.
+Your output must be:
+- A single line
+- ≤50 characters
+- No explanations
+</task>
+
+<rules>
+- you MUST use the same language as the user message you are summarizing
+- Title must be grammatically correct and read naturally - no word salad
+- Never include tool names in the title (e.g. "read tool", "bash tool", "edit tool")
+- Focus on the main topic or question the user needs to retrieve
+- Vary your phrasing - avoid repetitive patterns like always starting with "Analyzing"
+- When a file is mentioned, focus on WHAT the user wants to do WITH the file, not just that they shared it
+- Keep exact: technical terms, numbers, filenames, HTTP codes
+- Remove: the, this, my, a, an
+- Never assume tech stack
+- Never use tools
+- NEVER respond to questions, just generate a title for the conversation
+- The title should NEVER include "summarizing" or "generating" when generating a title
+- DO NOT SAY YOU CANNOT GENERATE A TITLE OR COMPLAIN ABOUT THE INPUT
+- Always output something meaningful, even if the input is minimal.
+- If the user message is short or conversational (e.g. "hello", "lol", "what's up", "hey"):
+  → create a title that reflects the user's tone or intent (such as Greeting, Quick check-in, Light chat, Intro message, etc.)
+</rules>
+
+<examples>
+"debug 500 errors in production" → Debugging production 500 errors
+"refactor user service" → Refactoring user service
+"why is app.js failing" → app.js failure investigation
+"implement rate limiting" → Rate limiting implementation
+"how do I connect postgres to my API" → Postgres API connection
+"best practices for React hooks" → React hooks best practices
+"@src/auth.ts can you add refresh token support" → Auth refresh token support
+"@utils/parser.ts this is broken" → Parser bug fix
+"look at @config.json" → Config review
+"@App.tsx add dark mode toggle" → Dark mode toggle in App
+</examples>"#;
+
+/// Generate a short session title via local Ollama chat, then unload
 /// (`keep_alive: 0`). Failures surface as Err so the UI keeps the fallback.
 #[tauri::command]
 async fn generate_session_title(prompt: String, model: String) -> Result<String, String> {
@@ -4525,16 +4571,61 @@ fn ensure_ollama_server(ollama: &Path) -> Result<(), String> {
     Err("Ollama server did not become ready".into())
 }
 
-fn ensure_ollama_model(ollama: &Path, model: &str) -> Result<(), String> {
+fn ollama_has_model(ollama: &Path, model: &str) -> Result<bool, String> {
     let listed = Command::new(ollama)
         .args(["list"])
         .output()
         .map_err(|e| format!("ollama list failed: {e}"))?;
     let list_txt = String::from_utf8_lossy(&listed.stdout);
-    // Match either the full tag or the bare name before ':'.
     let bare = model.split(':').next().unwrap_or(model);
-    if list_txt.lines().any(|line| line.contains(model) || line.contains(bare)) {
+    Ok(list_txt
+        .lines()
+        .any(|line| line.contains(model) || line.contains(bare)))
+}
+
+fn local_title_gguf(model: &str) -> Option<PathBuf> {
+    let bare = model.split(':').next().unwrap_or(model);
+    if bare != "lfm-title-bf16" {
+        return None;
+    }
+    let home = env::var_os("HOME")?;
+    let path = PathBuf::from(home).join(
+        "models/LFM2.5-230M-OpenCode-Title-Generator-GGUF/LFM2.5-230M-OpenCode-Title-Generator-bf16.gguf",
+    );
+    path.is_file().then_some(path)
+}
+
+fn create_ollama_from_gguf(ollama: &Path, model: &str, gguf: &Path) -> Result<(), String> {
+    let template = "{{ if .System }}<|im_start|>system\n{{ .System }}<|im_end|>\n{{ end }}{{ if .Prompt }}<|im_start|>user\n{{ .Prompt }}<|im_end|>\n<|im_start|>assistant\n{{ end }}{{ .Response }}";
+    let body = format!(
+        "FROM {gguf}\nTEMPLATE \"\"\"{template}\"\"\"\nPARAMETER stop <|im_end|>\nPARAMETER temperature 0.2\nPARAMETER num_predict 32\n",
+        gguf = gguf.display(),
+        template = template
+    );
+    let path = env::temp_dir().join(format!("{model}.Modelfile"));
+    std::fs::write(&path, body).map_err(|e| format!("write Modelfile: {e}"))?;
+    let create = Command::new(ollama)
+        .args(["create", model, "-f"])
+        .arg(&path)
+        .output()
+        .map_err(|e| format!("ollama create failed: {e}"))?;
+    let _ = std::fs::remove_file(&path);
+    if !create.status.success() {
+        return Err(format!(
+            "ollama create {}: {}",
+            model,
+            String::from_utf8_lossy(&create.stderr)
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_ollama_model(ollama: &Path, model: &str) -> Result<(), String> {
+    if ollama_has_model(ollama, model)? {
         return Ok(());
+    }
+    if let Some(gguf) = local_title_gguf(model) {
+        return create_ollama_from_gguf(ollama, model, &gguf);
     }
     let pull = Command::new(ollama)
         .args(["pull", model])
@@ -4560,15 +4651,17 @@ fn generate_session_title_blocking(prompt: String, model: String) -> Result<Stri
     ensure_ollama_server(&ollama)?;
     ensure_ollama_model(&ollama, &model)?;
 
-    // Prefer the HTTP generate API so we can set keep_alive: 0 and stream:false.
     let body = serde_json::json!({
         "model": model,
-        "prompt": prompt,
         "stream": false,
         "keep_alive": 0,
+        "messages": [
+            { "role": "system", "content": TITLE_AGENT_SYSTEM },
+            { "role": "user", "content": prompt }
+        ],
         "options": {
             "temperature": 0.2,
-            "num_predict": 24
+            "num_predict": 32
         }
     });
     let body_str = body.to_string();
@@ -4581,13 +4674,13 @@ fn generate_session_title_blocking(prompt: String, model: String) -> Result<Stri
             "Content-Type: application/json",
             "-d",
             &body_str,
-            "http://127.0.0.1:11434/api/generate",
+            "http://127.0.0.1:11434/api/chat",
         ])
         .output()
-        .map_err(|e| format!("ollama generate request failed: {e}"))?;
+        .map_err(|e| format!("ollama chat request failed: {e}"))?;
     if !output.status.success() {
         return Err(format!(
-            "ollama generate failed: {}",
+            "ollama chat failed: {}",
             String::from_utf8_lossy(&output.stderr)
         ));
     }
@@ -4595,7 +4688,7 @@ fn generate_session_title_blocking(prompt: String, model: String) -> Result<Stri
     let parsed: serde_json::Value =
         serde_json::from_str(&raw).map_err(|e| format!("bad ollama JSON: {e}"))?;
     let text = parsed
-        .get("response")
+        .pointer("/message/content")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .trim()

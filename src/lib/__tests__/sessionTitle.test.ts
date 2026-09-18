@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildTitlePrompt,
   canAcceptProviderTitle,
   fallbackSessionTitle,
   isPlausibleProviderTitle,
   normalizeProviderTitle,
   resolveSessionTitle,
+  SESSION_TITLE_OLLAMA_MODEL,
   shouldScheduleFirstPromptProvider,
 } from '../sessionTitle';
 
@@ -51,6 +53,12 @@ describe('sessionTitle (DeepSeek first-prompt cadence)', () => {
     expect(canAcceptProviderTitle('provider')).toBe(true);
     expect(canAcceptProviderTitle(undefined)).toBe(true);
     expect(canAcceptProviderTitle('user')).toBe(false);
+  });
+
+  it('sends the first prompt as a chat turn, not User:/Title: completion', () => {
+    expect(SESSION_TITLE_OLLAMA_MODEL).toBe('lfm-title-bf16');
+    expect(buildTitlePrompt('  帮我修 login flake  ')).toBe('帮我修 login flake');
+    expect(buildTitlePrompt('fix the login flake')).not.toMatch(/User:|Title:/);
   });
 
   it('normalizes model output', () => {

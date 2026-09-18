@@ -333,6 +333,7 @@ export const en = {
   'message.editPromptInput': 'Edit prompt text',
   'message.editCancel': 'Cancel',
   'message.editSend': 'Send edit',
+  'message.editingInComposer': 'Editing prompt',
   'message.editFailed': 'Edit could not safely replace the old context. Nothing was sent.',
   'message.copied': 'Copied',
   'message.fork': 'Fork response',

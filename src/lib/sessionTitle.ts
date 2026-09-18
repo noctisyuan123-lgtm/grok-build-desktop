@@ -10,7 +10,7 @@ import { deriveConversationTitle } from './conversationTitle';
 
 export type SessionTitleSource = 'fallback' | 'provider' | 'user';
 
-export const SESSION_TITLE_OLLAMA_MODEL = 'supra-title-350m-q4';
+export const SESSION_TITLE_OLLAMA_MODEL = 'lfm-title-bf16';
 
 export function fallbackSessionTitle(firstPrompt: string): string {
   return deriveConversationTitle(firstPrompt);
@@ -46,10 +46,9 @@ export function canAcceptProviderTitle(source?: SessionTitleSource | null): bool
   return source !== 'user';
 }
 
+/** First-prompt text for the OpenCode-style title chat turn (no User:/Title: priming). */
 export function buildTitlePrompt(userText: string): string {
-  const cleaned = userText.replace(/\s+/g, ' ').trim();
-  // Completion priming keeps Supra-Title-350M in title mode (plain text chats).
-  return `User: ${cleaned}\nTitle: `;
+  return userText.replace(/\s+/g, ' ').trim();
 }
 
 

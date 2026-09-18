@@ -34,6 +34,7 @@ it('does not show a bare Tool title when the command is known', () => {
 it('includes wait/download immediately, and slow generic tools after five seconds', () => {
   expect(isLongTask({ ...trace, command: 'sleep 60' }, 1_000)).toBe(true);
   expect(isLongTask({ ...trace, command: 'curl -O https://example.com/a.bin' }, 1_000)).toBe(true);
+  expect(isLongTask({ ...trace, label: 'Get task output: call-1bc' }, 1_000)).toBe(true);
   expect(isLongTask({ ...trace, label: 'Execute process' }, 1_000)).toBe(false);
   expect(isLongTask({ ...trace, command: 'bash -lc ls' }, 1_000)).toBe(false);
   expect(isLongTask({ ...trace, kind: 'task', label: 'Plan' }, 1_000)).toBe(false);
