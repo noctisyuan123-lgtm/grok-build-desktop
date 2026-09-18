@@ -1,4 +1,4 @@
-import { Extension } from '@tiptap/core';
+import { Extension, type JSONContent } from '@tiptap/core';
 import { EditorContent, useEditor, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { Markdown } from '@tiptap/markdown';
@@ -39,6 +39,57 @@ function detectPlainMention(
 
 function mentionInsertion(entry: FileEntry): string {
   return /\s/.test(entry.path) ? `@"${entry.path}" ` : `@${entry.path} `;
+}
+
+function normalizePasteText(text: string): string {
+  return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+function isBlockMarkdownPaste(text: string): boolean {
+  return /(?:^|\n)\s*\|.+\|/.test(text) || /(?:^|\n)```/.test(text);
+}
+
+function inCodeContext(editor: Editor): boolean {
+  const { $from, $to } = editor.state.selection;
+  if (!$from.sameParent($to)) return false;
+  return Boolean($from.parent.type.spec.code) || editor.isActive('code');
+}
+
+/** Codex-style literal paste: one paragraph, `\n` → hardBreak. */
+function literalHardBreakContent(text: string): JSONContent[] {
+  const lines = normalizePasteText(text).replace(/\n+$/, '').split('\n');
+  const content: JSONContent[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (i > 0) content.push({ type: 'hardBreak' });
+    const line = lines[i];
+    if (line) content.push({ type: 'text', text: line });
+  }
+  return content;
+}
+
+function insertPastedMarkdown(editor: Editor, text: string) {
+  const normalized = normalizePasteText(text);
+  if (inCodeContext(editor)) {
+    editor.view.dispatch(editor.state.tr.insertText(normalized));
+    return;
+  }
+  if (isBlockMarkdownPaste(normalized)) {
+    editor.commands.insertContent(normalized, { contentType: 'markdown' });
+    return;
+  }
+  const trimmed = normalized.replace(/\n+$/, '');
+  if (!trimmed.includes('\n')) {
+    const blocks = editor.markdown?.parse(trimmed)?.content ?? [];
+    const only = blocks.find((block) => block.type === 'paragraph' && block.content?.length);
+    if (only?.content) {
+      editor.commands.insertContent(only.content);
+      return;
+    }
+    if (trimmed) editor.commands.insertContent([{ type: 'text', text: trimmed }]);
+    return;
+  }
+  const inline = literalHardBreakContent(normalized);
+  if (inline.length) editor.commands.insertContent(inline);
 }
 
 interface Props {
@@ -144,7 +195,9 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
         if (html.includes('<table') && !looksLikeMdTable) return false;
         if (!text) return false;
         event.preventDefault();
-        editorRef.current?.commands.insertContent(text, { contentType: 'markdown' });
+        const current = editorRef.current;
+        if (!current) return false;
+        insertPastedMarkdown(current, text);
         return true;
       },
     },

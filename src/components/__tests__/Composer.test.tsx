@@ -470,4 +470,84 @@ describe('Composer live markdown', () => {
       expect(container.querySelector('.ProseMirror pre')).toBeTruthy();
     });
   });
+
+  it('pastes a single line without inserting extra line breaks', async () => {
+    const user = userEvent.setup();
+    const { textarea } = renderComposer();
+    await user.click(textarea);
+    await user.paste('hello world this is a long sentence');
+    await waitFor(() => {
+      expect(draftOf(document.body)).toBe('hello world this is a long sentence');
+    });
+  });
+
+  it('pastes inline into existing text without starting a new paragraph', async () => {
+    const user = userEvent.setup();
+    const { textarea } = renderComposer();
+    await user.click(textarea);
+    await user.keyboard('hello ');
+    await user.paste('world');
+    await waitFor(() => {
+      expect(draftOf(document.body)).toBe('hello world');
+    });
+  });
+
+  it('ignores a trailing clipboard newline when pasting into existing text', async () => {
+    const user = userEvent.setup();
+    const { textarea } = renderComposer();
+    await user.click(textarea);
+    await user.keyboard('hello ');
+    await user.paste('world\n');
+    await waitFor(() => {
+      expect(draftOf(document.body)).toBe('hello world');
+    });
+  });
+
+  it('pastes inline markdown marks without splitting the paragraph', async () => {
+    const user = userEvent.setup();
+    const { textarea, container } = renderComposer();
+    await user.click(textarea);
+    await user.keyboard('say ');
+    await user.paste('**please**');
+    await waitFor(() => {
+      expect(container.querySelector('.ProseMirror strong, .ProseMirror b')).toBeTruthy();
+      expect(draftOf(document.body)).toMatch(/^say \*\*please\*\*$/);
+    });
+  });
+
+  it('keeps a long pasted line as one paragraph even with a trailing newline', async () => {
+    const user = userEvent.setup();
+    const { textarea } = renderComposer();
+    await user.click(textarea);
+    await user.paste('one long line that should not wrap into many paragraphs\n');
+    await waitFor(() => {
+      const draft = draftOf(document.body);
+      expect(draft).toBe('one long line that should not wrap into many paragraphs');
+    });
+  });
+
+  it('pastes multiple lines as hard breaks in one paragraph', async () => {
+    const user = userEvent.setup();
+    const { textarea, container } = renderComposer();
+    await user.click(textarea);
+    await user.keyboard('start ');
+    await user.paste('hello\nworld');
+    await waitFor(() => {
+      expect(container.querySelectorAll('.ProseMirror p')).toHaveLength(1);
+      expect(container.querySelector('.ProseMirror br')).toBeTruthy();
+      expect(draftOf(document.body)).toBe('start hello  \nworld');
+    });
+  });
+
+  it('keeps a blank source line as two hard breaks instead of a new paragraph', async () => {
+    const user = userEvent.setup();
+    const { textarea, container } = renderComposer();
+    await user.click(textarea);
+    await user.paste('hello\n\nworld');
+    await waitFor(() => {
+      expect(container.querySelectorAll('.ProseMirror p')).toHaveLength(1);
+      expect(container.querySelectorAll('.ProseMirror br')).toHaveLength(2);
+      expect(draftOf(document.body)).not.toMatch(/\n\n/);
+    });
+  });
 });
