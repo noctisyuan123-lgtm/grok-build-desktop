@@ -28,6 +28,7 @@ import { showCompletionPopup } from './lib/completionPopup';
 import { isBackgroundSessionRun } from './lib/completionNotification';
 import { mergeStreamIntoMessages } from './lib/mergeStreamMessages';
 import { resolveWakeupLane } from './lib/wakeupLane';
+import { pickResumeSessionId } from './lib/resumeSessionId';
 import { MessageList, type MessageRef } from './components/MessageList';
 import type { ComposerFolder, ComposerHandle } from './components/Composer';
 import { QueueDock } from './components/QueueDock';
@@ -1071,13 +1072,15 @@ function App() {
       .reverse()
       .find((message) => message.role === 'assistant' && message.meta?.sessionId)?.meta?.sessionId;
     // Prefer the pinned tab's head — never the tab the user switched to mid-await.
-    const previousSessionId =
-      inPlaceEditSessionId ??
-      (rebased?.tabId === targetTabId ? rebased.sessionId : null) ??
-      visibleSessionId ??
-      (targetTabId === activeTabId ? currentSessionId() : null) ??
-      targetTab?.sessionHead ??
-      (targetTabId === activeTabId ? tabSessionHead : null);
+    const previousSessionId = pickResumeSessionId({
+      inPlaceEditSessionId,
+      rebasedSessionId: rebased?.tabId === targetTabId ? rebased.sessionId : null,
+      visibleSessionId,
+      currentSessionId: targetTabId === activeTabId ? currentSessionId() : null,
+      tabSessionHead:
+        targetTab?.sessionHead ?? (targetTabId === activeTabId ? tabSessionHead : null),
+      messages: targetMessages,
+    });
     // A turn currently running is the parent of anything newly queued. Its
     // session id does not exist yet, so do not accidentally fork from the
     // older completed turn found above.
@@ -1642,12 +1645,28 @@ function App() {
       rebasedSessionHeadRef.current = null;
     }
     const activeRebased = rebasedSessionHeadRef.current;
+    // liveSessionId is process-global. Only the tab that owns the live link may
+    // adopt it — otherwise New Session / an empty tab inherits a foreign head
+    // and the first send tries to --resume a dead session (FS_NOT_FOUND).
+    const liveOwned =
+      Boolean(liveSessionId) &&
+      Boolean(activeTabId) &&
+      liveTabIdRef.current === activeTabId;
     const head =
       newestSessionId ??
       (activeRebased?.tabId === activeTabId ? activeRebased.sessionId : null) ??
-      liveSessionId;
+      (liveOwned ? liveSessionId : null);
     if (head && head !== tabSessionHead) {
       updateActiveTabMeta({ sessionHead: head });
+    } else if (
+      !head &&
+      tabSessionHead &&
+      !newestSessionId &&
+      !liveOwned &&
+      !(activeRebased?.tabId === activeTabId)
+    ) {
+      // Drop a poisoned head on a blank / not-yet-bound conversation.
+      updateActiveTabMeta({ sessionHead: null });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, activeTabId, liveSessionId]);

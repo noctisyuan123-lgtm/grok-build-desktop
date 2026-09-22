@@ -122,6 +122,15 @@ export function useSessionTabs(deps: SessionTabsDeps) {
     // "New conversation" row into HISTORY on every ⌘N / New Session click.
     const currentTab = current.tabs.find((t) => t.id === current.activeTabId);
     if (currentTab && currentTab.messages.length === 0 && current.messages.length === 0) {
+      // A blank tab can still carry a foreign sessionHead (live-link leak).
+      // New Session must not --resume it on the first send.
+      if (currentTab.sessionHead) {
+        setTabs((existing) =>
+          existing.map((tab) =>
+            tab.id === currentTab.id ? { ...tab, sessionHead: null } : tab,
+          ),
+        );
+      }
       setDrafts({ standard: '', coding: '' });
       setComposerValue('');
       setSessionNotice(null);
