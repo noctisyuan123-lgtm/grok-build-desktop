@@ -34,7 +34,7 @@ function message(runId: string): ChatMessage {
 }
 
 describe('SubagentRail', () => {
-  it('keeps the empty rail mounted and shows long tasks without any subagents', async () => {
+  it('shows long tasks without any subagents, and hides the rail when messages become empty', async () => {
     const messages = [message('run-task')];
     streamStore.patchRun('run-task', {
       state: 'running',
@@ -63,11 +63,10 @@ describe('SubagentRail', () => {
     expect(onStopTask).toHaveBeenCalledWith('run-task');
     rerender(
       <SubagentUiProvider messages={[]}>
-        <SubagentRail onStopTask={() => {}} />
+        <SubagentRail messages={[]} onStopTask={() => {}} />
       </SubagentUiProvider>,
     );
-    expect(screen.getByRole('complementary', { name: 'Agents & Tasks' })).toBeInTheDocument();
-    expect(screen.queryByText('Processes and long tasks appear here.')).toBeNull();
+    expect(screen.queryByRole('complementary', { name: 'Agents & Tasks' })).toBeNull();
   });
 
   it('lists a watching monitor with its title in Tasks', () => {
@@ -102,9 +101,10 @@ describe('SubagentRail', () => {
         }),
       ],
     });
+    const messages = [message('run-1')];
     render(
-      <SubagentUiProvider messages={[message('run-1')]}>
-        <SubagentRail onStopTask={() => {}} />
+      <SubagentUiProvider messages={messages}>
+        <SubagentRail messages={messages} onStopTask={() => {}} />
       </SubagentUiProvider>,
     );
 
@@ -257,14 +257,27 @@ describe('SubagentRail', () => {
     }
   });
 
-  it('hides the collapsed activity dot when the rail is empty', async () => {
-    const user = userEvent.setup();
+  it('does not render the rail on the empty landing (no messages)', () => {
     render(
       <SubagentUiProvider messages={[]}>
-        <SubagentRail onStopTask={() => {}} />
+        <SubagentRail messages={[]} onStopTask={() => {}} />
       </SubagentUiProvider>,
     );
 
+    expect(screen.queryByRole('complementary', { name: 'Agents & Tasks' })).toBeNull();
+    expect(screen.queryByText('Agents & Tasks')).toBeNull();
+  });
+
+  it('hides the collapsed activity dot when there is no agent or task activity', async () => {
+    const user = userEvent.setup();
+    const messages = [message('run-idle')];
+    render(
+      <SubagentUiProvider messages={messages}>
+        <SubagentRail messages={messages} onStopTask={() => {}} />
+      </SubagentUiProvider>,
+    );
+
+    expect(screen.getByRole('complementary', { name: 'Agents & Tasks' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Collapse activity' }));
     expect(document.querySelector('.subagent-rail-activity-dot')).toBeNull();
     expect(screen.queryByText('0 agents')).toBeNull();

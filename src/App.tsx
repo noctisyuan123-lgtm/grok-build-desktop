@@ -2238,7 +2238,7 @@ function App() {
   ]);
   return (
     <main
-      className={`app-shell theme-${themeMode}${expandedWindow ? ' has-task-rail' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}${sidebarTransitionReady ? ' sidebar-transition-ready' : ''}`}
+      className={`app-shell theme-${themeMode}${expandedWindow && visibleMessages.length > 0 ? ' has-task-rail' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}${sidebarTransitionReady ? ' sidebar-transition-ready' : ''}`}
     >
       <CommandPalette
         open={paletteOpen}
@@ -2417,7 +2417,7 @@ function App() {
                   ) : null
                 }
               />
-              {expandedWindow ? <SubagentRail messages={visibleMessages} onStopTask={stopRun} /> : null}
+              {expandedWindow && visibleMessages.length > 0 ? <SubagentRail messages={visibleMessages} onStopTask={stopRun} /> : null}
             </div>
             <PreviewPanel
               open={previewOpen}

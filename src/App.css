@@ -11897,8 +11897,10 @@ body,
   background-color: var(--scroll-thumb-hover, #555);
 }
 
-/* Reserve one shared column, so history, composer and usage stay aligned. */
-.app-shell.has-task-rail {
+/* Reserve one shared column only while the rail is mounted. Empty landing
+   must not keep --task-rail-reserve (that left a Codex-unlike right gutter
+   after SubagentRail was unmounted but .has-task-rail stayed on). */
+.app-shell.has-task-rail:has(.subagent-rail) {
   --task-rail-width: clamp(250px, 19vw, 285px);
   --task-rail-reserve: calc(var(--task-rail-width) + 26px);
 }
@@ -11907,16 +11909,16 @@ body,
 }
 /* The rail floats over the right edge. Keep the viewport (and therefore its
    scrollbar) flush to that edge, while shifting only the reading column. */
-.has-task-rail .conversation-panel > .conversation-scroll {
+.has-task-rail .conversation-panel:has(> .subagent-rail) > .conversation-scroll {
   box-sizing: border-box;
   margin-right: 0;
   padding-right: 0;
   width: 100%;
 }
-.has-task-rail .message.message-user,
-.has-task-rail .message.message-assistant,
-.has-task-rail .conversation-panel > .queue-dock,
-.has-task-rail .conversation-panel > .composer-row {
+.has-task-rail .conversation-panel:has(> .subagent-rail) .message.message-user,
+.has-task-rail .conversation-panel:has(> .subagent-rail) .message.message-assistant,
+.has-task-rail .conversation-panel:has(> .subagent-rail) > .queue-dock,
+.has-task-rail .conversation-panel:has(> .subagent-rail) > .composer-row {
   position: relative;
   transform: translateX(calc(var(--task-rail-reserve) / -2));
 }
@@ -11924,8 +11926,13 @@ body,
 .has-task-rail .subagent-drawer .message.message-assistant {
   transform: none;
 }
-.has-task-rail .message-list-shell .jump-to-bottom {
+.has-task-rail .conversation-panel:has(> .subagent-rail) .message-list-shell .jump-to-bottom {
   transform: translateX(calc(-50% - var(--task-rail-reserve) / 2));
+}
+/* Belt-and-suspenders: empty stage never shifts for a phantom rail column. */
+.has-task-rail .conversation-panel.is-empty > .composer-row,
+.has-task-rail .conversation-panel.is-empty > .queue-dock {
+  transform: none;
 }
 .subagent-float-copy {
   display: flex;

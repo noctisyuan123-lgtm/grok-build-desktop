@@ -129,6 +129,8 @@ export function SubagentRail({
   const taskCount = taskItems.length;
 
   if (!ui) return null;
+  // Hide on the empty landing screen (no messages yet) — same condition as EmptyState.
+  if (messages.length === 0) return null;
 
   const { active, done } = partitionSessionSubagents(ui.items);
   const collapsed = ui.collapsed;
