@@ -10,7 +10,12 @@ import { defaultTabName, makeTab, type Tab, type TabMessage } from '../lib/tabs'
 import type { ChatMessage, Mode } from '../app/types';
 import { storageKeys, tabsActiveKey, tabsStorageKey } from '../app/constants';
 import { storedMessages, writeLocalStorageJson } from '../app/storage';
-import { mergeTabLists, richerMessageList, tabMessages } from '../lib/conversationMerge';
+import {
+  mergeTabLists,
+  reconcileActiveTab,
+  richerMessageList,
+  tabMessages,
+} from '../lib/conversationMerge';
 import { loadConversations, saveConversations } from '../lib/grok';
 import { hasTauriRuntime } from '../lib/runtime';
 
@@ -94,6 +99,9 @@ export function useSessionTabs(deps: SessionTabsDeps) {
   // the synthesized tab as active immediately.
   useEffect(() => {
     if (!activeTabId && tabs.length > 0) setActiveTabId(tabs[0].id);
+    // Do not re-point a dangling activeTabId here: session_state may still
+    // restore the live transcript for that id, and the mirror / load
+    // reconcile paths materialize it into tabs[].
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -217,7 +225,31 @@ export function useSessionTabs(deps: SessionTabsDeps) {
   useEffect(() => {
     if (!hasTauriRuntime() || !conversationsReady || tabs.length === 0) return;
     const timer = window.setTimeout(() => {
-      void saveConversations({ activeTabId, tabs }).catch(() => {
+      const live = sessionStateRef.current;
+      const reconciled = reconcileActiveTab(live.tabs, live.activeTabId, {
+        messages: live.messages,
+        cwd: live.codingCwd,
+      });
+      // Persist the reconciled snapshot so conversations.json never records a
+      // dangling activeTabId. Repair React state only when the active id was
+      // missing from tabs (or needed a fallback), not on every enrich.
+      const wasDangling =
+        Boolean(live.activeTabId) &&
+        !live.tabs.some((tab) => tab.id === live.activeTabId);
+      if (
+        wasDangling ||
+        reconciled.activeTabId !== live.activeTabId ||
+        reconciled.tabs.length !== live.tabs.length
+      ) {
+        setTabs(reconciled.tabs);
+        if (reconciled.activeTabId !== live.activeTabId) {
+          setActiveTabId(reconciled.activeTabId);
+        }
+      }
+      void saveConversations({
+        activeTabId: reconciled.activeTabId,
+        tabs: reconciled.tabs,
+      }).catch(() => {
         /* disk backup is best-effort; localStorage still holds a cache */
       });
     }, 300);
@@ -232,24 +264,38 @@ export function useSessionTabs(deps: SessionTabsDeps) {
         if (cancelled) return;
         if (stored && Array.isArray(stored.tabs) && stored.tabs.length > 0) {
           const diskTabs = stored.tabs as Tab[];
-          const diskActive =
-            stored.activeTabId && diskTabs.some((tab) => tab.id === stored.activeTabId)
-              ? stored.activeTabId
+          const diskActiveRaw =
+            typeof stored.activeTabId === 'string' ? stored.activeTabId : undefined;
+          const diskActiveInTabs =
+            diskActiveRaw && diskTabs.some((tab) => tab.id === diskActiveRaw)
+              ? diskActiveRaw
               : undefined;
           // Merge may drop a reinstall-bootstrap tab (new id, same content as
           // disk). Re-point activeTabId / messages at a tab that still exists.
+          // If disk activeTabId is dangling but session_state / in-memory still
+          // holds that conversation, reconcile merges it back into tabs.
           let merged: Tab[] = [];
+          let nextActive = '';
           setTabs((current) => {
             merged = mergeTabLists(current, diskTabs);
+            const live = sessionStateRef.current;
+            const previousActive = live.activeTabId;
+            const activeStillPresent = merged.some((tab) => tab.id === previousActive);
+            const desiredActive =
+              (activeStillPresent ? previousActive : undefined) ||
+              diskActiveInTabs ||
+              diskActiveRaw ||
+              merged[0]?.id ||
+              '';
+            const reconciled = reconcileActiveTab(merged, desiredActive, {
+              messages: live.messages,
+              cwd: live.codingCwd,
+            });
+            merged = reconciled.tabs;
+            nextActive = reconciled.activeTabId;
             return merged;
           });
           const previousActive = sessionStateRef.current.activeTabId;
-          const activeStillPresent = merged.some((tab) => tab.id === previousActive);
-          const nextActive =
-            (activeStillPresent ? previousActive : undefined) ||
-            diskActive ||
-            merged[0]?.id ||
-            '';
           if (nextActive && nextActive !== previousActive) {
             setActiveTabId(nextActive);
             const nextTab = merged.find((tab) => tab.id === nextActive);
@@ -280,13 +326,31 @@ export function useSessionTabs(deps: SessionTabsDeps) {
   // requiring every existing setMessages/setCodingCwd call-site to know about
   // tabs.
   useEffect(() => {
-    setTabs((current) =>
-      current.map((t) =>
-        t.id === activeTabId
-          ? { ...t, cwd: codingCwd, messages: messages as unknown as TabMessage[] }
-          : t,
-      ),
-    );
+    setTabs((current) => {
+      if (!activeTabId) return current;
+      if (current.some((t) => t.id === activeTabId)) {
+        return current.map((t) =>
+          t.id === activeTabId
+            ? { ...t, cwd: codingCwd, messages: messages as unknown as TabMessage[] }
+            : t,
+        );
+      }
+      // Orphan activeTabId: materialize the live conversation into tabs so
+      // conversations.json / HISTORY cannot lose a chat that only lives in
+      // session_state / flat messages. Keep the dangling id (load/save
+      // reconcile collapses reinstall ghosts when appropriate).
+      if (messages.length === 0) return current;
+      return [
+        ...current,
+        {
+          id: activeTabId,
+          name: defaultTabName(codingCwd, current.length),
+          cwd: codingCwd,
+          messages: messages as unknown as TabMessage[],
+          createdAt: Date.now(),
+        },
+      ];
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [codingCwd, messages]);
 

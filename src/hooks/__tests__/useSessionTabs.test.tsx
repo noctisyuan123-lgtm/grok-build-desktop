@@ -374,3 +374,51 @@ describe('persistence and helpers', () => {
     expect(result.current.sessionFirstPrompt('ghost')).toBeNull();
   });
 });
+
+describe('active tab persistence desync', () => {
+  it('materializes an orphan activeTabId into tabs when live messages arrive', () => {
+    // tabsActiveKey points at an id that is not in the tabs cache (quota drop /
+    // partial write). session_state / flat messages still hold the transcript.
+    window.localStorage.setItem(
+      tabsStorageKey,
+      JSON.stringify([
+        { id: 'other', name: 'other', cwd: '/other', createdAt: 1, messages: [message('x')] },
+      ]),
+    );
+    window.localStorage.setItem(tabsActiveKey, 'tab_muamqbbk_1');
+
+    const { result } = renderHook(() => useHarness([]));
+    expect(result.current.activeTabId).toBe('tab_muamqbbk_1');
+    expect(result.current.tabs.some((t) => t.id === 'tab_muamqbbk_1')).toBe(false);
+
+    act(() => {
+      result.current.setMessages([message('m1'), message('m2')]);
+    });
+
+    expect(result.current.tabs.some((t) => t.id === 'tab_muamqbbk_1')).toBe(true);
+    const orphan = result.current.tabs.find((t) => t.id === 'tab_muamqbbk_1')!;
+    expect(orphan.messages.map((m) => m.id)).toEqual(['m1', 'm2']);
+    // Durable cache must list the active tab.
+    const stored = JSON.parse(window.localStorage.getItem(tabsStorageKey)!) as Array<{
+      id: string;
+    }>;
+    expect(stored.some((t) => t.id === 'tab_muamqbbk_1')).toBe(true);
+  });
+
+  it('keeps subsequent message updates on the materialized orphan tab', () => {
+    window.localStorage.setItem(
+      tabsStorageKey,
+      JSON.stringify([{ id: 'other', name: 'other', cwd: '', createdAt: 1, messages: [] }]),
+    );
+    window.localStorage.setItem(tabsActiveKey, 'orphan');
+    const { result } = renderHook(() => useHarness([message('m1')]));
+    act(() => {
+      result.current.setMessages([message('m1')]);
+    });
+    act(() => {
+      result.current.setMessages([message('m1'), message('m2')]);
+    });
+    const orphan = result.current.tabs.find((t) => t.id === 'orphan')!;
+    expect(orphan.messages.map((m) => m.id)).toEqual(['m1', 'm2']);
+  });
+});

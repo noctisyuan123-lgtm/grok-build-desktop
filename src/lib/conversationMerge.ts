@@ -1,5 +1,5 @@
 import type { ChatMessage } from '../app/types';
-import type { Tab } from './tabs';
+import { defaultTabName, type Tab, type TabMessage } from './tabs';
 
 /** Same conversation (shared ids) → keep the longer transcript. Else keep `local`. */
 export function richerMessageList<T extends { id: string }>(local: T[], disk: T[]): T[] {
@@ -101,4 +101,98 @@ function dedupeEmptyUntitledTabs(tabs: Tab[]): Tab[] {
 
 export function tabMessages(tab: Tab | undefined): ChatMessage[] {
   return (tab?.messages ?? []) as ChatMessage[];
+}
+
+/** Live surface used to repair a dangling `activeTabId` (session_state / React). */
+export type ActiveTabLiveState = {
+  messages?: ChatMessage[];
+  cwd?: string;
+  sessionHead?: string | null;
+  name?: string;
+};
+
+/**
+ * Find an existing tab that already holds this transcript (message ids are a
+ * subset). Used so repairing a dangling activeTabId does not reintroduce a
+ * reinstall ghost duplicate beside the real disk row.
+ */
+function findTranscriptHost(tabs: Tab[], messages: TabMessage[]): Tab | undefined {
+  if (messages.length === 0) return undefined;
+  const liveIds = messages.map((message) => message.id);
+  return tabs.find((tab) => {
+    const diskIds = new Set((tab.messages ?? []).map((message) => message.id));
+    return liveIds.every((id) => diskIds.has(id));
+  });
+}
+
+/**
+ * Keep `activeTabId` ↔ `tabs[]` consistent for conversations.json persistence.
+ *
+ * - Active id already in tabs: optionally enrich that row with a richer live
+ *   transcript (session_state can outpace the tab cache).
+ * - Active id missing, but live has messages / sessionHead: prefer adopting an
+ *   existing host tab that already contains the transcript (ghost-safe); else
+ *   synthesize a tab with the dangling id so HISTORY does not lose the chat.
+ * - Active id missing and live empty: re-point to `tabs[0]` (or "").
+ */
+export function reconcileActiveTab(
+  tabs: Tab[],
+  activeTabId: string | null | undefined,
+  live?: ActiveTabLiveState,
+): { tabs: Tab[]; activeTabId: string } {
+  const id = typeof activeTabId === 'string' ? activeTabId.trim() : '';
+  const liveMessages = (live?.messages ?? []) as TabMessage[];
+  const hasLiveContent = liveMessages.length > 0 || Boolean(live?.sessionHead);
+
+  if (id && tabs.some((tab) => tab.id === id)) {
+    if (!hasLiveContent) return { tabs, activeTabId: id };
+    const next = tabs.map((tab) => {
+      if (tab.id !== id) return tab;
+      const mergedMessages = richerMessageList(tab.messages ?? [], liveMessages) as TabMessage[];
+      return {
+        ...tab,
+        messages: mergedMessages,
+        cwd: tab.cwd || live?.cwd || '',
+        sessionHead: tab.sessionHead ?? live?.sessionHead ?? null,
+      };
+    });
+    return { tabs: next, activeTabId: id };
+  }
+
+  if (id && hasLiveContent) {
+    const host = findTranscriptHost(tabs, liveMessages);
+    if (host) {
+      const enriched = tabs.map((tab) => {
+        if (tab.id !== host.id) return tab;
+        return {
+          ...tab,
+          messages: richerMessageList(tab.messages ?? [], liveMessages) as TabMessage[],
+          cwd: tab.cwd || live?.cwd || '',
+          sessionHead: tab.sessionHead ?? live?.sessionHead ?? null,
+        };
+      });
+      return { tabs: enriched, activeTabId: host.id };
+    }
+    const synthesized: Tab = {
+      id,
+      name: live?.name ?? defaultTabName(live?.cwd ?? '', tabs.length),
+      cwd: live?.cwd ?? '',
+      messages: liveMessages,
+      createdAt: Date.now(),
+      sessionHead: live?.sessionHead ?? null,
+    };
+    return { tabs: [...tabs, synthesized], activeTabId: id };
+  }
+
+  const fallback = tabs[0]?.id ?? '';
+  return { tabs, activeTabId: fallback };
+}
+
+/** True when `activeTabId` is set but absent from `tabs` (persistence desync). */
+export function isDanglingActiveTabId(
+  tabs: Tab[],
+  activeTabId: string | null | undefined,
+): boolean {
+  const id = typeof activeTabId === 'string' ? activeTabId.trim() : '';
+  return Boolean(id) && !tabs.some((tab) => tab.id === id);
 }

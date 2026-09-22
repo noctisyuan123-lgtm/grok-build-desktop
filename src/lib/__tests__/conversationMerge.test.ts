@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { isReinstallGhostTab, mergeTabLists, richerMessageList } from '../conversationMerge';
+import {
+  isDanglingActiveTabId,
+  isReinstallGhostTab,
+  mergeTabLists,
+  reconcileActiveTab,
+  richerMessageList,
+} from '../conversationMerge';
 import type { Tab } from '../tabs';
 
 function tab(id: string, messageIds: string[], cwd = '', extras: Partial<Tab> = {}): Tab {
@@ -121,5 +127,78 @@ describe('isReinstallGhostTab', () => {
         tab('b', [], '/other', { sessionHead: 'other' }),
       ]),
     ).toBe(false);
+  });
+});
+
+describe('reconcileActiveTab', () => {
+  it('keeps a consistent activeTabId that already exists in tabs', () => {
+    const tabs = [tab('t1', ['a']), tab('t2', ['b'])];
+    expect(reconcileActiveTab(tabs, 't2')).toEqual({ tabs, activeTabId: 't2' });
+  });
+
+  it('synthesizes a missing active tab when live messages exist (persistence desync)', () => {
+    const tabs = [tab('other', ['x'])];
+    const liveMsgs = [
+      { id: 'm1', role: 'user' as const, content: 'hi', ts: 1 },
+      { id: 'm2', role: 'assistant' as const, content: 'yo', ts: 2 },
+    ];
+    const result = reconcileActiveTab(tabs, 'tab_muamqbbk_1', {
+      messages: liveMsgs,
+      cwd: '/repo',
+    });
+    expect(result.activeTabId).toBe('tab_muamqbbk_1');
+    expect(result.tabs.map((item) => item.id)).toEqual(['other', 'tab_muamqbbk_1']);
+    const added = result.tabs.find((item) => item.id === 'tab_muamqbbk_1')!;
+    expect(added.messages.map((message) => message.id)).toEqual(['m1', 'm2']);
+    expect(added.cwd).toBe('/repo');
+  });
+
+  it('synthesizes from sessionHead alone when messages are empty', () => {
+    const tabs = [tab('other', ['x'])];
+    const result = reconcileActiveTab(tabs, 'orphan', {
+      sessionHead: 'sess-head',
+      cwd: '/proj',
+    });
+    expect(result.activeTabId).toBe('orphan');
+    expect(result.tabs.some((item) => item.id === 'orphan')).toBe(true);
+    expect(result.tabs.find((item) => item.id === 'orphan')?.sessionHead).toBe('sess-head');
+  });
+
+  it('adopts an existing host tab instead of duplicating a reinstall ghost transcript', () => {
+    const tabs = [tab('tab_stable', ['m1', 'm2', 'm3'])];
+    const result = reconcileActiveTab(tabs, 'tab_new', {
+      messages: [
+        { id: 'm1', role: 'user', content: 'm1', ts: 1 },
+        { id: 'm2', role: 'user', content: 'm2', ts: 1 },
+      ],
+    });
+    expect(result.activeTabId).toBe('tab_stable');
+    expect(result.tabs.map((item) => item.id)).toEqual(['tab_stable']);
+  });
+
+  it('re-points dangling empty activeTabId to the first tab', () => {
+    const tabs = [tab('t1', ['a']), tab('t2', ['b'])];
+    expect(reconcileActiveTab(tabs, 'ghost')).toEqual({ tabs, activeTabId: 't1' });
+  });
+
+  it('enriches the active tab with a richer live transcript', () => {
+    const tabs = [tab('t1', ['a'])];
+    const result = reconcileActiveTab(tabs, 't1', {
+      messages: [
+        { id: 'a', role: 'user', content: 'a', ts: 1 },
+        { id: 'b', role: 'user', content: 'b', ts: 1 },
+      ],
+    });
+    expect(result.activeTabId).toBe('t1');
+    expect(result.tabs[0]?.messages.map((message) => message.id)).toEqual(['a', 'b']);
+  });
+});
+
+describe('isDanglingActiveTabId', () => {
+  it('detects active ids missing from tabs', () => {
+    expect(isDanglingActiveTabId([tab('t1', [])], 'ghost')).toBe(true);
+    expect(isDanglingActiveTabId([tab('t1', [])], 't1')).toBe(false);
+    expect(isDanglingActiveTabId([tab('t1', [])], '')).toBe(false);
+    expect(isDanglingActiveTabId([tab('t1', [])], null)).toBe(false);
   });
 });
