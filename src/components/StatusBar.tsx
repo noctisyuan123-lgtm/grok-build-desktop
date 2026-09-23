@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useMemo } from 'react';
 import { useElapsed } from '../hooks/useElapsed';
 import { useAppOnline } from '../hooks/useAppOnline';
 import { useSessionActiveRun } from '../hooks/useActiveRun';
@@ -55,12 +55,9 @@ export function RunStatusLine({
   const snap = useRunSnapshot(runId);
   const online = useAppOnline();
   const elapsed = useElapsed(snap?.startedAt ?? null, snap?.endedAt ?? null);
-  const generationElapsed = useElapsed(snap?.firstOutputAt ?? null, snap?.endedAt ?? null);
+  // Tick while a generation segment is open so tok/s updates during streaming.
+  const segmentElapsed = useElapsed(snap?.generationResumedAt ?? null, null);
   useElapsed(snap?.lastEventAt ?? snap?.startedAt ?? null, snap?.endedAt ?? null);
-  const heldRate = useRef<string | null>(null);
-  useEffect(() => {
-    heldRate.current = null;
-  }, [runId]);
   if (!snap || (snap.state !== 'queued' && snap.state !== 'running') || snap.watching) return null;
 
   const appearance = deriveConnection({
@@ -76,10 +73,9 @@ export function RunStatusLine({
     thoughtText: thoughtTextFromTranscript(snap.transcript),
     responseText: snap.text,
   });
-  const streaming = snap.lastEventType === 'text' || snap.lastEventType === 'thought';
-  const sampled = formatTokenRate(generated, generationElapsed);
-  if (streaming && sampled) heldRate.current = sampled;
-  const rate = streaming ? sampled : heldRate.current;
+  // Denominator is generation-active time only (paused during tools / activity).
+  const activeMs = snap.generationActiveMs + (segmentElapsed ?? 0);
+  const rate = formatTokenRate(generated, activeMs);
   return (
     <div
       className={`run-status-line${variant === 'titlebar' ? ' is-titlebar' : ''}${variant === 'hud' ? ' is-hud' : ''}`}

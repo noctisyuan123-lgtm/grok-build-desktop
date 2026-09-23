@@ -90,6 +90,17 @@ export function resolveAssistantQuoteSelection(
   };
 }
 
+/** Short Codex-like id for the attribution line (avoid dumping full UUIDs). */
+export function formatQuoteAttributionId(messageId: string | null | undefined): string | null {
+  const raw = messageId?.trim();
+  if (!raw) return null;
+  if (raw.length <= 18) return raw;
+  // Prefer the trailing segment when ids look like `a-mue0xho5-7be2db`.
+  const tail = raw.split('-').filter(Boolean).slice(-2).join('-');
+  if (tail && tail.length >= 6 && tail.length <= 18) return tail;
+  return `${raw.slice(0, 8)}…${raw.slice(-6)}`;
+}
+
 /** Format selected text as a markdown blockquote with a light role attribution. */
 export function formatQuoteMarkdown(
   text: string,
@@ -103,7 +114,7 @@ export function formatQuoteMarkdown(
   if (!trimmed) return '';
 
   const role = opts?.role === 'user' ? 'User' : 'Assistant';
-  const id = opts?.messageId?.trim();
+  const id = formatQuoteAttributionId(opts?.messageId);
   const attribution = id ? `${role} · ${id}` : role;
 
   const body = trimmed
@@ -111,6 +122,8 @@ export function formatQuoteMarkdown(
     .map((line) => `> ${line}`)
     .join('\n');
 
+  // Blank `>` keeps attribution and body as separate paragraphs so CSS can
+  // mute the first line (Codex: dim “— Assistant · id”, brighter excerpt).
   return `> — ${attribution}\n>\n${body}`;
 }
 

@@ -2971,14 +2971,17 @@ body[data-completion-popup='true'] {
   color: #ccc;
 }
 
-/* VSCode-style blockquotes: colored left border, subtle bg */
+/* Default markdown blockquotes — Codex thin bar (message bubbles override
+   attribution color more tightly below). */
 .markdown-body blockquote {
-  background: rgba(149, 200, 248, 0.06);
-  border-left: 3px solid var(--accent);
-  border-radius: 0 6px 6px 0;
-  color: var(--text-2);
+  background: transparent;
+  border-left: 1.5px solid rgba(255, 255, 255, 0.22);
+  border-radius: 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12.5px;
+  line-height: 18px;
   margin: 12px 0 16px;
-  padding: 8px 14px;
+  padding: 0 0 0 12px;
 }
 .markdown-body blockquote > *:first-child {
   margin-top: 0;
@@ -4801,13 +4804,29 @@ body[data-completion-popup='true'] {
 :is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) li p {
   margin: 0;
 }
+/* Codex-style quote reference: thin muted bar, dim attribution, bright body.
+   Not the VSCode accent wash — that reads as a heavy “blockquote card”. */
 :is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) blockquote {
   background: transparent;
-  border-left: 3.5px solid rgba(255, 255, 255, 0.18);
-  border-radius: 2px;
-  color: inherit;
-  margin: 0 0 16px;
-  padding: 0 16px 0 14px;
+  border-left: 1.5px solid rgba(255, 255, 255, 0.22);
+  border-radius: 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12.5px;
+  line-height: 18px;
+  margin: 0 0 12px;
+  padding: 0 0 0 12px;
+}
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) blockquote > p {
+  margin: 0 0 4px;
+}
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) blockquote > p:last-child {
+  margin-bottom: 0;
+}
+:is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) blockquote > p:first-child {
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 11.5px;
+  letter-spacing: 0.01em;
+  line-height: 16px;
 }
 :is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) hr {
   border: 0;
@@ -9562,18 +9581,19 @@ select:focus-visible {
   padding: 12px 28px 10px;
 }
 
+/* Back-to-back assistant/wakeup bubbles: denser than user↔assistant turns.
+   Class is set by MessageList because Virtuoso wraps each row. */
+.message.message-assistant.message-assistant-followup {
+  padding-top: 4px;
+}
+
 /* Text-selection isolation for Virtuoso rows.
    Adjacent rows can visually overlap (abs chrome, residual negative margins,
    measurement lag). Transparent message backgrounds let hit-testing fall
    through to text from the row above — classic LTR-selects-lines-above /
    RTL-works asymmetry, because the drag starts on the exposed left edge.
    Clip overflow and paint an opaque canvas-matching fill so each row owns
-   its hit box without changing the look.
-   Use the full `background` shorthand (not only background-color) so the
-   legacy May 2026 user-row orange wash
-   (linear-gradient … rgba(255, 122, 69, 0.04)) cannot leak back after the
-   theme-dark `background: transparent` override was replaced. Match the
-   conversation canvas (#171717), not --app-bg (#0b0c0d), which is darker. */
+   its hit box without changing the look. */
 .message.message-user,
 .message.message-assistant {
   isolation: isolate;
@@ -9586,12 +9606,6 @@ select:focus-visible {
 .theme-light .message.message-user,
 .theme-light .message.message-assistant {
   background: var(--app-bg, #f6f6f4);
-}
-
-/* Back-to-back assistant/wakeup bubbles: denser than user↔assistant turns.
-   Class is set by MessageList because Virtuoso wraps each row. */
-.message.message-assistant.message-assistant-followup {
-  padding-top: 4px;
 }
 
 .message-worked {
@@ -10497,9 +10511,33 @@ body,
   padding: 0;
 }
 .composer-editor .ProseMirror blockquote {
-  border-left: 3.5px solid rgba(255, 255, 255, 0.18);
+  background: transparent;
+  border-left: 1.5px solid rgba(255, 255, 255, 0.22);
+  border-radius: 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12.5px;
+  line-height: 18px;
   margin: 0 0 0.55em;
-  padding: 0 12px;
+  padding: 0 0 0 12px;
+}
+.composer-editor .ProseMirror blockquote > p {
+  margin: 0 0 4px;
+}
+.composer-editor .ProseMirror blockquote > p:last-child {
+  margin-bottom: 0;
+}
+.composer-editor .ProseMirror blockquote > p:first-child {
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 11.5px;
+  letter-spacing: 0.01em;
+  line-height: 16px;
+}
+.app-shell.theme-light .composer-editor .ProseMirror blockquote {
+  border-left-color: rgba(31, 29, 25, 0.28);
+  color: rgba(31, 29, 25, 0.88);
+}
+.app-shell.theme-light .composer-editor .ProseMirror blockquote > p:first-child {
+  color: rgba(31, 29, 25, 0.45);
 }
 .composer-editor .ProseMirror table {
   border-collapse: collapse;
@@ -10922,7 +10960,11 @@ body,
    parchment canvas. Ink-based equivalents keep the same visual weight; the
    dark rules above are untouched. */
 .theme-light :is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) blockquote {
-  border-left-color: rgba(31, 29, 25, 0.22);
+  border-left-color: rgba(31, 29, 25, 0.28);
+  color: rgba(31, 29, 25, 0.88);
+}
+.theme-light :is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) blockquote > p:first-child {
+  color: rgba(31, 29, 25, 0.45);
 }
 .theme-light :is(:is(.message.message-assistant, .message.message-user) .markdown-body, :is(.customize-markdown-preview, .composer-markdown-preview).markdown-body) hr {
   border-bottom-color: rgba(31, 29, 25, 0.14);
@@ -11935,10 +11977,8 @@ body,
   background-color: var(--scroll-thumb-hover, #555);
 }
 
-/* Reserve one shared column only while the rail is mounted. Empty landing
-   must not keep --task-rail-reserve (that left a Codex-unlike right gutter
-   after SubagentRail was unmounted but .has-task-rail stayed on). */
-.app-shell.has-task-rail:has(.subagent-rail) {
+/* Reserve one shared column, so history, composer and usage stay aligned. */
+.app-shell.has-task-rail {
   --task-rail-width: clamp(250px, 19vw, 285px);
   --task-rail-reserve: calc(var(--task-rail-width) + 26px);
 }
@@ -11947,16 +11987,16 @@ body,
 }
 /* The rail floats over the right edge. Keep the viewport (and therefore its
    scrollbar) flush to that edge, while shifting only the reading column. */
-.has-task-rail .conversation-panel:has(> .subagent-rail) > .conversation-scroll {
+.has-task-rail .conversation-panel > .conversation-scroll {
   box-sizing: border-box;
   margin-right: 0;
   padding-right: 0;
   width: 100%;
 }
-.has-task-rail .conversation-panel:has(> .subagent-rail) .message.message-user,
-.has-task-rail .conversation-panel:has(> .subagent-rail) .message.message-assistant,
-.has-task-rail .conversation-panel:has(> .subagent-rail) > .queue-dock,
-.has-task-rail .conversation-panel:has(> .subagent-rail) > .composer-row {
+.has-task-rail .message.message-user,
+.has-task-rail .message.message-assistant,
+.has-task-rail .conversation-panel > .queue-dock,
+.has-task-rail .conversation-panel > .composer-row {
   position: relative;
   transform: translateX(calc(var(--task-rail-reserve) / -2));
 }
@@ -11964,13 +12004,8 @@ body,
 .has-task-rail .subagent-drawer .message.message-assistant {
   transform: none;
 }
-.has-task-rail .conversation-panel:has(> .subagent-rail) .message-list-shell .jump-to-bottom {
+.has-task-rail .message-list-shell .jump-to-bottom {
   transform: translateX(calc(-50% - var(--task-rail-reserve) / 2));
-}
-/* Belt-and-suspenders: empty stage never shifts for a phantom rail column. */
-.has-task-rail .conversation-panel.is-empty > .composer-row,
-.has-task-rail .conversation-panel.is-empty > .queue-dock {
-  transform: none;
 }
 .subagent-float-copy {
   display: flex;

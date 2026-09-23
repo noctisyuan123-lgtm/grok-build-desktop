@@ -97,6 +97,11 @@ export function installTauriAppMock(overrides: Record<string, CommandHandler> = 
   const runIds: string[] = [];
   let runCounter = 0;
 
+  // Session-scoped attachment bytes (mirrors Rust save/load/copy layout).
+  const attachmentStore = new Map<string, string>();
+  const attachmentKey = (sessionId: unknown, assetId: unknown) =>
+    `${String(sessionId ?? '')}::${String(assetId ?? '')}`;
+
   const handlers: Record<string, CommandHandler> = {
     load_session_state: () => null,
     save_session_state: () => null,
@@ -190,6 +195,28 @@ export function installTauriAppMock(overrides: Record<string, CommandHandler> = 
     start_grok_login: () => toolRun('grok login', 'Login window opened.'),
     generate_session_title: () => 'Mock title',
     consume_desktop_handoff: () => null,
+    save_attachment: (args) => {
+      attachmentStore.set(attachmentKey(args.sessionId, args.assetId), String(args.dataUrl ?? ''));
+      return null;
+    },
+    load_attachment: (args) => {
+      const dataUrl = attachmentStore.get(attachmentKey(args.sessionId, args.assetId));
+      if (!dataUrl) throw new Error('Could not find attachment');
+      return dataUrl;
+    },
+    copy_session_attachments: (args) => {
+      const source = String(args.sourceSessionId ?? '');
+      const dest = String(args.destSessionId ?? '');
+      const assetIds = Array.isArray(args.assetIds) ? args.assetIds.map(String) : [];
+      let copied = 0;
+      for (const assetId of assetIds) {
+        const dataUrl = attachmentStore.get(attachmentKey(source, assetId));
+        if (!dataUrl) continue;
+        attachmentStore.set(attachmentKey(dest, assetId), dataUrl);
+        copied += 1;
+      }
+      return copied;
+    },
     open_grok_cli: () => null,
     open_grok_desktop: () => null,
     export_grok_session: () => '## User\n\nhello\n\n## Assistant\n\nhi\n',

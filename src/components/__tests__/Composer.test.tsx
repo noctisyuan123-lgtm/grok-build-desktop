@@ -1,8 +1,9 @@
+import { createRef } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { mockIPC } from '@tauri-apps/api/mocks';
-import { Composer } from '../Composer';
+import { Composer, type ComposerHandle } from '../Composer';
 import { streamStore, getPendingSubmitCount } from '../../lib/streamStore';
 
 // jsdom provides requestAnimationFrame, but keep the focus-restore rAF
@@ -558,5 +559,35 @@ describe('Composer live markdown', () => {
       expect(container.querySelectorAll('.ProseMirror br')).toHaveLength(2);
       expect(draftOf(document.body)).not.toMatch(/\n\n/);
     });
+  });
+});
+
+describe('ComposerHandle attachments', () => {
+  it('round-trips attachments through setAttachments / getAttachments', () => {
+    const ref = createRef<ComposerHandle>();
+    render(
+      <Composer
+        ref={ref}
+        cwd=""
+        argsBuilder={() => ['--output-format', 'streaming-json']}
+      />,
+    );
+    expect(ref.current?.getAttachments()).toEqual([]);
+    const sample = [
+      {
+        id: 'att-1',
+        name: 'shot.png',
+        mimeType: 'image/png',
+        sizeBytes: 12,
+        dataUrl: 'data:image/png;base64,aaa',
+      },
+    ];
+    ref.current?.setAttachments(sample);
+    expect(ref.current?.getAttachments()).toEqual(sample);
+    // Defensive copy — mutating the returned array must not leak into state.
+    ref.current?.getAttachments().pop();
+    expect(ref.current?.getAttachments()).toHaveLength(1);
+    ref.current?.setAttachments([]);
+    expect(ref.current?.getAttachments()).toEqual([]);
   });
 });

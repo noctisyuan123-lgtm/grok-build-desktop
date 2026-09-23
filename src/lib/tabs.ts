@@ -1,11 +1,12 @@
 import type { TabRevertPointer } from './sessionRevert';
+import type { Mode } from '../app/types';
 // Lightweight multi-session tab model.
 //
-// Each tab owns its (cwd, displayName, messages). The rest of the UI state
-// (mode, draft text, model selection, action policy, etc.) is global — tabs
-// are *workspaces*, not full preference clones. That keeps the refactor
-// surgical: App.tsx's 80+ pieces of state stay flat; only `codingCwd` and
-// `messages` are now derived from the active tab.
+// Each tab owns its (cwd, displayName, messages, drafts). Composer draft text
+// is per-session so switching conversations does not leak typed text across
+// tabs. Mode, model selection, action policy, etc. remain global — tabs are
+// still workspaces, not full preference clones. App.tsx's flat state mirrors
+// the active tab for cwd/messages/drafts.
 
 /**
  * Minimal shape of a chat message; the canonical type is defined in App.tsx.
@@ -26,6 +27,8 @@ export interface Tab {
   cwd: string;
   messages: TabMessage[];
   createdAt: number;
+  /** Per-mode composer drafts for this session (restored on switch). */
+  drafts?: Partial<Record<Mode, string>>;
   /** Root tab and ordinal for Fork sessions shown in the history sidebar. */
   forkRootId?: string;
   forkIndex?: number;

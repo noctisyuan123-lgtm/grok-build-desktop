@@ -22,6 +22,8 @@ function snap(partial: Partial<RunSnapshot> & Pick<RunSnapshot, 'id'>): RunSnaps
     endedAt: null,
     lastEventAt: 10,
     firstOutputAt: null,
+    generationActiveMs: 0,
+    generationResumedAt: null,
     thoughtChars: 0,
     textChars: 0,
     lastEventType: null,

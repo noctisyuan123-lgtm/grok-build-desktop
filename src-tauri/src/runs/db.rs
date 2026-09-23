@@ -501,6 +501,24 @@ impl Db {
         Ok(())
     }
 
+    /// Reverse lookup: which UI lane currently points at this session head.
+    pub async fn find_lane_id_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<String>, sqlx::Error> {
+        let session_id = session_id.trim();
+        if session_id.is_empty() {
+            return Ok(None);
+        }
+        sqlx::query_as::<_, (String,)>(
+            "SELECT lane_id FROM lane_heads WHERE session_id = ? LIMIT 1",
+        )
+        .bind(session_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map(|row| row.map(|(lane_id,)| lane_id))
+    }
+
     /// Drop any lane head that still points at an undone / replaced session.
     pub async fn clear_lane_heads_for_session(
         &self,
@@ -540,5 +558,11 @@ mod tests {
         // Empty lane ids are ignored (legacy default lane).
         db.upsert_lane_head("", "sess-x").await.unwrap();
         assert_eq!(db.get_lane_head("").await.unwrap(), None);
+
+        assert_eq!(
+            db.find_lane_id_for_session("sess-2").await.unwrap().as_deref(),
+            Some("tab_a")
+        );
+        assert_eq!(db.find_lane_id_for_session("missing").await.unwrap(), None);
     }
 }

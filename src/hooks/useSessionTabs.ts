@@ -8,14 +8,9 @@ import { useEffect, useRef, useState } from 'react';
 import type { ToolRun } from '../lib/grok';
 import { defaultTabName, makeTab, type Tab, type TabMessage } from '../lib/tabs';
 import type { ChatMessage, Mode } from '../app/types';
-import { storageKeys, tabsActiveKey, tabsStorageKey } from '../app/constants';
+import { defaultDrafts, storageKeys, tabsActiveKey, tabsStorageKey } from '../app/constants';
 import { storedMessages, writeLocalStorageJson } from '../app/storage';
-import {
-  mergeTabLists,
-  reconcileActiveTab,
-  richerMessageList,
-  tabMessages,
-} from '../lib/conversationMerge';
+import { mergeTabLists, richerMessageList, tabMessages } from '../lib/conversationMerge';
 import { loadConversations, saveConversations } from '../lib/grok';
 import { hasTauriRuntime } from '../lib/runtime';
 
@@ -24,6 +19,8 @@ export interface SessionTabsDeps {
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   codingCwd: string;
   setCodingCwd: React.Dispatch<React.SetStateAction<string>>;
+  mode: Mode;
+  drafts: Record<Mode, string>;
   setDrafts: React.Dispatch<React.SetStateAction<Record<Mode, string>>>;
   setLastRun: (run: ToolRun | null) => void;
   setSessionNotice: (notice: string | null) => void;
@@ -42,6 +39,8 @@ export function useSessionTabs(deps: SessionTabsDeps) {
     setMessages,
     codingCwd,
     setCodingCwd,
+    mode,
+    drafts,
     setDrafts,
     setLastRun,
     setSessionNotice,
@@ -51,30 +50,83 @@ export function useSessionTabs(deps: SessionTabsDeps) {
     onConversationDeleted,
   } = deps;
 
+  const emptyDrafts = (): Record<Mode, string> => ({ ...defaultDrafts });
+
+  function resolveTabDrafts(tab?: Tab | null): Record<Mode, string> {
+    return { ...defaultDrafts, ...(tab?.drafts ?? {}) };
+  }
+
+  function applySessionDrafts(next: Record<Mode, string>) {
+    setDrafts(next);
+    setComposerValue(next[mode] ?? '');
+  }
+
+  function withOutgoingSnapshot(
+    existing: Tab[],
+    outgoingId: string,
+    snapshot: { cwd: string; messages: TabMessage[]; drafts: Record<Mode, string> },
+  ): Tab[] {
+    return existing.map((t) =>
+      t.id === outgoingId
+        ? {
+            ...t,
+            cwd: snapshot.cwd,
+            messages: snapshot.messages,
+            drafts: { ...snapshot.drafts },
+          }
+        : t,
+    );
+  }
+
+
   // Multi-session tabs. The "active" tab's cwd and messages are mirrored back
   // into the existing flat state above so the rest of App.tsx (model picker,
   // mode dock, status bar, etc.) keeps working unchanged. Tabs are a thin
   // facade — see comment in lib/tabs.ts for the design rationale. Storage keys
   // live at module scope (near storedActiveTabMessages).
   const [tabs, setTabs] = useState<Tab[]>(() => {
+    let legacyDrafts: Partial<Record<Mode, string>> | null = null;
+    try {
+      legacyDrafts = {
+        ...JSON.parse(window.localStorage.getItem(storageKeys.drafts) ?? '{}'),
+      };
+    } catch {
+      legacyDrafts = null;
+    }
+    const activeId = window.localStorage.getItem(tabsActiveKey);
     try {
       const raw = window.localStorage.getItem(tabsStorageKey);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed as Tab[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const tabs = parsed as Tab[];
+          // Migrate flat grok-desktop-mode-drafts onto the active tab once.
+          if (legacyDrafts && Object.values(legacyDrafts).some((v) => typeof v === 'string' && v)) {
+            const targetId =
+              (activeId && tabs.some((t) => t.id === activeId) ? activeId : tabs[0]?.id) ?? '';
+            return tabs.map((t) =>
+              t.id === targetId && !t.drafts
+                ? { ...t, drafts: { ...defaultDrafts, ...legacyDrafts } }
+                : t,
+            );
+          }
+          return tabs;
+        }
       }
     } catch {
       // fall through
     }
     // First-run: synthesize one tab from the legacy single-session state.
     const initialCwd = window.localStorage.getItem(storageKeys.codingCwd) ?? '';
-    return [
-      makeTab(
-        initialCwd,
-        storedMessages() as unknown as TabMessage[],
-        defaultTabName(initialCwd, 0),
-      ),
-    ];
+    const fresh = makeTab(
+      initialCwd,
+      storedMessages() as unknown as TabMessage[],
+      defaultTabName(initialCwd, 0),
+    );
+    if (legacyDrafts && Object.values(legacyDrafts).some((v) => typeof v === 'string' && v)) {
+      fresh.drafts = { ...defaultDrafts, ...legacyDrafts };
+    }
+    return [fresh];
   });
   const [activeTabId, setActiveTabId] = useState<string>(() => {
     const stored = window.localStorage.getItem(tabsActiveKey);
@@ -99,9 +151,6 @@ export function useSessionTabs(deps: SessionTabsDeps) {
   // the synthesized tab as active immediately.
   useEffect(() => {
     if (!activeTabId && tabs.length > 0) setActiveTabId(tabs[0].id);
-    // Do not re-point a dangling activeTabId here: session_state may still
-    // restore the live transcript for that id, and the mirror / load
-    // reconcile paths materialize it into tabs[].
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -112,8 +161,8 @@ export function useSessionTabs(deps: SessionTabsDeps) {
   // invoked from stale closures (the ⌘N keydown listener and the ⌘K palette
   // memo, whose dep arrays don't include messages/tabs), so reading the
   // render-scope variables there could act on state that is many turns old.
-  const sessionStateRef = useRef({ activeTabId, messages, tabs, codingCwd });
-  sessionStateRef.current = { activeTabId, messages, tabs, codingCwd };
+  const sessionStateRef = useRef({ activeTabId, messages, tabs, codingCwd, drafts, mode });
+  sessionStateRef.current = { activeTabId, messages, tabs, codingCwd, drafts, mode };
   const conversationsReadyRef = useRef(!hasTauriRuntime());
   const [conversationsReady, setConversationsReady] = useState(() => !hasTauriRuntime());
   function handleTabCreate() {
@@ -122,17 +171,7 @@ export function useSessionTabs(deps: SessionTabsDeps) {
     // "New conversation" row into HISTORY on every ⌘N / New Session click.
     const currentTab = current.tabs.find((t) => t.id === current.activeTabId);
     if (currentTab && currentTab.messages.length === 0 && current.messages.length === 0) {
-      // A blank tab can still carry a foreign sessionHead (live-link leak).
-      // New Session must not --resume it on the first send.
-      if (currentTab.sessionHead) {
-        setTabs((existing) =>
-          existing.map((tab) =>
-            tab.id === currentTab.id ? { ...tab, sessionHead: null } : tab,
-          ),
-        );
-      }
-      setDrafts({ standard: '', coding: '' });
-      setComposerValue('');
+      applySessionDrafts(emptyDrafts());
       setSessionNotice(null);
       setLastRun(null);
       focusComposer();
@@ -148,26 +187,22 @@ export function useSessionTabs(deps: SessionTabsDeps) {
     // one frame behind stream finalize), then activate an empty tab in the
     // same event turn so React batches one coherent render.
     const fresh = makeTab('', [], defaultTabName('', current.tabs.length));
+    fresh.drafts = emptyDrafts();
     setTabs((existing) => [
-      ...existing.map((t) =>
-        t.id === current.activeTabId
-          ? {
-              ...t,
-              cwd: current.codingCwd,
-              messages: current.messages as unknown as TabMessage[],
-            }
-          : t,
-      ),
+      ...withOutgoingSnapshot(existing, current.activeTabId, {
+        cwd: current.codingCwd,
+        messages: current.messages as unknown as TabMessage[],
+        drafts: current.drafts,
+      }),
       fresh,
     ]);
     setActiveTabId(fresh.id);
     setCodingCwd(fresh.cwd);
     setMessages([]);
-    // "Clean slate" — Claude-Desktop-style. Wipe the composer draft, any
-    // leftover banner / notice, and the last-run card. The user opened a
-    // new session because they wanted a *fresh* surface.
-    setDrafts({ standard: '', coding: '' });
-    setComposerValue('');
+    // "Clean slate" — Claude-Desktop-style. Wipe the composer draft for the
+    // *new* surface only; other tabs keep their saved drafts. Also clear any
+    // leftover banner / notice and the last-run card.
+    applySessionDrafts(emptyDrafts());
     setSessionNotice(null);
     setLastRun(null);
     focusComposer();
@@ -202,19 +237,19 @@ export function useSessionTabs(deps: SessionTabsDeps) {
       forkIndex,
     };
     const outgoingMessages = current.messages as unknown as TabMessage[];
+    fresh.drafts = emptyDrafts();
     setTabs((existing) => [
-      ...existing.map((tab) =>
-        tab.id === current.activeTabId
-          ? { ...tab, cwd: current.codingCwd, messages: outgoingMessages }
-          : tab,
-      ),
+      ...withOutgoingSnapshot(existing, current.activeTabId, {
+        cwd: current.codingCwd,
+        messages: outgoingMessages,
+        drafts: current.drafts,
+      }),
       fresh,
     ]);
     setActiveTabId(fresh.id);
     setCodingCwd(fresh.cwd);
     setMessages(forkedMessages);
-    setDrafts({ standard: '', coding: '' });
-    setComposerValue('');
+    applySessionDrafts(emptyDrafts());
     setSessionNotice(null);
     closePalette();
     focusComposer();
@@ -234,31 +269,7 @@ export function useSessionTabs(deps: SessionTabsDeps) {
   useEffect(() => {
     if (!hasTauriRuntime() || !conversationsReady || tabs.length === 0) return;
     const timer = window.setTimeout(() => {
-      const live = sessionStateRef.current;
-      const reconciled = reconcileActiveTab(live.tabs, live.activeTabId, {
-        messages: live.messages,
-        cwd: live.codingCwd,
-      });
-      // Persist the reconciled snapshot so conversations.json never records a
-      // dangling activeTabId. Repair React state only when the active id was
-      // missing from tabs (or needed a fallback), not on every enrich.
-      const wasDangling =
-        Boolean(live.activeTabId) &&
-        !live.tabs.some((tab) => tab.id === live.activeTabId);
-      if (
-        wasDangling ||
-        reconciled.activeTabId !== live.activeTabId ||
-        reconciled.tabs.length !== live.tabs.length
-      ) {
-        setTabs(reconciled.tabs);
-        if (reconciled.activeTabId !== live.activeTabId) {
-          setActiveTabId(reconciled.activeTabId);
-        }
-      }
-      void saveConversations({
-        activeTabId: reconciled.activeTabId,
-        tabs: reconciled.tabs,
-      }).catch(() => {
+      void saveConversations({ activeTabId, tabs }).catch(() => {
         /* disk backup is best-effort; localStorage still holds a cache */
       });
     }, 300);
@@ -273,38 +284,24 @@ export function useSessionTabs(deps: SessionTabsDeps) {
         if (cancelled) return;
         if (stored && Array.isArray(stored.tabs) && stored.tabs.length > 0) {
           const diskTabs = stored.tabs as Tab[];
-          const diskActiveRaw =
-            typeof stored.activeTabId === 'string' ? stored.activeTabId : undefined;
-          const diskActiveInTabs =
-            diskActiveRaw && diskTabs.some((tab) => tab.id === diskActiveRaw)
-              ? diskActiveRaw
+          const diskActive =
+            stored.activeTabId && diskTabs.some((tab) => tab.id === stored.activeTabId)
+              ? stored.activeTabId
               : undefined;
           // Merge may drop a reinstall-bootstrap tab (new id, same content as
           // disk). Re-point activeTabId / messages at a tab that still exists.
-          // If disk activeTabId is dangling but session_state / in-memory still
-          // holds that conversation, reconcile merges it back into tabs.
           let merged: Tab[] = [];
-          let nextActive = '';
           setTabs((current) => {
             merged = mergeTabLists(current, diskTabs);
-            const live = sessionStateRef.current;
-            const previousActive = live.activeTabId;
-            const activeStillPresent = merged.some((tab) => tab.id === previousActive);
-            const desiredActive =
-              (activeStillPresent ? previousActive : undefined) ||
-              diskActiveInTabs ||
-              diskActiveRaw ||
-              merged[0]?.id ||
-              '';
-            const reconciled = reconcileActiveTab(merged, desiredActive, {
-              messages: live.messages,
-              cwd: live.codingCwd,
-            });
-            merged = reconciled.tabs;
-            nextActive = reconciled.activeTabId;
             return merged;
           });
           const previousActive = sessionStateRef.current.activeTabId;
+          const activeStillPresent = merged.some((tab) => tab.id === previousActive);
+          const nextActive =
+            (activeStillPresent ? previousActive : undefined) ||
+            diskActive ||
+            merged[0]?.id ||
+            '';
           if (nextActive && nextActive !== previousActive) {
             setActiveTabId(nextActive);
             const nextTab = merged.find((tab) => tab.id === nextActive);
@@ -335,33 +332,20 @@ export function useSessionTabs(deps: SessionTabsDeps) {
   // requiring every existing setMessages/setCodingCwd call-site to know about
   // tabs.
   useEffect(() => {
-    setTabs((current) => {
-      if (!activeTabId) return current;
-      if (current.some((t) => t.id === activeTabId)) {
-        return current.map((t) =>
-          t.id === activeTabId
-            ? { ...t, cwd: codingCwd, messages: messages as unknown as TabMessage[] }
-            : t,
-        );
-      }
-      // Orphan activeTabId: materialize the live conversation into tabs so
-      // conversations.json / HISTORY cannot lose a chat that only lives in
-      // session_state / flat messages. Keep the dangling id (load/save
-      // reconcile collapses reinstall ghosts when appropriate).
-      if (messages.length === 0) return current;
-      return [
-        ...current,
-        {
-          id: activeTabId,
-          name: defaultTabName(codingCwd, current.length),
-          cwd: codingCwd,
-          messages: messages as unknown as TabMessage[],
-          createdAt: Date.now(),
-        },
-      ];
-    });
+    setTabs((current) =>
+      current.map((t) =>
+        t.id === activeTabId
+          ? {
+              ...t,
+              cwd: codingCwd,
+              messages: messages as unknown as TabMessage[],
+              drafts: { ...drafts },
+            }
+          : t,
+      ),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [codingCwd, messages]);
+  }, [codingCwd, messages, drafts]);
 
   // First user prompt of a conversation (session/tab id) — used for copy /
   // save-to-library actions in the history menu.
@@ -384,21 +368,19 @@ export function useSessionTabs(deps: SessionTabsDeps) {
     if (id === current.activeTabId) return;
     const target = current.tabs.find((t) => t.id === id);
     if (!target) return;
-    // Persist the current conversation back into its tab, then load the target.
+    // Persist the current conversation + composer draft back into its tab,
+    // then load the target (including that session's draft).
     setTabs((existing) =>
-      existing.map((t) =>
-        t.id === current.activeTabId
-          ? {
-              ...t,
-              cwd: current.codingCwd,
-              messages: current.messages as unknown as TabMessage[],
-            }
-          : t,
-      ),
+      withOutgoingSnapshot(existing, current.activeTabId, {
+        cwd: current.codingCwd,
+        messages: current.messages as unknown as TabMessage[],
+        drafts: current.drafts,
+      }),
     );
     setActiveTabId(target.id);
     setCodingCwd(target.cwd);
     setMessages(target.messages as unknown as ChatMessage[]);
+    applySessionDrafts(resolveTabDrafts(target));
     setSessionNotice(null);
   }
 
@@ -421,19 +403,16 @@ export function useSessionTabs(deps: SessionTabsDeps) {
     if (target) {
       if (target.id !== current.activeTabId) {
         setTabs((existing) =>
-          existing.map((tab) =>
-            tab.id === current.activeTabId
-              ? {
-                  ...tab,
-                  cwd: current.codingCwd,
-                  messages: current.messages as unknown as TabMessage[],
-                }
-              : tab,
-          ),
+          withOutgoingSnapshot(existing, current.activeTabId, {
+            cwd: current.codingCwd,
+            messages: current.messages as unknown as TabMessage[],
+            drafts: current.drafts,
+          }),
         );
         setActiveTabId(target.id);
         setCodingCwd(target.cwd);
         setMessages(target.messages as unknown as ChatMessage[]);
+        applySessionDrafts(resolveTabDrafts(target));
       }
       setSessionNotice(null);
       return target.id;
@@ -451,23 +430,19 @@ export function useSessionTabs(deps: SessionTabsDeps) {
     }
 
     const fresh = makeTab(cwd.trim(), [], defaultTabName(cwd.trim(), current.tabs.length));
+    fresh.drafts = emptyDrafts();
     setTabs((existing) => [
-      ...existing.map((tab) =>
-        tab.id === current.activeTabId
-          ? {
-              ...tab,
-              cwd: current.codingCwd,
-              messages: current.messages as unknown as TabMessage[],
-            }
-          : tab,
-      ),
+      ...withOutgoingSnapshot(existing, current.activeTabId, {
+        cwd: current.codingCwd,
+        messages: current.messages as unknown as TabMessage[],
+        drafts: current.drafts,
+      }),
       fresh,
     ]);
     setActiveTabId(fresh.id);
     setCodingCwd(fresh.cwd);
     setMessages([]);
-    setDrafts({ standard: '', coding: '' });
-    setComposerValue('');
+    applySessionDrafts(emptyDrafts());
     setSessionNotice(null);
     setLastRun(null);
     return fresh.id;
@@ -495,16 +470,19 @@ export function useSessionTabs(deps: SessionTabsDeps) {
     if (remaining.length === 0) {
       // Last conversation → reset to a single fresh, empty one.
       const fresh = makeTab('', []);
+      fresh.drafts = emptyDrafts();
       setTabs([fresh]);
       setActiveTabId(fresh.id);
       setCodingCwd(fresh.cwd);
       setMessages([]);
+      applySessionDrafts(emptyDrafts());
     } else {
       if (id === activeTabId) {
         const next = remaining.slice().sort((a, b) => b.createdAt - a.createdAt)[0];
         setActiveTabId(next.id);
         setCodingCwd(next.cwd);
         setMessages(next.messages as unknown as ChatMessage[]);
+        applySessionDrafts(resolveTabDrafts(next));
       }
       setTabs(remaining);
     }

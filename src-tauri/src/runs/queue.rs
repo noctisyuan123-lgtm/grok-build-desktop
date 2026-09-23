@@ -198,98 +198,6 @@ impl RunQueue {
             .clone()
     }
 
-    /// Rewind through a parked/idle ACP host that already mounts `session_id`.
-    ///
-    /// Avoids the Undo cold path (evict every host + spawn a fresh grok process
-    /// just to call `_x.ai/rewind/execute`), which is a multi-second UI freeze
-    /// after every Undo click even when a warm host is sitting idle.
-    ///
-    /// Returns `None` when no warm host holds the session (caller falls back).
-    pub async fn try_rewind_with_parked_host(
-        &self,
-        session_id: &str,
-        cwd: &Path,
-        undone_preview: Option<&str>,
-    ) -> Option<Result<core::RewindResult, String>> {
-        let session_id = session_id.trim();
-        if session_id.is_empty() {
-            return None;
-        }
-
-        // 1) Bare parked hosts (no idle watch) — can inspect loaded_sessions.
-        let parked_lane = {
-            let parked = self.acp_hosts.lock().await;
-            parked
-                .iter()
-                .find(|(_, host)| host.has_loaded_session(session_id))
-                .map(|(lane_id, _)| lane_id.clone())
-        };
-
-        // 2) Prewarm map is keyed by lane_id; value.id is the session head.
-        let prewarm_lane = if parked_lane.is_none() {
-            let prewarmed = self.prewarmed_sessions.lock().await;
-            prewarmed
-                .iter()
-                .find(|(_, entry)| entry.id == session_id)
-                .map(|(lane_id, _)| lane_id.clone())
-        } else {
-            None
-        };
-
-        // 3) Common case: a single idle-watched host after the last turn.
-        // We cannot peek loaded_sessions without taking it; verify after take.
-        let idle_lane = if parked_lane.is_none() && prewarm_lane.is_none() {
-            let watches = self.idle_watches.lock().await;
-            if watches.len() == 1 {
-                watches.keys().next().cloned()
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        let lane_id = parked_lane.or(prewarm_lane).or(idle_lane)?;
-        let (config, parent_run_id) = {
-            let watches = self.idle_watches.lock().await;
-            if let Some(handle) = watches.get(&lane_id) {
-                (handle.config.clone(), handle.run_id.clone())
-            } else {
-                (
-                    CoreConfig {
-                        model: None,
-                        reasoning_effort: None,
-                        always_approve: false,
-                        permission_mode: None,
-                        experimental_memory: false,
-                        web_search_disabled: false,
-                        subagents_disabled: false,
-                        review_only: false,
-                        rules: None,
-                        resume_session_id: Some(session_id.to_string()),
-                        share_session: false,
-                        fork_session: false,
-                        prompt_blocks: None,
-                    },
-                    String::new(),
-                )
-            }
-        };
-
-        let mut host = self.take_lane_host(&lane_id).await?;
-        if !host.has_loaded_session(session_id) {
-            // Wrong host (sole-idle heuristic miss) — put it back and bail.
-            self.park_lane_host(lane_id, host, config, parent_run_id).await;
-            return None;
-        }
-        let result = host
-            .rewind_last_user_turn(cwd, session_id, &config, undone_preview)
-            .await;
-        // Keep the warm host for the next turn (session still loaded, truncated).
-        self.park_lane_host(lane_id, host, config, parent_run_id).await;
-        Some(result)
-    }
-
     /// Stop and reap ACP children so `/cli` or rewind can load the same
     /// session only after the previous client has released and flushed it.
     pub async fn evict_acp_hosts(&self) {
@@ -321,14 +229,123 @@ impl RunQueue {
     }
 
     async fn take_lane_host(&self, lane_id: &str) -> Option<AcpHost> {
+        self.take_lane_host_with_meta(lane_id)
+            .await
+            .map(|(host, _, _)| host)
+    }
+
+    /// Take a parked / idle-watch host and the metadata needed to park it back.
+    /// Idle-watch entries carry the authoritative `CoreConfig` + owner run id;
+    /// bare `acp_hosts` entries (prewarm only) synthesize a minimal park config.
+    async fn take_lane_host_with_meta(
+        &self,
+        lane_id: &str,
+    ) -> Option<(AcpHost, CoreConfig, String)> {
         let watch = self.idle_watches.lock().await.remove(lane_id);
         if let Some(watch) = watch {
             // watch_idle must return on stop even mid-wakeup; otherwise this
             // join waits forever for turn_completed and the next prompt hangs.
+            let config = watch.config.clone();
+            let owner_run_id = watch.run_id.clone();
             let _ = watch.stop.send(true);
-            return watch.join.await.ok();
+            let host = watch.join.await.ok()?;
+            return Some((host, config, owner_run_id));
         }
-        self.acp_hosts.lock().await.remove(lane_id)
+        let host = self.acp_hosts.lock().await.remove(lane_id)?;
+        let session = host.cancel_handle().session_id().await;
+        let config = CoreConfig {
+            resume_session_id: session,
+            ..CoreConfig::from_legacy_args(&[])
+        };
+        Some((host, config, format!("parked:{lane_id}")))
+    }
+
+    /// Prefer in-place rewind on the lane's parked/idle-watch ACP host when it
+    /// already owns (or can mount) `session_id`. Returns:
+    /// - `None` — no suitable warm host (caller should cold-start)
+    /// - `Some(Ok/Err)` — warm attempt finished; on `Err` caller may cold-fall back
+    ///
+    /// Does **not** call `evict_acp_hosts`. The host is parked back afterward so
+    /// session identity and the warm pool survive a successful Undo.
+    pub async fn rewind_on_lane_host(
+        &self,
+        lane_id: &str,
+        cwd: &Path,
+        session_id: &str,
+        undone_preview: Option<&str>,
+    ) -> Option<Result<core::RewindResult, String>> {
+        let lane_id = lane_id.trim();
+        if lane_id.is_empty() || session_id.trim().is_empty() {
+            return None;
+        }
+        let lane_guard = self.lane_guard(lane_id).await;
+        let _lane_guard = lane_guard.lock().await;
+        if self.inner.lock().await.active_lanes.contains_key(lane_id) {
+            // A live turn owns the host — do not steal it for Undo.
+            return None;
+        }
+        let Some((mut host, mut config, owner_run_id)) =
+            self.take_lane_host_with_meta(lane_id).await
+        else {
+            return None;
+        };
+
+        let cancel_sid = host.cancel_handle().session_id().await;
+        let prewarmed_match = self
+            .prewarmed_sessions
+            .lock()
+            .await
+            .get(lane_id)
+            .is_some_and(|warm| warm.id == session_id);
+        let suitable = warm_rewind_host_suitable(
+            false, // lane already gated as idle above
+            true,
+            host.has_loaded_session(session_id),
+            cancel_sid.as_deref() == Some(session_id),
+            prewarmed_match,
+        );
+        if !suitable {
+            // Different conversation on this lane — put the host back untouched.
+            self.repark_lane_host(lane_id.to_string(), host, config, owner_run_id)
+                .await;
+            return None;
+        }
+
+        // Ensure rewind execute sees the head even if only cancel/prewarm knew it.
+        config.resume_session_id = Some(session_id.to_string());
+        // Warm Undo uses the parked host itself (not a second shared-leader
+        // client), so keep share_session off for the rewind request config.
+        config.share_session = false;
+        if !host.has_loaded_session(session_id) {
+            if let Err(error) = host.ensure_session_loaded(cwd, &config, session_id).await {
+                self.repark_lane_host(lane_id.to_string(), host, config, owner_run_id)
+                    .await;
+                return Some(Err(error));
+            }
+        }
+
+        let result = host
+            .rewind_last_user_turn(cwd, session_id, &config, undone_preview)
+            .await;
+        self.repark_lane_host(lane_id.to_string(), host, config, owner_run_id)
+            .await;
+        Some(result)
+    }
+
+    /// Park back into idle-watch when we have a real owner run, otherwise the
+    /// bare host map (prewarm-style) so the next Send can still take it.
+    async fn repark_lane_host(
+        &self,
+        lane_id: String,
+        host: AcpHost,
+        config: CoreConfig,
+        owner_run_id: String,
+    ) {
+        if owner_run_id.starts_with("parked:") {
+            self.acp_hosts.lock().await.insert(lane_id, host);
+        } else {
+            self.park_lane_host(lane_id, host, config, owner_run_id).await;
+        }
     }
 
     async fn park_lane_host(
@@ -1432,6 +1449,23 @@ impl RunQueue {
     }
 }
 
+
+/// Pure gate used by warm Undo: only attempt in-place rewind when the lane is
+/// idle and the host already knows the session (loaded / cancel handle /
+/// prewarm cache). Kept separate so unit tests cover the decision without ACP.
+pub(crate) fn warm_rewind_host_suitable(
+    lane_active: bool,
+    host_present: bool,
+    host_has_loaded: bool,
+    cancel_session_matches: bool,
+    prewarmed_matches: bool,
+) -> bool {
+    if lane_active || !host_present {
+        return false;
+    }
+    host_has_loaded || cancel_session_matches || prewarmed_matches
+}
+
 /// Decide whether a turn can skip ACP `session/load` and prompt directly.
 ///
 /// - Resume id already loaded on THIS host → warm direct.
@@ -1555,5 +1589,30 @@ mod tests {
             None
         );
         assert_eq!(warm_direct_session_id(None, |_| false, None), None);
+    }
+
+    #[test]
+    fn warm_rewind_requires_idle_lane_and_known_session() {
+        assert!(warm_rewind_host_suitable(
+            false, true, true, false, false
+        ));
+        assert!(warm_rewind_host_suitable(
+            false, true, false, true, false
+        ));
+        assert!(warm_rewind_host_suitable(
+            false, true, false, false, true
+        ));
+        // Active turn owns the host — never steal for Undo.
+        assert!(!warm_rewind_host_suitable(
+            true, true, true, true, true
+        ));
+        // No parked host → cold path.
+        assert!(!warm_rewind_host_suitable(
+            false, false, false, false, false
+        ));
+        // Host present but unrelated session → cold path.
+        assert!(!warm_rewind_host_suitable(
+            false, true, false, false, false
+        ));
     }
 }

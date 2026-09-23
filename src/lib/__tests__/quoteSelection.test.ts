@@ -12,6 +12,12 @@ describe('formatQuoteMarkdown', () => {
     );
   });
 
+  it('compacts long message ids in the attribution line', () => {
+    expect(
+      formatQuoteMarkdown('x', { messageId: 'a-mue0xho5-7be2db-extra-long-tail' }),
+    ).toBe('> — Assistant · long-tail\n>\n> x');
+  });
+
   it('preserves indentation inside the selection', () => {
     expect(formatQuoteMarkdown('  foo\n    bar')).toBe('> — Assistant\n>\n>   foo\n>     bar');
   });

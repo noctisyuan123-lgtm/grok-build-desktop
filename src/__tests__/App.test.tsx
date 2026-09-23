@@ -43,8 +43,15 @@ function setup(overrides: Record<string, CommandHandler> = {}) {
 }
 type Ctx = ReturnType<typeof setup>;
 
-function composerTextarea(): HTMLTextAreaElement {
-  return convo().getByRole('textbox') as HTMLTextAreaElement;
+function composerTextarea(): HTMLElement {
+  return convo().getByRole('textbox');
+}
+
+/** ProseMirror composer has no HTMLTextAreaElement.value — read the source attr. */
+function composerValue(): string {
+  return (
+    document.querySelector('[data-composer-source]')?.getAttribute('data-composer-source') ?? ''
+  );
 }
 
 /** Queries scoped to the conversation panel — the sidebar HISTORY rows repeat
@@ -74,6 +81,14 @@ async function submitPrompt(ctx: Ctx, prompt: string): Promise<string> {
   await waitFor(() => expect(ctx.tauri.runIds.length).toBeGreaterThan(before));
   return ctx.tauri.runIds[ctx.tauri.runIds.length - 1]!;
 }
+
+/** jsdom drops a typed leading '/' in ProseMirror — paste drives /cli submit. */
+async function submitHostSlash(ctx: Ctx, command: '/cli' | '/desktop' = '/cli') {
+  composerTextarea().focus();
+  fireEvent.paste(composerTextarea(), { clipboardData: { getData: () => command } });
+  await ctx.user.keyboard('{Enter}');
+}
+
 
 describe('App boot', () => {
   it('renders the shell and bootstraps through the Tauri IPC surface', async () => {
@@ -148,7 +163,7 @@ describe('composer submit → queued run → streamed reply', () => {
     expect(enqueue.args.args).toContain('-p');
     // The user bubble shows what was typed; the composer cleared.
     expect(await convo().findByText('Say hello please')).toBeInTheDocument();
-    expect(composerTextarea().value).toBe('');
+    expect(composerValue()).toBe('');
 
     // Backend picks the run up: queue active + Running state.
     await act(async () => {
@@ -367,9 +382,7 @@ describe('composer submit → queued run → streamed reply', () => {
       await ctx.tauri.emitRunState(runId, 'Done', { endedAt: Date.now() });
     });
 
-    const textarea = composerTextarea();
-    await ctx.user.type(textarea, '/cli');
-    await ctx.user.keyboard('{Enter}');
+    await submitHostSlash(ctx, '/cli');
     await waitFor(() => expect(ctx.tauri.commands()).toContain('open_grok_cli'));
     const openCli = [...ctx.tauri.calls].reverse().find((call) => call.cmd === 'open_grok_cli')!;
     expect(openCli.args.sessionId).toBe('shared-session');
@@ -383,7 +396,7 @@ describe('composer submit → queued run → streamed reply', () => {
     expect(await convo().findByText('Message from CLI')).toBeInTheDocument();
     expect(await convo().findByText('CLI reply')).toBeInTheDocument();
 
-    await ctx.user.type(textarea, 'Message from Desktop');
+    await ctx.user.type(composerTextarea(), 'Message from Desktop');
     await ctx.user.keyboard('{Enter}');
     await waitFor(() => expect(ctx.tauri.runIds).toHaveLength(2));
     const sharedEnqueue = [...ctx.tauri.calls]
@@ -429,9 +442,7 @@ describe('composer submit → queued run → streamed reply', () => {
     await act(async () => {
       await ctx.tauri.streamReply(second, ['Gone.']);
     });
-    const textarea = composerTextarea();
-    await ctx.user.type(textarea, '/cli');
-    await ctx.user.keyboard('{Enter}');
+    await submitHostSlash(ctx, '/cli');
     await waitFor(() => expect(ctx.tauri.commands()).toContain('open_grok_cli'));
 
     const undoButtons = await convo().findAllByRole('button', { name: t('message.undoResponse') });
@@ -441,8 +452,7 @@ describe('composer submit → queued run → streamed reply', () => {
       .find((button) => !(button as HTMLButtonElement).disabled);
     await ctx.user.click(enabledUndo!);
     expect(convo().queryByText('Gone.')).not.toBeInTheDocument();
-    // Cleanup-on-commit: engine rewind happens on the next send.
-    await ctx.user.keyboard('{Enter}');
+    // Codex-style optimistic Undo: engine rewind starts on click (composer stays unlocked).
     await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
 
     exported = [
@@ -497,9 +507,7 @@ describe('composer submit → queued run → streamed reply', () => {
       await ctx.tauri.streamReply(second, ['Second continue reply']);
     });
 
-    const textarea = composerTextarea();
-    await ctx.user.type(textarea, '/cli');
-    await ctx.user.keyboard('{Enter}');
+    await submitHostSlash(ctx, '/cli');
     await waitFor(() => expect(ctx.tauri.commands()).toContain('open_grok_cli'));
 
     const undoButtons = await convo().findAllByRole('button', { name: t('message.undoResponse') });
@@ -509,7 +517,6 @@ describe('composer submit → queued run → streamed reply', () => {
       .find((button) => !(button as HTMLButtonElement).disabled);
     await ctx.user.click(enabledUndo!);
     expect(convo().queryByText('Second continue reply')).not.toBeInTheDocument();
-    await ctx.user.keyboard('{Enter}');
     await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
 
     exported = [
@@ -574,8 +581,7 @@ describe('composer submit → queued run → streamed reply', () => {
       await ctx.tauri.streamReply(second, ['Undo this answer.']);
     });
 
-    await ctx.user.type(composerTextarea(), '/cli');
-    await ctx.user.keyboard('{Enter}');
+    await submitHostSlash(ctx, '/cli');
     await waitFor(() => expect(ctx.tauri.commands()).toContain('open_grok_cli'));
     const opensBeforeUndo = ctx.tauri.calls.filter((call) => call.cmd === 'open_grok_cli').length;
 
@@ -586,11 +592,11 @@ describe('composer submit → queued run → streamed reply', () => {
       .find((button) => !(button as HTMLButtonElement).disabled);
     await ctx.user.click(enabledUndo!);
 
-    expect(composerTextarea().value).toBe('Undo this turn');
+    expect(composerValue()).toBe('Undo this turn');
     expect(await convo().findByText('Context kept.')).toBeInTheDocument();
     expect(convo().queryByText('Undo this answer.')).not.toBeInTheDocument();
 
-    await ctx.user.keyboard('{Enter}');
+    // Wait for background rebase + live CLI reopen (composer stays unlocked).
     await waitFor(() => {
       const opens = ctx.tauri.calls.filter((call) => call.cmd === 'open_grok_cli');
       expect(opens).toHaveLength(opensBeforeUndo + 1);
@@ -638,20 +644,21 @@ describe('composer submit → queued run → streamed reply', () => {
     await act(async () => {
       await ctx.tauri.streamReply(runId, ['Only answer.']);
     });
-    await ctx.user.type(composerTextarea(), '/cli');
-    await ctx.user.keyboard('{Enter}');
+    await submitHostSlash(ctx, '/cli');
     await waitFor(() => expect(ctx.tauri.commands()).toContain('open_grok_cli'));
 
     await ctx.user.click(await convo().findByRole('button', { name: t('message.undoResponse') }));
-    expect(composerTextarea().value).toBe('Only turn');
+    expect(composerValue()).toBe('Only turn');
     expect(convo().queryByText('Only answer.')).not.toBeInTheDocument();
 
-    await ctx.user.keyboard('{Enter}');
+    // Background rebase + live CLI reopen finish without locking the composer.
+    await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
     await waitFor(() => {
       const open = [...ctx.tauri.calls].reverse().find((call) => call.cmd === 'open_grok_cli');
       expect(open?.args.sessionId).toBe('empty-rebased-session');
       expect(open?.args.cwd).toBe('');
     });
+    await ctx.user.keyboard('{Enter}');
     await waitFor(() => expect(ctx.tauri.runIds).toHaveLength(2));
     const enqueue = [...ctx.tauri.calls].reverse().find((call) => call.cmd === 'enqueue_run')!;
     const args = enqueue.args.args as string[];
@@ -751,13 +758,13 @@ describe('composer submit → queued run → streamed reply', () => {
     expect(
       await convo().findByRole('button', { name: t('emptyState.workspaceAria') }),
     ).toBeInTheDocument();
-    expect(composerTextarea().value).toBe('Please revise this prompt');
+    expect(composerValue()).toBe('Please revise this prompt');
     expect(convo().queryByText('A completed answer.')).not.toBeInTheDocument();
 
     await ctx.user.click(screen.getByRole('button', { name: t('common.undo') }));
     // Grok-native eager Undo: toast only restores the prior composer draft
     // (and optional file stash) — not the truncated conversation.
-    expect(composerTextarea().value).toBe('Keep this newer draft');
+    expect(composerValue()).toBe('Keep this newer draft');
     expect(convo().queryByText('A completed answer.')).not.toBeInTheDocument();
   });
 
@@ -792,7 +799,7 @@ describe('composer submit → queued run → streamed reply', () => {
     expect(convo().queryByText('First answer.')).not.toBeInTheDocument();
     expect(convo().queryByText('Second answer.')).not.toBeInTheDocument();
     expect(convo().queryByText('Second prompt')).not.toBeInTheDocument();
-    expect(composerTextarea().value).toBe('First prompt');
+    expect(composerValue()).toBe('First prompt');
 
     await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
     const rewind = [...ctx.tauri.calls]
@@ -834,7 +841,7 @@ describe('composer submit → queued run → streamed reply', () => {
     await ctx.user.click(tipUndo);
 
     expect(convo().queryByText('This response should disappear too.')).not.toBeInTheDocument();
-    expect(composerTextarea().value).toBe('Undo this prompt from its own controls');
+    expect(composerValue()).toBe('Undo this prompt from its own controls');
 
     await ctx.user.keyboard('{Enter}');
     await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
@@ -983,9 +990,12 @@ describe('composer submit → queued run → streamed reply', () => {
     expect(await convo().findByText('Undo this user-only tail')).toBeInTheDocument();
     await ctx.user.click(await convo().findByRole('button', { name: t('message.undoPrompt') }));
 
-    expect(convo().queryByText('Undo this user-only tail')).not.toBeInTheDocument();
-    expect(composerTextarea().value).toBe('Undo this user-only tail');
-    await ctx.user.keyboard('{Enter}');
+    // Empty transcript puts the composer inside .conversation-panel — don't
+    // confuse the restored composer draft with a leftover user bubble.
+    await waitFor(() => {
+      expect(document.querySelector('.message-user')).not.toBeInTheDocument();
+    });
+    expect(composerValue()).toBe('Undo this user-only tail');
     await waitFor(() => expect(ctx.tauri.commands()).toContain('rewind_grok_session'));
     expect(undonePrompt).toBe('Undo this user-only tail');
   });
@@ -1016,7 +1026,7 @@ describe('composer submit → queued run → streamed reply', () => {
     await ctx.user.click(enabledUndo!);
     expect(convo().queryByText('Wrong answer to undo.')).not.toBeInTheDocument();
     expect(await convo().findByText('Remember the project name Aurora')).toBeInTheDocument();
-    expect(composerTextarea().value).toBe('Now do something wrong');
+    expect(composerValue()).toBe('Now do something wrong');
 
     // Submit the restored (or revised) prompt: must NOT resume the ACP head
     // that still holds the undone turn, and must re-seed the visible first turn.
@@ -1064,12 +1074,12 @@ describe('composer submit → queued run → streamed reply', () => {
     await ctx.user.click(enabledUndo!);
     expect(convo().queryByText('Gone.')).not.toBeInTheDocument();
     expect(await convo().findByText('Kept.')).toBeInTheDocument();
-    expect(composerTextarea().value).toBe('Undo me');
+    expect(composerValue()).toBe('Undo me');
 
     await ctx.user.click(screen.getByRole('button', { name: t('common.undo') }));
     // No conversation Redo — only the prior composer draft returns.
     expect(convo().queryByText('Gone.')).not.toBeInTheDocument();
-    expect(composerTextarea().value).toBe('draft before undo');
+    expect(composerValue()).toBe('draft before undo');
 
     // Follow-up after toast restore should resume normally, not force-replay.
     await ctx.user.clear(composerTextarea());
@@ -1101,7 +1111,7 @@ describe('composer submit → queued run → streamed reply', () => {
       await convo().findByText(t('composerSection.sendFailed', { message: 'backend not ready' })),
     ).toBeInTheDocument();
     // The prompt is still there for a retry.
-    expect(composerTextarea().value).toBe('Doomed prompt');
+    expect(composerValue()).toBe('Doomed prompt');
   });
 
   it('resumes the rebased head after a rewind, then the real id the next turn reports', async () => {
@@ -1308,6 +1318,67 @@ describe('session tabs and history', () => {
     expect(enqueue.args.args).toContain('--resume');
     expect(enqueue.args.args).toContain('s-1');
     expect(enqueue.args.args).toContain('--fork-session');
+  });
+
+  it('keeps message attachments visible after forking and copies assets to the fork session', async () => {
+    const ctx = await bootApp();
+    const { tauri, user, view } = ctx;
+
+    const fileInput = view.container.querySelector('input[type="file"]') as HTMLInputElement;
+    const image = new File(['tiny image'], 'reference.png', { type: 'image/png' });
+    fireEvent.change(fileInput, { target: { files: [image] } });
+    expect(await screen.findByText('reference.png')).toBeInTheDocument();
+
+    const runId = await submitPrompt(ctx, 'Describe this screenshot');
+    await waitFor(() => expect(tauri.commands()).toContain('save_attachment'));
+    const saveCall = tauri.calls.find((call) => call.cmd === 'save_attachment')!;
+    const sourceSessionId = String(saveCall.args.sessionId);
+    const assetId = String(saveCall.args.assetId);
+    expect(sourceSessionId.length).toBeGreaterThan(0);
+    expect(assetId.length).toBeGreaterThan(0);
+
+    await act(async () => {
+      await tauri.streamReply(runId, ['Looks like a UI mock.']);
+    });
+    await waitFor(() => {
+      expect(document.querySelector('.message-assistant')).toHaveTextContent(
+        'Looks like a UI mock.',
+      );
+    });
+
+    // Attachment preview stays on the user bubble via messageAttachments.
+    expect(
+      convo().getByRole('button', { name: /reference\.png/i }).querySelector('img'),
+    ).toBeTruthy();
+
+    await user.click(convo().getByRole('button', { name: t('message.fork') }));
+
+    await waitFor(() => expect(tauri.commands()).toContain('copy_session_attachments'));
+    const copyCall = tauri.calls.find((call) => call.cmd === 'copy_session_attachments')!;
+    expect(copyCall.args.sourceSessionId).toBe(sourceSessionId);
+    expect(copyCall.args.destSessionId).not.toBe(sourceSessionId);
+    expect(copyCall.args.assetIds).toEqual([assetId]);
+
+    // No empty flash: forked tab still shows the image immediately.
+    expect(await convo().findByText('Describe this screenshot')).toBeInTheDocument();
+    await waitFor(() => {
+      const img = convo()
+        .getByRole('button', { name: /reference\.png/i })
+        .querySelector('img');
+      expect(img).toBeTruthy();
+      expect(img?.getAttribute('src') ?? '').toMatch(/^data:image\/png;base64,/);
+    });
+
+    // Rehydrate under the fork sessionId must also succeed after the copy.
+    await waitFor(() => {
+      const loads = tauri.calls.filter(
+        (call) =>
+          call.cmd === 'load_attachment' &&
+          call.args.sessionId === copyCall.args.destSessionId &&
+          call.args.assetId === assetId,
+      );
+      expect(loads.length).toBeGreaterThan(0);
+    });
   });
 
   it('exposes Copy and Fork on each round tip, not continue bubbles in the same round', async () => {

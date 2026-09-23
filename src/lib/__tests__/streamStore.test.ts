@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   streamStore,
   applyRunEvent,
@@ -7,6 +7,7 @@ import {
   cancelOpenWork,
   replaceQueue,
 } from '../streamStore';
+import { networkGiveUpError } from '../connectionHealth';
 
 beforeEach(() => streamStore.__reset());
 
@@ -217,6 +218,38 @@ describe('streamStore', () => {
     const snap = streamStore.getRunSnapshot('cancelled');
     expect(snap?.state).toBe('cancelled');
     expect(snap?.sessionId).toBe('session-1');
+  });
+
+  it('does not downgrade a network failed run to cancelled on end', () => {
+    streamStore.patchRun('net-fail-end', {
+      state: 'failed',
+      error: networkGiveUpError(),
+      endedAt: 42,
+    });
+    applyRunEvent('net-fail-end', {
+      type: 'end',
+      stopReason: 'Cancelled',
+      sessionId: 's-net',
+      requestId: 'r-net',
+    });
+    const snap = streamStore.getRunSnapshot('net-fail-end');
+    expect(snap?.state).toBe('failed');
+    expect(snap?.error).toBe(networkGiveUpError());
+    expect(snap?.stopReason).toBe('Cancelled');
+    expect(snap?.sessionId).toBe('s-net');
+  });
+
+  it('keeps failed+network when applyStateChange receives Cancelled', () => {
+    streamStore.patchRun('net-fail-state', {
+      state: 'failed',
+      error: networkGiveUpError(),
+      endedAt: 7,
+    });
+    applyStateChange('net-fail-state', { state: 'Cancelled', endedAt: 99 });
+    const snap = streamStore.getRunSnapshot('net-fail-state');
+    expect(snap?.state).toBe('failed');
+    expect(snap?.error).toBe(networkGiveUpError());
+    expect(snap?.endedAt).toBe(99);
   });
 
   it('emits one completion notification when end and Done both arrive', () => {
@@ -463,6 +496,58 @@ describe('streamStore', () => {
     expect(streamStore.getRunSnapshot('usage')).toMatchObject({
       state: 'failed',
       error: 'quota exhausted',
+    });
+  });
+
+  describe('generation clock', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(1_000_000);
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('accumulates only while text/thought, pauses for tools, flushes on end', () => {
+      applyRunEvent('clock', { type: 'text', data: 'hello' });
+      expect(streamStore.getRunSnapshot('clock')).toMatchObject({
+        generationActiveMs: 0,
+        generationResumedAt: 1_000_000,
+        lastEventType: 'text',
+      });
+
+      vi.setSystemTime(1_000_500);
+      applyRunEvent(
+        'clock',
+        { type: 'unknown' },
+        { type: 'tool_call', toolCallId: 't1', title: 'Shell', status: 'in_progress' },
+      );
+      expect(streamStore.getRunSnapshot('clock')).toMatchObject({
+        generationActiveMs: 500,
+        generationResumedAt: null,
+        lastEventType: 'activity',
+      });
+
+      vi.setSystemTime(1_002_000);
+      applyRunEvent('clock', { type: 'text', data: ' world' });
+      expect(streamStore.getRunSnapshot('clock')).toMatchObject({
+        generationActiveMs: 500,
+        generationResumedAt: 1_002_000,
+        lastEventType: 'text',
+      });
+
+      vi.setSystemTime(1_002_300);
+      applyRunEvent('clock', {
+        type: 'end',
+        stopReason: 'end_turn',
+        sessionId: 's',
+        requestId: 'r',
+      });
+      expect(streamStore.getRunSnapshot('clock')).toMatchObject({
+        generationActiveMs: 800,
+        generationResumedAt: null,
+        state: 'done',
+      });
     });
   });
 });

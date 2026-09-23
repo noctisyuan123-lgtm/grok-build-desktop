@@ -2891,17 +2891,30 @@ async fn export_grok_session(session_id: String) -> Result<String, String> {
 
 /// Rewind the active Grok context without clearing the whole session.
 ///
-/// Prefer an in-place conversation-only rewind so all earlier turns and the
-/// session identity survive. If the old ACP head cannot be loaded or rewound,
-/// fall back to a new durable head seeded only with the turns still visible.
-/// This makes the model-context boundary identical to the UI boundary without
-/// turning every Undo into `/clear`.
+/// Warm path: rewind on the lane's parked/idle-watch ACP host when it already
+/// owns the session (no full `evict_acp_hosts`). Cold path: stop Desktop TUI,
+/// evict hosts (share-leader conflict), then isolated ACP client. Prefer
+/// in-place rewind so session identity survives; only rebase onto a new head
+/// when the old session cannot be loaded or rewound.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UndoSessionResult {
     rewound: bool,
     session_id: String,
     rebased: bool,
+}
+
+/// Fire-and-forget shadow-git restore so Undo IPC does not await disk I/O.
+/// FE `restore_workspace_on_undo` still owns redo-stash capture on Undo click;
+/// this covers Edit-message rewind and ConversationOnly/empty-snapshot cases.
+fn spawn_shadow_git_restore(cwd: PathBuf, session_id: String, preview: Option<String>) {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::runs::shadow_git::restore_undone_turn_best_effort(
+            &cwd,
+            &session_id,
+            preview.as_deref(),
+        );
+    });
 }
 
 #[tauri::command]
@@ -2911,6 +2924,7 @@ async fn rewind_grok_session(
     cwd: Option<String>,
     undo_prompt: Option<String>,
     replay_context: Option<String>,
+    lane_id: Option<String>,
 ) -> Result<UndoSessionResult, String> {
     let session_id = session_id.trim().to_string();
     if session_id.is_empty() {
@@ -2929,37 +2943,69 @@ async fn rewind_grok_session(
         .filter(|value| !value.is_empty())
         .map(str::to_string);
 
-    // Fast path: rewind on the warm parked/idle ACP host that already mounts
-    // this session. Skipping evict+cold-connect removes the multi-second
-    // post-Undo freeze when a host is already sitting idle after the turn.
+    // --- Warm path ---------------------------------------------------------
+    // Prefer the lane's parked/idle-watch ACP host when it already owns the
+    // session. Do NOT evict all hosts first — that forced every Undo through a
+    // cold ACP connect and was the main freeze.
     if let Some(queue) = app.try_state::<std::sync::Arc<RunQueue>>() {
-        if let Some(fast) = queue
-            .try_rewind_with_parked_host(&session_id, &cwd, undone.as_deref())
-            .await
-        {
-            match fast {
-                Ok(result) if result.rewound => {
-                    return Ok(UndoSessionResult {
-                        rewound: true,
-                        session_id,
-                        rebased: false,
-                    });
-                }
-                Ok(_) => {
-                    // Host present but nothing to rewind — fall through.
-                }
+        let mut resolved_lane = lane_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        if resolved_lane.is_none() {
+            match queue.db().find_lane_id_for_session(&session_id).await {
+                Ok(found) => resolved_lane = found,
                 Err(error) => {
-                    eprintln!(
-                        "[grok undo] warm-host rewind failed ({error}); falling back to cold path"
-                    );
+                    eprintln!("[grok undo] lane lookup for warm rewind failed: {error}");
+                }
+            }
+        }
+        if let Some(lane) = resolved_lane {
+            if let Some(warm) = queue
+                .rewind_on_lane_host(&lane, &cwd, &session_id, undone.as_deref())
+                .await
+            {
+                match warm {
+                    Ok(result) if result.rewound => {
+                        // Best-effort: stop Desktop-launched TUI without blocking
+                        // the warm IPC return (FE may reopen /cli afterward).
+                        let stop_program = program.clone();
+                        let stop_session_id = session_id.clone();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            let _ = stop_desktop_grok_cli(&stop_program, &stop_session_id);
+                        });
+                        spawn_shadow_git_restore(
+                            PathBuf::from(&cwd),
+                            session_id.clone(),
+                            undone.clone(),
+                        );
+                        return Ok(UndoSessionResult {
+                            rewound: true,
+                            session_id,
+                            rebased: false,
+                        });
+                    }
+                    Ok(_) => {
+                        eprintln!(
+                            "[grok undo] warm host could not target rewind; falling back cold"
+                        );
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "[grok undo] warm rewind failed ({error}); falling back cold"
+                        );
+                    }
                 }
             }
         }
     }
 
-    // Cold path: release every ACP client so an isolated rewind process can
-    // session/load the head (needed when no warm host holds it, or warm rewind
-    // failed).
+    // --- Cold fallback -----------------------------------------------------
+    // No suitable warm host (or warm rewind failed). Evict parked ACP hosts so
+    // an isolated client can load the session without fighting a second client
+    // on the same head — required for Desktop TUI / share-leader conflicts.
+    // Keep eviction ONLY on this path; the warm path above must not evict.
     if let Some(queue) = app.try_state::<std::sync::Arc<RunQueue>>() {
         queue.evict_acp_hosts().await;
     }
@@ -2970,9 +3016,8 @@ async fn rewind_grok_session(
     })
     .await
     .map_err(|error| format!("stop Desktop Grok CLI join failed: {error}"))??;
-    // Desktop's TUI was stopped above, so rewind through an isolated ACP
-    // client. This avoids trying to bind a second client to a shared leader
-    // while still preserving the original session when the rewind succeeds.
+    // Isolated ACP client (share=false): Desktop TUI was stopped above so we
+    // do not bind a second client to a shared leader.
     let rewind = crate::runs::core::rewind_last_user_turn_with_share(
         Path::new(&program),
         &cwd,
@@ -2982,6 +3027,7 @@ async fn rewind_grok_session(
     )
     .await;
     if matches!(rewind, Ok(ref result) if result.rewound) {
+        spawn_shadow_git_restore(PathBuf::from(&cwd), session_id.clone(), undone.clone());
         return Ok(UndoSessionResult {
             rewound: true,
             session_id,
@@ -3007,18 +3053,11 @@ async fn rewind_grok_session(
                 )
                 .await;
                 if load_ok {
-                    // Frontend restore_workspace_on_undo already owns file
-                    // restore + redo stash; don't join another git add -A here.
-                    let snap_cwd = PathBuf::from(&cwd);
-                    let snap_session = session_id.clone();
-                    let snap_preview = Some(prompt.to_string());
-                    let _ = tauri::async_runtime::spawn_blocking(move || {
-                        crate::runs::shadow_git::restore_undone_turn_best_effort(
-                            &snap_cwd,
-                            &snap_session,
-                            snap_preview.as_deref(),
-                        );
-                    });
+                    spawn_shadow_git_restore(
+                        PathBuf::from(&cwd),
+                        session_id.clone(),
+                        Some(prompt.to_string()),
+                    );
                     return Ok(UndoSessionResult {
                         rewound: true,
                         session_id,
@@ -3038,21 +3077,8 @@ async fn rewind_grok_session(
     // or the old session may be gone. Only in that case create a replacement
     // seeded with the replay context supplied by the renderer.
     let rewind_error = rewind.err();
-    // Even when conversation is rebased onto a new session, restore files from
-    // the shadow-git snapshot of the undone turn (OpenCode-style).
-    {
-        // Idempotent with frontend restore_workspace_on_undo; do not await.
-        let snap_cwd = PathBuf::from(&cwd);
-        let snap_session = session_id.clone();
-        let snap_preview = undone.clone();
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            crate::runs::shadow_git::restore_undone_turn_best_effort(
-                &snap_cwd,
-                &snap_session,
-                snap_preview.as_deref(),
-            );
-        });
-    }
+    // Non-blocking: FE Undo also calls restore_workspace_on_undo for redo stash.
+    spawn_shadow_git_restore(PathBuf::from(&cwd), session_id.clone(), undone.clone());
     if let Some(queue) = app.try_state::<std::sync::Arc<RunQueue>>() {
         // Replacement head: drop lane pointers at the undone session so the
         // queue cannot --resume it after rebase.
@@ -3123,8 +3149,9 @@ struct RestoreWorkspaceOnUndoResult {
 }
 
 /// Workspace restore helper used on Undo click (AFTER stash + shadow-git).
-/// Engine rewind now also runs eagerly on click; this remains the file-level
-/// fallback / redo-stash capture when RewindMode::All is unavailable.
+/// Owns redo-stash capture for the toast. Engine/warm rewind no longer awaits
+/// shadow-git on the IPC path — this FE invoke is the primary file restore
+/// (idempotent with any fire-and-forget backend best-effort restore).
 #[tauri::command]
 async fn restore_workspace_on_undo(
     cwd: Option<String>,
@@ -4270,6 +4297,52 @@ async fn load_attachment(
     .map_err(|error| error.to_string())?
 }
 
+/// Copy attachment asset files from one session folder into another.
+/// Used when forking a conversation so the new tab can rehydrate by its own
+/// sessionId. Missing source assets are skipped (best-effort); already-present
+/// destination files are overwritten.
+fn copy_session_attachment_assets(
+    source_session_id: &str,
+    dest_session_id: &str,
+    asset_ids: &[String],
+) -> Result<usize, String> {
+    if source_session_id == dest_session_id {
+        return Ok(0);
+    }
+    let mut copied = 0usize;
+    for asset_id in asset_ids {
+        let source = attachment_asset_path(source_session_id, asset_id)?;
+        if !source.is_file() {
+            continue;
+        }
+        let dest = attachment_asset_path(dest_session_id, asset_id)?;
+        let parent = dest
+            .parent()
+            .ok_or_else(|| "Attachment asset directory is invalid.".to_string())?;
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Could not create assets directory: {error}"))?;
+        fs::copy(&source, &dest)
+            .map_err(|error| format!("Could not copy attachment {asset_id}: {error}"))?;
+        copied += 1;
+    }
+    Ok(copied)
+}
+
+/// Clone attachment bytes into a forked session so load_attachment(sessionId=fork)
+/// resolves the same assetIds the transcript still references.
+#[tauri::command]
+async fn copy_session_attachments(
+    source_session_id: String,
+    dest_session_id: String,
+    asset_ids: Vec<String>,
+) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        copy_session_attachment_assets(&source_session_id, &dest_session_id, &asset_ids)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 // ── Event forwarder ─────────────────────────────────────────────────────────
 
 fn forward_queue_message(app: &tauri::AppHandle, msg: &QueueMessage) {
@@ -5372,6 +5445,7 @@ pub fn run() {
             path_is_directory,
             save_attachment,
             load_attachment,
+            copy_session_attachments,
             desktop::desktop_list_apps,
             desktop::desktop_query,
             desktop::desktop_activate,
@@ -5999,5 +6073,45 @@ mod tests {
         assert_eq!(percent_decode_path("%2e%2e"), "..");
         assert_eq!(percent_decode_path("100%"), "100%");
         assert_eq!(percent_decode_path("%zz"), "%zz");
+    }
+
+    #[test]
+    fn copy_session_attachment_assets_clones_bytes_into_dest_session() {
+        let home = env::temp_dir().join(format!("grok-attach-home-{}", uuid::Uuid::now_v7()));
+        fs::create_dir_all(&home).expect("create home");
+        // attachment_asset_path resolves under $HOME/Library/Application Support/Grok Desktop
+        let previous_home = env::var_os("HOME");
+        env::set_var("HOME", &home);
+
+        let source_session = "tab_source";
+        let dest_session = "tab_fork";
+        let asset_id = "asset_abc";
+        let source_path = attachment_asset_path(source_session, asset_id).expect("source path");
+        fs::create_dir_all(source_path.parent().unwrap()).expect("create assets dir");
+        fs::write(&source_path, b"fork-me").expect("write source asset");
+
+        let copied = copy_session_attachment_assets(
+            source_session,
+            dest_session,
+            &[asset_id.to_string(), "missing_asset".to_string()],
+        )
+        .expect("copy");
+        assert_eq!(copied, 1);
+
+        let dest_path = attachment_asset_path(dest_session, asset_id).expect("dest path");
+        assert_eq!(fs::read(&dest_path).expect("read dest"), b"fork-me");
+        // Source must remain intact for the original tab.
+        assert_eq!(fs::read(&source_path).expect("read source"), b"fork-me");
+        assert_eq!(
+            copy_session_attachment_assets(source_session, source_session, &[asset_id.to_string()])
+                .expect("same session"),
+            0
+        );
+
+        match previous_home {
+            Some(value) => env::set_var("HOME", value),
+            None => env::remove_var("HOME"),
+        }
+        fs::remove_dir_all(&home).ok();
     }
 }

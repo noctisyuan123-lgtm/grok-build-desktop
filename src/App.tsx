@@ -28,7 +28,6 @@ import { showCompletionPopup } from './lib/completionPopup';
 import { isBackgroundSessionRun } from './lib/completionNotification';
 import { mergeStreamIntoMessages } from './lib/mergeStreamMessages';
 import { resolveWakeupLane } from './lib/wakeupLane';
-import { pickResumeSessionId } from './lib/resumeSessionId';
 import { MessageList, type MessageRef } from './components/MessageList';
 import type { ComposerFolder, ComposerHandle } from './components/Composer';
 import { QueueDock } from './components/QueueDock';
@@ -191,10 +190,15 @@ function App() {
   }, []);
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const [turnMutationBusy, setTurnMutationBusy] = useState(false);
+  // Soft guard for background Undo engine sync — does NOT lock the composer.
+  // Codex-style: UI truncates immediately; ACP rewind finishes asynchronously.
+  const undoEngineSyncRef = useRef(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const editingUserIdRef = useRef<string | null>(null);
   editingUserIdRef.current = editingUserId;
   const editingDraftBackupRef = useRef<string | null>(null);
+  const editingAttachmentsBackupRef = useRef<ComposerAttachment[] | null>(null);
+  const editingFolderBackupRef = useRef<ComposerFolder | null | undefined>(undefined);
   // Live CLI↔Desktop link is opt-in via /cli or /desktop only — never restore
   // from localStorage on boot (that was resuming the old head into New Session).
   const [liveSessionId, setLiveSessionId] = useState<string | null>(null);
@@ -239,6 +243,16 @@ function App() {
   >({});
   const [messageFolders, setMessageFolders] = useState<Record<string, ComposerFolder>>({});
   const attachmentLoadKeyRef = useRef('');
+  // After fork, activeTabId changes and the clear effect would wipe previews.
+  // Carry the branch's in-memory attachments/folders onto the new tab so the
+  // UI never flashes empty while disk copy + rehydrate settle.
+  const forkAttachmentCarryRef = useRef<{
+    tabId: string;
+    attachments: Record<string, ComposerAttachment[]>;
+    folders: Record<string, ComposerFolder>;
+  } | null>(null);
+  // Rehydrate awaits this so load_attachment sees assets under the fork sessionId.
+  const pendingForkAttachmentCopyRef = useRef<Promise<void> | null>(null);
   const prewarmKeyRef = useRef('');
   // Session state (mode/drafts/cwd/theme/history/messages) + localStorage and
   // session_state.json persistence live in hooks/useSessionPersistence.ts.
@@ -289,6 +303,8 @@ function App() {
     setMessages,
     codingCwd,
     setCodingCwd,
+    mode,
+    drafts,
     setDrafts,
     setLastRun,
     setSessionNotice,
@@ -1108,15 +1124,13 @@ function App() {
       .reverse()
       .find((message) => message.role === 'assistant' && message.meta?.sessionId)?.meta?.sessionId;
     // Prefer the pinned tab's head — never the tab the user switched to mid-await.
-    const previousSessionId = pickResumeSessionId({
-      inPlaceEditSessionId,
-      rebasedSessionId: rebased?.tabId === targetTabId ? rebased.sessionId : null,
-      visibleSessionId,
-      currentSessionId: targetTabId === activeTabId ? currentSessionId() : null,
-      tabSessionHead:
-        targetTab?.sessionHead ?? (targetTabId === activeTabId ? tabSessionHead : null),
-      messages: targetMessages,
-    });
+    const previousSessionId =
+      inPlaceEditSessionId ??
+      (rebased?.tabId === targetTabId ? rebased.sessionId : null) ??
+      visibleSessionId ??
+      (targetTabId === activeTabId ? currentSessionId() : null) ??
+      targetTab?.sessionHead ??
+      (targetTabId === activeTabId ? tabSessionHead : null);
     // A turn currently running is the parent of anything newly queued. Its
     // session id does not exist yet, so do not accidentally fork from the
     // older completed turn found above.
@@ -1333,7 +1347,18 @@ function App() {
   // Attachment bytes live outside the transcript. Rehydrate only the active
   // tab's references after boot or a conversation switch; transient data from
   // a just-sent message remains visible if the first disk read races its save.
+  // Fork seeds the new tab from carry-over so previews never flash empty.
+  // Keep carry while still on the fork tab so StrictMode's setup→cleanup→setup
+  // cannot wipe the seed on a second effect pass.
   useEffect(() => {
+    const carry = forkAttachmentCarryRef.current;
+    if (carry?.tabId === activeTabId) {
+      setMessageAttachments(carry.attachments);
+      setMessageFolders(carry.folders);
+      attachmentLoadKeyRef.current = '';
+      return;
+    }
+    if (carry) forkAttachmentCarryRef.current = null;
     setMessageAttachments({});
     setMessageFolders({});
     attachmentLoadKeyRef.current = '';
@@ -1353,26 +1378,39 @@ function App() {
     if (!references.length || loadKey === attachmentLoadKeyRef.current) return;
     attachmentLoadKeyRef.current = loadKey;
     let cancelled = false;
-    void Promise.all(
-      references.map(async ({ messageId, attachment }) => {
+    const pendingCopy = pendingForkAttachmentCopyRef.current;
+    void (async () => {
+      if (pendingCopy) {
         try {
-          const dataUrl = await invoke<string>('load_attachment', {
-            sessionId: activeTabId,
-            assetId: attachment.assetId,
-            mimeType: attachment.mimeType,
-          });
-          return {
-            messageId,
-            attachment: { ...attachment, dataUrl },
-          } satisfies { messageId: string; attachment: ComposerAttachment };
+          await pendingCopy;
         } catch {
-          return null;
+          /* copy errors surface via session notice from the fork caller */
         }
-      }),
-    ).then((loaded) => {
+        if (pendingForkAttachmentCopyRef.current === pendingCopy) {
+          pendingForkAttachmentCopyRef.current = null;
+        }
+      }
+      if (cancelled) return;
+      const loaded = await Promise.all(
+        references.map(async ({ messageId, attachment }) => {
+          try {
+            const dataUrl = await invoke<string>('load_attachment', {
+              sessionId: activeTabId,
+              assetId: attachment.assetId,
+              mimeType: attachment.mimeType,
+            });
+            return {
+              messageId,
+              attachment: { ...attachment, dataUrl },
+            } satisfies { messageId: string; attachment: ComposerAttachment };
+          } catch {
+            return null;
+          }
+        }),
+      );
       if (cancelled) return;
       setMessageAttachments((current) => mergeHydratedAttachments(current, loaded));
-    });
+    })();
     return () => {
       cancelled = true;
     };
@@ -1681,28 +1719,12 @@ function App() {
       rebasedSessionHeadRef.current = null;
     }
     const activeRebased = rebasedSessionHeadRef.current;
-    // liveSessionId is process-global. Only the tab that owns the live link may
-    // adopt it — otherwise New Session / an empty tab inherits a foreign head
-    // and the first send tries to --resume a dead session (FS_NOT_FOUND).
-    const liveOwned =
-      Boolean(liveSessionId) &&
-      Boolean(activeTabId) &&
-      liveTabIdRef.current === activeTabId;
     const head =
       newestSessionId ??
       (activeRebased?.tabId === activeTabId ? activeRebased.sessionId : null) ??
-      (liveOwned ? liveSessionId : null);
+      liveSessionId;
     if (head && head !== tabSessionHead) {
       updateActiveTabMeta({ sessionHead: head });
-    } else if (
-      !head &&
-      tabSessionHead &&
-      !newestSessionId &&
-      !liveOwned &&
-      !(activeRebased?.tabId === activeTabId)
-    ) {
-      // Drop a poisoned head on a blank / not-yet-bound conversation.
-      updateActiveTabMeta({ sessionHead: null });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, activeTabId, liveSessionId]);
@@ -1789,7 +1811,7 @@ function App() {
   }
 
   async function undoLatestTurn(messageId: string) {
-    if (activeSessionIsRunning || turnMutationBusy) return;
+    if (activeSessionIsRunning || turnMutationBusy || undoEngineSyncRef.current) return;
     if (activeRevert) return;
     const selectedIndex = messages.findIndex((message) => message.id === messageId);
     if (selectedIndex < 0) return;
@@ -1818,10 +1840,15 @@ function App() {
 
     const previousDraft = composerRef.current?.getValue() ?? '';
     const previousFolder = composerRef.current?.getAttachedFolder() ?? null;
+    const previousAttachments = composerRef.current?.getAttachments() ?? [];
     const restoredFolder = messageFolders[user.id] ?? null;
+    const restoredAttachments = messageAttachments[user.id] ?? [];
     const preserved = messages.slice(0, assistant ? assistantIndex - 1 : selectedIndex);
     const grokSessionId =
       assistant?.meta?.sessionId ?? currentSessionId() ?? tabSessionHead ?? liveSessionId;
+
+    // Claim soft sync lock before mutating UI (composer stays unlocked).
+    undoEngineSyncRef.current = true;
 
     // Grok-native eager rewind: truncate the engine session on click (same
     // session id), then physically tighten the UI. No OpenCode-style pointer
@@ -1836,6 +1863,7 @@ function App() {
     };
     // Optimistic: block parent inject until rewind outcome is known. Success
     // clears this and keeps the same sessionHead; failure keeps force-new.
+    // Do NOT hold turnMutationBusy — Codex/Claude-style: user keeps typing.
     setBlockEnqueueParent(true);
     undoneUserContentRef.current = user.content;
 
@@ -1847,11 +1875,11 @@ function App() {
     });
     updatePrompt(user.content);
     composerRef.current?.setAttachedFolder(restoredFolder);
+    composerRef.current?.setAttachments(restoredAttachments);
     composerRef.current?.focus();
 
-    // Capture AFTER bytes before restores so toast can re-apply file stash.
-    // Engine prefers RewindMode::All; shadow-git remains the ConversationOnly
-    // / local-truncate fallback (idempotent when All already restored files).
+    // Single non-blocking file-restore path (redo-stash for toast). Backend
+    // warm/cold rewind no longer awaits shadow-git on the IPC critical path.
     const cwdForRestore = codingCwd.trim();
     if (hasTauriRuntime() && cwdForRestore && grokSessionId) {
       undoWorkspaceRedoRef.current = invoke<{
@@ -1869,45 +1897,22 @@ function App() {
       undoWorkspaceRedoRef.current = null;
     }
 
-    setTurnMutationBusy(true);
-    let _rewoundOk = false;
-    try {
-      if (hasTauriRuntime() && grokSessionId) {
-        pendingUndoVisibleMessagesRef.current = {
-          sessionId: grokSessionId,
-          messages: preserved,
-        };
-        suppressLiveRehydrateRef.current = true;
-        _rewoundOk = await persistUndoToGrokSession(grokSessionId);
-        if (!_rewoundOk) {
-          // Keep undoSessionPlanRef so the next send force-news + replays.
-          // Drop the unreound head so we cannot --resume an untruncated session.
-          updateActiveTabMeta({ sessionHead: null });
-          setSessionNotice(t('notices.undoRewindFailed'));
-        } else {
-          setBlockEnqueueParent(false);
-        }
-      }
-    } finally {
-      setTurnMutationBusy(false);
-    }
-
+    // Toast + composer ready immediately. Engine sync continues in background.
+    const rewoundOkRef = { current: false as boolean | null };
     showUndoToast({
       text: t('message.turnUndone'),
       undo: () => {
-        // Conversation is already truncated in the engine — toast "Undo" only
-        // restores the prior composer draft and optional AFTER file stash.
-        // If rewind succeeded, clear any leftover force-new plan so a follow-up
-        // resumes the truncated same-session head (CLI alignment).
-        if (_rewoundOk) {
-          undoSessionPlanRef.current = null;
-          setBlockEnqueueParent(false);
-        }
+        // Toast "Undo" restores prior composer draft / chips / AFTER file stash.
+        // Always drop the force-new reseed plan: conversation stays truncated,
+        // and a follow-up should resume the pinned/visible head (not replay).
+        undoSessionPlanRef.current = null;
+        setBlockEnqueueParent(false);
         pendingUndoVisibleMessagesRef.current = null;
         const pendingWorkspace = undoWorkspaceRedoRef.current;
         undoWorkspaceRedoRef.current = null;
         updatePrompt(previousDraft);
         composerRef.current?.setAttachedFolder(previousFolder);
+        composerRef.current?.setAttachments(previousAttachments);
         if (pendingWorkspace && cwdForRestore) {
           void pendingWorkspace.then((result) => {
             const files = result?.redoFiles;
@@ -1922,6 +1927,39 @@ function App() {
         }
       },
     });
+
+    if (hasTauriRuntime() && grokSessionId) {
+      pendingUndoVisibleMessagesRef.current = {
+        sessionId: grokSessionId,
+        messages: preserved,
+      };
+      suppressLiveRehydrateRef.current = true;
+      void persistUndoToGrokSession(grokSessionId)
+        .then((ok) => {
+          rewoundOkRef.current = ok;
+          if (!ok) {
+            // Keep undoSessionPlanRef so the next send force-news + replays.
+            // Drop the unreound head so we cannot --resume an untruncated session.
+            updateActiveTabMeta({ sessionHead: null });
+            setSessionNotice(t('notices.undoRewindFailed'));
+          } else {
+            setBlockEnqueueParent(false);
+          }
+        })
+        .catch((error) => {
+          console.warn('[undo] engine rewind failed', error);
+          rewoundOkRef.current = false;
+          updateActiveTabMeta({ sessionHead: null });
+          setSessionNotice(t('notices.undoRewindFailed'));
+        })
+        .finally(() => {
+          undoEngineSyncRef.current = false;
+        });
+    } else {
+      rewoundOkRef.current = true;
+      setBlockEnqueueParent(false);
+      undoEngineSyncRef.current = false;
+    }
   }
 
   function forkAssistantResponse(messageId: string) {
@@ -1936,8 +1974,52 @@ function App() {
       return;
     }
     const branch = messages.slice(0, selectedIndex + 1);
+    const sourceTabId = activeTabId;
+    const branchIds = new Set(branch.map((message) => message.id));
+    const seededAttachments: Record<string, ComposerAttachment[]> = {};
+    for (const id of branchIds) {
+      const attachments = messageAttachments[id];
+      if (attachments?.length) seededAttachments[id] = attachments;
+    }
+    const seededFolders: Record<string, ComposerFolder> = {};
+    for (const id of branchIds) {
+      const folder = messageFolders[id];
+      if (folder) seededFolders[id] = folder;
+    }
+    const assetIds = [
+      ...new Set(
+        branch.flatMap((message) => (message.attachments ?? []).map((item) => item.assetId)),
+      ),
+    ];
+
     const tabId = forkSession(branch);
     if (!tabId) return;
+
+    forkAttachmentCarryRef.current = {
+      tabId,
+      attachments: seededAttachments,
+      folders: seededFolders,
+    };
+
+    // Assets were saved under the source sessionId; copy them so rehydrate
+    // under the new tab id succeeds (and survives restart).
+    if (assetIds.length > 0 && sourceTabId && hasTauriRuntime()) {
+      pendingForkAttachmentCopyRef.current = invoke<number>('copy_session_attachments', {
+        sourceSessionId: sourceTabId,
+        destSessionId: tabId,
+        assetIds,
+      })
+        .then(() => undefined)
+        .catch((error) => {
+          setSessionNotice(
+            t('notices.saveFailed', {
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        });
+    } else {
+      pendingForkAttachmentCopyRef.current = null;
+    }
 
     // Only the current session tail can use native resume+fork. A session id
     // is session-scoped, so older responses would otherwise fork from a head
@@ -1970,9 +2052,13 @@ function App() {
     if (assistant?.status === 'streaming') return;
     if (!editingUserIdRef.current) {
       editingDraftBackupRef.current = composerRef.current?.getValue() ?? '';
+      editingAttachmentsBackupRef.current = composerRef.current?.getAttachments() ?? [];
+      editingFolderBackupRef.current = composerRef.current?.getAttachedFolder() ?? null;
     }
     setEditingUserId(messageId);
     composerRef.current?.setValue(text);
+    composerRef.current?.setAttachments(messageAttachments[messageId] ?? []);
+    composerRef.current?.setAttachedFolder(messageFolders[messageId] ?? null);
     composerRef.current?.focus();
     setDrafts((current) => ({ ...current, [mode]: text }));
   }
@@ -1980,9 +2066,18 @@ function App() {
   function cancelComposerEdit() {
     if (!editingUserIdRef.current) return;
     const backup = editingDraftBackupRef.current ?? '';
+    const attachmentsBackup = editingAttachmentsBackupRef.current ?? [];
+    const folderBackup =
+      editingFolderBackupRef.current === undefined
+        ? null
+        : editingFolderBackupRef.current;
     editingDraftBackupRef.current = null;
+    editingAttachmentsBackupRef.current = null;
+    editingFolderBackupRef.current = undefined;
     setEditingUserId(null);
     composerRef.current?.setValue(backup);
+    composerRef.current?.setAttachments(attachmentsBackup);
+    composerRef.current?.setAttachedFolder(folderBackup);
     composerRef.current?.focus();
     setDrafts((current) => ({ ...current, [mode]: backup }));
   }
@@ -2005,7 +2100,9 @@ function App() {
     const snapshot = messages;
     const previousDraft = composerRef.current?.getValue() ?? '';
     const previousFolder = composerRef.current?.getAttachedFolder() ?? null;
+    const previousAttachments = composerRef.current?.getAttachments() ?? [];
     const restoredFolder = messageFolders[selected.id] ?? null;
+    const restoredAttachments = messageAttachments[selected.id] ?? [];
     const preserved = messages.slice(0, assistant ? assistantIndex - 1 : selectedIndex);
     const sessionId = assistant?.meta?.sessionId ?? currentSessionId() ?? liveSessionId;
 
@@ -2042,6 +2139,7 @@ function App() {
       setMessages(snapshot);
       composerRef.current?.setValue(previousDraft);
       composerRef.current?.setAttachedFolder(previousFolder);
+      composerRef.current?.setAttachments(previousAttachments);
       setSessionNotice(t('message.editFailed'));
       setTurnMutationBusy(false);
     };
@@ -2049,6 +2147,7 @@ function App() {
     if (!hasTauriRuntime() && !sessionId) {
       suppressLiveRehydrateRef.current = false;
       composerRef.current?.setAttachedFolder(restoredFolder);
+      composerRef.current?.setAttachments(restoredAttachments);
       setTurnMutationBusy(false);
       return true;
     }
@@ -2062,6 +2161,7 @@ function App() {
       return false;
     }
     composerRef.current?.setAttachedFolder(restoredFolder);
+    composerRef.current?.setAttachments(restoredAttachments);
     setTurnMutationBusy(false);
     return true;
   }
@@ -2080,6 +2180,7 @@ function App() {
       }>('rewind_grok_session', {
         sessionId,
         cwd: laneEffectiveCwd(activeTabId),
+        laneId: activeTabId,
         undoPrompt: undoneUserContentRef.current,
         replayContext: buildConversationReplayBlock(undoPlan?.replayMessages ?? []) ?? '',
       });
@@ -2293,7 +2394,7 @@ function App() {
   ]);
   return (
     <main
-      className={`app-shell theme-${themeMode}${expandedWindow && visibleMessages.length > 0 ? ' has-task-rail' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}${sidebarTransitionReady ? ' sidebar-transition-ready' : ''}`}
+      className={`app-shell theme-${themeMode}${expandedWindow ? ' has-task-rail' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}${sidebarTransitionReady ? ' sidebar-transition-ready' : ''}`}
     >
       <CommandPalette
         open={paletteOpen}
@@ -2473,7 +2574,7 @@ function App() {
                   ) : null
                 }
               />
-              {expandedWindow && visibleMessages.length > 0 ? <SubagentRail messages={visibleMessages} onStopTask={stopRun} /> : null}
+              {expandedWindow ? <SubagentRail messages={visibleMessages} onStopTask={stopRun} /> : null}
             </div>
             <PreviewPanel
               open={previewOpen}

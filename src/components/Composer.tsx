@@ -41,6 +41,10 @@ export interface ComposerHandle {
   setAttachedFolder: (folder: ComposerFolder | null) => void;
   /** Read the current folder card before a reversible composer operation. */
   getAttachedFolder: () => ComposerFolder | null;
+  /** Restore image/file chips when an undone / edited turn returns to the composer. */
+  setAttachments: (next: ComposerAttachment[]) => void;
+  /** Read current attachment chips before a reversible composer operation. */
+  getAttachments: () => ComposerAttachment[];
   /** Current textarea value. */
   getValue: () => string;
   /** Focus the textarea. */
@@ -149,6 +153,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const [activeOptionId, setActiveOptionId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [attachedFolder, setAttachedFolder] = useState<ComposerFolder | null>(null);
+  // Keep mirrors so getAttachments/getAttachedFolder stay correct in the same
+  // tick as set* (useImperativeHandle would otherwise return a stale closure).
+  const attachmentsRef = useRef(attachments);
+  attachmentsRef.current = attachments;
+  const attachedFolderRef = useRef(attachedFolder);
+  attachedFolderRef.current = attachedFolder;
   const [attachmentPickerBusy, setAttachmentPickerBusy] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -516,13 +526,22 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       setValue: (text: string) => {
         editorRef.current?.setMarkdown(text);
       },
-      setAttachedFolder,
-      getAttachedFolder: () => attachedFolder,
+      setAttachedFolder: (folder: ComposerFolder | null) => {
+        attachedFolderRef.current = folder;
+        setAttachedFolder(folder);
+      },
+      getAttachedFolder: () => attachedFolderRef.current,
+      setAttachments: (next: ComposerAttachment[]) => {
+        const copy = Array.isArray(next) ? next.slice() : [];
+        attachmentsRef.current = copy;
+        setAttachments(copy);
+      },
+      getAttachments: () => attachmentsRef.current.slice(),
       getValue: () => editorRef.current?.getMarkdown() ?? '',
       focus: () => editorRef.current?.focus(),
       submit: () => submit(true),
     }),
-    [attachedFolder, submit],
+    [submit],
   );
 
   const pickerOpen = Boolean(mention && cwd.trim());

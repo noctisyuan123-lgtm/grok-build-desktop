@@ -18,23 +18,38 @@ function sessionMessage(id: string, sessionId: string): ChatMessage {
 function useHarness(initialMessages: ChatMessage[] = []) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [codingCwd, setCodingCwd] = useState('');
+  const [mode] = useState<Mode>('coding');
   const [drafts, setDrafts] = useState<Record<Mode, string>>({ standard: 's', coding: 'c' });
   const [lastRun, setLastRun] = useState<ToolRun | null>(null);
   const [notice, setNotice] = useState<string | null>('old notice');
+  const [composerValue, setComposerValue] = useState('c');
   const tabsApi = useSessionTabs({
     messages,
     setMessages,
     codingCwd,
     setCodingCwd,
+    mode,
+    drafts,
     setDrafts,
     setLastRun,
     setSessionNotice: setNotice,
-    setComposerValue: () => {},
+    setComposerValue,
     focusComposer: () => {},
     closePalette: () => {},
     onConversationDeleted: harnessDeleted,
   });
-  return { ...tabsApi, messages, setMessages, codingCwd, setCodingCwd, drafts, lastRun, notice };
+  return {
+    ...tabsApi,
+    messages,
+    setMessages,
+    codingCwd,
+    setCodingCwd,
+    drafts,
+    setDrafts,
+    lastRun,
+    notice,
+    composerValue,
+  };
 }
 let harnessDeleted: (id: string) => void = () => {};
 
@@ -112,6 +127,28 @@ describe('switchToSession', () => {
     expect(result.current.activeTabId).toBe('t1');
     expect(result.current.messages.map((m) => m.id)).toEqual(['a1']);
   });
+
+  it('saves and restores per-session composer drafts across A→B→A', () => {
+    seedTabs();
+    const { result } = renderHook(() => useHarness([message('a1')]));
+
+    act(() => {
+      result.current.setDrafts({ standard: '', coding: 'draft-from-A' });
+    });
+    act(() => result.current.switchToSession('t2'));
+    expect(result.current.activeTabId).toBe('t2');
+    expect(result.current.drafts).toEqual({ standard: '', coding: '' });
+    expect(result.current.composerValue).toBe('');
+
+    act(() => {
+      result.current.setDrafts({ standard: '', coding: 'draft-from-B' });
+    });
+    act(() => result.current.switchToSession('t1'));
+    expect(result.current.activeTabId).toBe('t1');
+    expect(result.current.drafts.coding).toBe('draft-from-A');
+    expect(result.current.composerValue).toBe('draft-from-A');
+    expect(result.current.tabs.find((t) => t.id === 't2')?.drafts?.coding).toBe('draft-from-B');
+  });
 });
 
 describe('openGrokSessionTab', () => {
@@ -166,6 +203,9 @@ describe('handleTabCreate', () => {
     seedTabs();
     const { result } = renderHook(() => useHarness([message('a1')]));
     act(() => {
+      result.current.setDrafts({ standard: '', coding: 'keep-on-prior' });
+    });
+    act(() => {
       result.current.handleTabCreate();
     });
     expect(result.current.tabs).toHaveLength(3);
@@ -174,8 +214,10 @@ describe('handleTabCreate', () => {
     expect(result.current.messages).toEqual([]);
     expect(result.current.codingCwd).toBe('');
     expect(result.current.drafts).toEqual({ standard: '', coding: '' });
+    expect(result.current.composerValue).toBe('');
     expect(result.current.notice).toBeNull();
     expect(result.current.lastRun).toBeNull();
+    expect(result.current.tabs.find((t) => t.id === 't1')?.drafts?.coding).toBe('keep-on-prior');
   });
 
   it('does not copy the prior conversation into the new tab (⌘N clean slate)', () => {
@@ -372,53 +414,5 @@ describe('persistence and helpers', () => {
     expect(result.current.sessionFirstPrompt('t1')).toBe('first alpha prompt');
     expect(result.current.sessionFirstPrompt('t2')).toBe('msg b1');
     expect(result.current.sessionFirstPrompt('ghost')).toBeNull();
-  });
-});
-
-describe('active tab persistence desync', () => {
-  it('materializes an orphan activeTabId into tabs when live messages arrive', () => {
-    // tabsActiveKey points at an id that is not in the tabs cache (quota drop /
-    // partial write). session_state / flat messages still hold the transcript.
-    window.localStorage.setItem(
-      tabsStorageKey,
-      JSON.stringify([
-        { id: 'other', name: 'other', cwd: '/other', createdAt: 1, messages: [message('x')] },
-      ]),
-    );
-    window.localStorage.setItem(tabsActiveKey, 'tab_muamqbbk_1');
-
-    const { result } = renderHook(() => useHarness([]));
-    expect(result.current.activeTabId).toBe('tab_muamqbbk_1');
-    expect(result.current.tabs.some((t) => t.id === 'tab_muamqbbk_1')).toBe(false);
-
-    act(() => {
-      result.current.setMessages([message('m1'), message('m2')]);
-    });
-
-    expect(result.current.tabs.some((t) => t.id === 'tab_muamqbbk_1')).toBe(true);
-    const orphan = result.current.tabs.find((t) => t.id === 'tab_muamqbbk_1')!;
-    expect(orphan.messages.map((m) => m.id)).toEqual(['m1', 'm2']);
-    // Durable cache must list the active tab.
-    const stored = JSON.parse(window.localStorage.getItem(tabsStorageKey)!) as Array<{
-      id: string;
-    }>;
-    expect(stored.some((t) => t.id === 'tab_muamqbbk_1')).toBe(true);
-  });
-
-  it('keeps subsequent message updates on the materialized orphan tab', () => {
-    window.localStorage.setItem(
-      tabsStorageKey,
-      JSON.stringify([{ id: 'other', name: 'other', cwd: '', createdAt: 1, messages: [] }]),
-    );
-    window.localStorage.setItem(tabsActiveKey, 'orphan');
-    const { result } = renderHook(() => useHarness([message('m1')]));
-    act(() => {
-      result.current.setMessages([message('m1')]);
-    });
-    act(() => {
-      result.current.setMessages([message('m1'), message('m2')]);
-    });
-    const orphan = result.current.tabs.find((t) => t.id === 'orphan')!;
-    expect(orphan.messages.map((m) => m.id)).toEqual(['m1', 'm2']);
   });
 });

@@ -11,6 +11,7 @@ import {
   type TraceStatus,
 } from './traceParser';
 import { hasTauriRuntime } from './runtime';
+import { isNetworkFailure } from './connectionHealth';
 
 export type GrokEvent =
   | { type: 'thought'; data: string }
@@ -48,6 +49,10 @@ export interface RunSnapshot {
   lastEventAt: number | null;
   /** First thought/text of this turn — tok/s excludes pre-stream wait. */
   firstOutputAt: number | null;
+  /** Accumulated ms while lastEventType was text/thought (excludes tool waits). */
+  generationActiveMs: number;
+  /** Wall clock when the current text/thought segment resumed; null while paused. */
+  generationResumedAt: number | null;
   thoughtChars: number;
   textChars: number;
   lastEventType: 'thought' | 'text' | 'activity' | 'end' | null;
@@ -225,6 +230,7 @@ class StreamStore {
     if (patch.lastEventAt === undefined && isActivityPatch(patch)) {
       next.lastEventAt = Date.now();
     }
+    syncGenerationClock(cur, next);
     this.runs.set(id, next);
     if (options?.notify !== false) this.notifyNow();
   };
@@ -261,6 +267,8 @@ class StreamStore {
       endedAt: null,
       lastEventAt: null,
       firstOutputAt: null,
+      generationActiveMs: 0,
+      generationResumedAt: null,
       thoughtChars: 0,
       textChars: 0,
       lastEventType: null,
@@ -306,6 +314,35 @@ function isActivityPatch(patch: Partial<RunSnapshot>): boolean {
     patch.state === 'queued' ||
     patch.state === 'running'
   );
+}
+
+function isGenerationStreaming(type: RunSnapshot['lastEventType']): boolean {
+  return type === 'text' || type === 'thought';
+}
+
+/**
+ * Pause/resume the tok/s clock when lastEventType crosses streaming ↔
+ * non-streaming. Flush any open segment on terminal states even if the event
+ * type was left unchanged (e.g. applyStateChange → Done).
+ */
+function syncGenerationClock(cur: RunSnapshot, next: RunSnapshot): void {
+  const now = Date.now();
+  const wasStreaming = isGenerationStreaming(cur.lastEventType);
+  const isStreaming = isGenerationStreaming(next.lastEventType);
+  if (wasStreaming && !isStreaming) {
+    if (cur.generationResumedAt != null) {
+      next.generationActiveMs = cur.generationActiveMs + (now - cur.generationResumedAt);
+    }
+    next.generationResumedAt = null;
+  } else if (!wasStreaming && isStreaming) {
+    next.generationResumedAt = now;
+  }
+  const terminal =
+    next.state === 'done' || next.state === 'cancelled' || next.state === 'failed';
+  if (terminal && next.generationResumedAt != null) {
+    next.generationActiveMs += now - next.generationResumedAt;
+    next.generationResumedAt = null;
+  }
 }
 
 export const streamStore = new StreamStore();
@@ -442,6 +479,23 @@ export function applyRunEvent(
     const e = event as Extract<GrokEvent, { type: 'end' }>;
     const endedAt = Date.now();
     const cancelled = /cancel/i.test(e.stopReason);
+    // Sticky failed: network watchdog (and other failure paths) mark the run
+    // failed before cancelRun finishes. The matching end often carries a
+    // cancel-like stopReason — do not downgrade failed → cancelled or the UI
+    // will mislabel the turn as "Stopped by you."
+    if (cur?.state === 'failed') {
+      streamStore.patchRun(runId, {
+        lastEventType: 'end',
+        stopReason: e.stopReason,
+        sessionId: cur.sessionId ?? e.sessionId,
+        rootSessionId: cur.rootSessionId ?? sessionId ?? e.sessionId,
+        endedAt: cur.endedAt ?? endedAt,
+        usage: usage ?? cur.usage ?? null,
+        traces: reconcileOpenTraces(cur.traces, 'error'),
+        transcript: closeThought(cur.transcript, endedAt),
+      });
+      return;
+    }
     streamStore.patchRun(runId, {
       state: cancelled ? 'cancelled' : 'done',
       lastEventType: 'end',
@@ -560,6 +614,23 @@ export function applyStateChange(
 ): void {
   const current = streamStore.getRunSnapshot(runId);
   const state = payload.state.toLowerCase() as RunState;
+  // Sticky failed after network give-up: a later Cancelled (from cancelRun /
+  // ACP) must not flip the UI to "Stopped by you."
+  if (
+    current?.state === 'failed' &&
+    state === 'cancelled' &&
+    isNetworkFailure(current.error)
+  ) {
+    const endedAt = payload.endedAt ?? current.endedAt ?? Date.now();
+    streamStore.patchRun(runId, {
+      startedAt: payload.startedAt ?? current.startedAt ?? null,
+      endedAt,
+      error: current.error,
+      traces: reconcileOpenTraces(current.traces, 'error'),
+      transcript: closeThought(current.transcript, payload.endedAt ?? Date.now()),
+    });
+    return;
+  }
   const terminalStatus: TraceStatus | null =
     state === 'done'
       ? 'done'

@@ -46,7 +46,7 @@ function Harness({ workingSessionIds }: { workingSessionIds?: ReadonlySet<string
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([message('m100', 'fix the login flake')]);
   const [codingCwd, setCodingCwd] = useState('/a');
-  const [, setDrafts] = useState<Record<Mode, string>>({ standard: '', coding: '' });
+  const [drafts, setDrafts] = useState<Record<Mode, string>>({ standard: '', coding: '' });
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { undoToast, showUndoToast, undoNow } = useUndoToast();
@@ -55,6 +55,8 @@ function Harness({ workingSessionIds }: { workingSessionIds?: ReadonlySet<string
     setMessages,
     codingCwd,
     setCodingCwd,
+    mode: 'coding',
+    drafts,
     setDrafts,
     setLastRun: () => {},
     setSessionNotice: () => {},

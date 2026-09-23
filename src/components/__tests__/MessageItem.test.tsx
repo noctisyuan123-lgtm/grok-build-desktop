@@ -9,6 +9,7 @@ import {
   exteriorMarkdownKey,
   streamStore,
 } from '../../lib/streamStore';
+import { networkGiveUpError } from '../../lib/connectionHealth';
 import { renderMarkdown } from '../../lib/markdown';
 import { __resetTableScrollForTests } from '../../lib/tableScroll';
 
@@ -1363,5 +1364,23 @@ describe('MessageItem rendering states', () => {
     applyStateChange('r5', { state: 'Cancelled' });
     render(<MessageItem runId="r5" />);
     expect(screen.getByText('Stopped by you.')).toBeInTheDocument();
+  });
+
+  it('keeps network failure UI after failed+network then Cancelled/end-cancel', () => {
+    streamStore.patchRun('r-net', {
+      state: 'failed',
+      error: networkGiveUpError(),
+      endedAt: 1,
+    });
+    applyStateChange('r-net', { state: 'Cancelled' });
+    applyRunEvent('r-net', {
+      type: 'end',
+      stopReason: 'Cancelled',
+      sessionId: 's',
+      requestId: 'q',
+    });
+    render(<MessageItem runId="r-net" />);
+    expect(screen.queryByText('Stopped by you.')).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Disconnected. Retry to send again.');
   });
 });

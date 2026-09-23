@@ -58,4 +58,64 @@ describe('RunStatusLine', () => {
     rerender(<RunStatusLine runId="live-hold" variant="hud" />);
     expect(screen.getByText(/\d+ tok\/s/)).toBeInTheDocument();
   });
+
+  it('does not change tok/s when wall time advances during a tool', () => {
+    applyStateChange('live-pause', { state: 'Running', startedAt: 1_000_000 });
+    applyRunEvent('live-pause', { type: 'text', data: 'x'.repeat(400) });
+    const { rerender } = render(<RunStatusLine runId="live-pause" variant="hud" />);
+    act(() => {
+      vi.setSystemTime(1_001_000);
+      vi.advanceTimersByTime(250);
+    });
+    applyRunEvent(
+      'live-pause',
+      { type: 'unknown' },
+      { type: 'tool_call', toolCallId: 't1', title: 'Shell', status: 'in_progress' },
+    );
+    rerender(<RunStatusLine runId="live-pause" variant="hud" />);
+    const held = screen.getByText(/\d+ tok\/s/).textContent;
+    expect(held).toMatch(/\d+ tok\/s/);
+    act(() => {
+      vi.setSystemTime(1_010_000);
+      vi.advanceTimersByTime(250);
+    });
+    rerender(<RunStatusLine runId="live-pause" variant="hud" />);
+    expect(screen.getByText(/\d+ tok\/s/).textContent).toBe(held);
+  });
+
+  it('recomputes tok/s when usage jumps during a tool', () => {
+    applyStateChange('live-usage', { state: 'Running', startedAt: 1_000_000 });
+    applyRunEvent('live-usage', { type: 'text', data: 'x'.repeat(400) });
+    const { rerender } = render(<RunStatusLine runId="live-usage" variant="hud" />);
+    act(() => {
+      vi.setSystemTime(1_001_000);
+      vi.advanceTimersByTime(250);
+    });
+    // Pin wall clock so the tool flush records exactly 1s of active generation.
+    act(() => {
+      vi.setSystemTime(1_001_000);
+    });
+    applyRunEvent(
+      'live-usage',
+      { type: 'unknown' },
+      { type: 'tool_call', toolCallId: 't1', title: 'Shell', status: 'in_progress' },
+    );
+    rerender(<RunStatusLine runId="live-usage" variant="hud" />);
+    const before = screen.getByText(/\d+ tok\/s/).textContent;
+    // Char estimate ≈100 tokens → ~100 tok/s over 1s active. Official usage is higher.
+    streamStore.patchRun('live-usage', {
+      usage: {
+        inputTokens: 10,
+        outputTokens: 400,
+        thoughtTokens: 100,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        totalTokens: 510,
+      },
+    });
+    rerender(<RunStatusLine runId="live-usage" variant="hud" />);
+    const after = screen.getByText(/\d+ tok\/s/).textContent;
+    expect(after).not.toBe(before);
+    expect(screen.getByText('500 tok/s')).toBeInTheDocument();
+  });
 });
