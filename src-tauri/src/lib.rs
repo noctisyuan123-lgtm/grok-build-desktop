@@ -2917,16 +2917,6 @@ async fn rewind_grok_session(
         return Err("session id required".into());
     }
     let program = env::var("GROK_DESKTOP_GROK_CMD").unwrap_or_else(|_| default_grok_binary());
-    if let Some(queue) = app.try_state::<std::sync::Arc<RunQueue>>() {
-        queue.evict_acp_hosts().await;
-    }
-    let stop_program = program.clone();
-    let stop_session_id = session_id.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        stop_desktop_grok_cli(&stop_program, &stop_session_id)
-    })
-    .await
-    .map_err(|error| format!("stop Desktop Grok CLI join failed: {error}"))??;
     // Sessions are keyed by cwd. Runs (enqueue + prewarm) resolve the lane's
     // raw cwd through `resolve_session_cwd` — chat lanes enqueue '' and land
     // on HOME. Rewind must resolve the same way: `normalized_cwd` maps '' /
@@ -2938,6 +2928,48 @@ async fn rewind_grok_session(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+
+    // Fast path: rewind on the warm parked/idle ACP host that already mounts
+    // this session. Skipping evict+cold-connect removes the multi-second
+    // post-Undo freeze when a host is already sitting idle after the turn.
+    if let Some(queue) = app.try_state::<std::sync::Arc<RunQueue>>() {
+        if let Some(fast) = queue
+            .try_rewind_with_parked_host(&session_id, &cwd, undone.as_deref())
+            .await
+        {
+            match fast {
+                Ok(result) if result.rewound => {
+                    return Ok(UndoSessionResult {
+                        rewound: true,
+                        session_id,
+                        rebased: false,
+                    });
+                }
+                Ok(_) => {
+                    // Host present but nothing to rewind — fall through.
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[grok undo] warm-host rewind failed ({error}); falling back to cold path"
+                    );
+                }
+            }
+        }
+    }
+
+    // Cold path: release every ACP client so an isolated rewind process can
+    // session/load the head (needed when no warm host holds it, or warm rewind
+    // failed).
+    if let Some(queue) = app.try_state::<std::sync::Arc<RunQueue>>() {
+        queue.evict_acp_hosts().await;
+    }
+    let stop_program = program.clone();
+    let stop_session_id = session_id.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        stop_desktop_grok_cli(&stop_program, &stop_session_id)
+    })
+    .await
+    .map_err(|error| format!("stop Desktop Grok CLI join failed: {error}"))??;
     // Desktop's TUI was stopped above, so rewind through an isolated ACP
     // client. This avoids trying to bind a second client to a shared leader
     // while still preserving the original session when the rewind succeeds.
@@ -2975,6 +3007,8 @@ async fn rewind_grok_session(
                 )
                 .await;
                 if load_ok {
+                    // Frontend restore_workspace_on_undo already owns file
+                    // restore + redo stash; don't join another git add -A here.
                     let snap_cwd = PathBuf::from(&cwd);
                     let snap_session = session_id.clone();
                     let snap_preview = Some(prompt.to_string());
@@ -2984,8 +3018,7 @@ async fn rewind_grok_session(
                             &snap_session,
                             snap_preview.as_deref(),
                         );
-                    })
-                    .await;
+                    });
                     return Ok(UndoSessionResult {
                         rewound: true,
                         session_id,
@@ -3008,6 +3041,7 @@ async fn rewind_grok_session(
     // Even when conversation is rebased onto a new session, restore files from
     // the shadow-git snapshot of the undone turn (OpenCode-style).
     {
+        // Idempotent with frontend restore_workspace_on_undo; do not await.
         let snap_cwd = PathBuf::from(&cwd);
         let snap_session = session_id.clone();
         let snap_preview = undone.clone();
@@ -3017,8 +3051,7 @@ async fn rewind_grok_session(
                 &snap_session,
                 snap_preview.as_deref(),
             );
-        })
-        .await;
+        });
     }
     if let Some(queue) = app.try_state::<std::sync::Arc<RunQueue>>() {
         // Replacement head: drop lane pointers at the undone session so the

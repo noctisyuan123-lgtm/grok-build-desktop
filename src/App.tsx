@@ -36,6 +36,12 @@ import { CommandPalette, type PaletteAction } from './components/CommandPalette'
 import { ToolsPage } from './components/ToolsPage';
 import { CustomizePage } from './components/CustomizePage';
 import { ContextMenu, type ContextMenuState, type ContextMenuItem } from './components/ContextMenu';
+import { SelectionQuoteToolbar } from './components/SelectionQuoteToolbar';
+import {
+  formatQuoteMarkdown,
+  mergeQuoteIntoComposer,
+  resolveAssistantQuoteSelection,
+} from './lib/quoteSelection';
 import { InspectorDrawer } from './components/InspectorDrawer';
 import { Sidebar } from './components/Sidebar';
 import { EmptyState } from './components/EmptyState';
@@ -741,14 +747,43 @@ function App() {
   }
   // Right-click menu for the conversation area — real, clickable actions
   // (replaces the suppressed WebView menu). Selection-aware.
+  function quoteSelectionIntoComposer(markdown?: string) {
+    const block =
+      markdown ??
+      (() => {
+        const source = resolveAssistantQuoteSelection();
+        return source
+          ? formatQuoteMarkdown(source.text, {
+              role: 'assistant',
+              messageId: source.messageId,
+            })
+          : '';
+      })();
+    if (!block.trim()) return;
+    const current = composerRef.current?.getValue() ?? '';
+    const next = mergeQuoteIntoComposer(current, block);
+    composerRef.current?.setValue(next);
+    composerRef.current?.focus();
+  }
+
+  // Right-click menu for the conversation area — real, clickable actions
+  // (replaces the suppressed WebView menu). Selection-aware, with Quote when
+  // the selection sits inside an assistant response (Codex-style).
   function openConversationMenu(e: React.MouseEvent) {
     e.preventDefault();
     const selection = window.getSelection()?.toString().trim() ?? '';
+    const quoteSource = selection ? resolveAssistantQuoteSelection() : null;
     const items: ContextMenuItem[] = [];
     if (selection) {
       items.push({
         label: 'Copy',
         onClick: () => void navigator.clipboard?.writeText(selection),
+      });
+    }
+    if (quoteSource) {
+      items.push({
+        label: t('message.quote'),
+        onClick: () => quoteSelectionIntoComposer(),
       });
     }
     items.push(
@@ -778,6 +813,7 @@ function App() {
     );
     setContextMenu({ x: e.clientX, y: e.clientY, items });
   }
+
 
   function currentSessionId(list: typeof messages = messagesRef.current): string | null {
     const visible =
@@ -2293,6 +2329,7 @@ function App() {
         }}
       />
       <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
+      <SelectionQuoteToolbar onQuote={(markdown) => quoteSelectionIntoComposer(markdown)} />
       <Sidebar
         history={historyApi}
         sessionFirstPrompt={sessionFirstPrompt}

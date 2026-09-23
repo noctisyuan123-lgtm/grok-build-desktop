@@ -889,7 +889,7 @@ impl AcpHost {
         }
     }
 
-    async fn rewind_last_user_turn(
+    pub(crate) async fn rewind_last_user_turn(
         &mut self,
         cwd: &Path,
         session_id: &str,
@@ -943,23 +943,21 @@ impl AcpHost {
                 kept_prompt_index: None,
             });
         };
-        // Grok-native default: omit mode so ACP uses RewindMode::All (conversation
-        // + files when snapshots exist). Fall back to ConversationOnly + Desktop
-        // file restore (ACP file_snapshots, then shadow-git).
-        let execute_all = json!({
+        // Align with Grok CLI pager (`rewind_execute_params`): force commit +
+        // conversation_only. CLI docs leave the worktree alone; Desktop file
+        // restore stays on FE `restore_workspace_on_undo` / shadow-git (and
+        // ACP file_snapshots below as a best-effort fallback).
+        // Wire: RewindSessionRequest accepts sessionId/targetPromptIndex aliases;
+        // `force` and `mode` are snake_case (`"conversation_only"`).
+        let execute = json!({
             "sessionId": session_id,
             "targetPromptIndex": target,
-        });
-        let execute_conversation_only = json!({
-            "sessionId": session_id,
-            "targetPromptIndex": target,
-            "conversationOnly": true,
-            "conversation_only": true
+            "force": true,
+            "mode": "conversation_only",
         });
 
-        let mut conversation_only = false;
         let mut result = self
-            .request("_x.ai/rewind/execute", execute_all.clone(), None)
+            .request("_x.ai/rewind/execute", execute.clone(), None)
             .await?;
         // A second client on the leader can list points without load, but
         // execute then returns success:false and the TUI context is unchanged.
@@ -974,34 +972,10 @@ impl AcpHost {
             {
                 Ok(_) => {
                     result = self
-                        .request("_x.ai/rewind/execute", execute_all.clone(), None)
+                        .request("_x.ai/rewind/execute", execute, None)
                         .await?;
                 }
                 Err(error) => return Err(error),
-            }
-        }
-        if result.get("success").and_then(Value::as_bool) == Some(false) {
-            // All rejected — retry ConversationOnly and restore files ourselves.
-            conversation_only = true;
-            result = self
-                .request("_x.ai/rewind/execute", execute_conversation_only.clone(), None)
-                .await?;
-            if result.get("success").and_then(Value::as_bool) == Some(false) {
-                match self
-                    .request(
-                        "session/load",
-                        session_open_params(&cwd, config, Some(session_id)),
-                        None,
-                    )
-                    .await
-                {
-                    Ok(_) => {
-                        result = self
-                            .request("_x.ai/rewind/execute", execute_conversation_only, None)
-                            .await?;
-                    }
-                    Err(error) => return Err(error),
-                }
             }
         }
         if result.get("success").and_then(Value::as_bool) == Some(false) {
@@ -1011,35 +985,24 @@ impl AcpHost {
                 .unwrap_or("rewind failed");
             return Err(detail.to_string());
         }
-        // When All succeeded the engine already restored files from snapshots.
-        // ConversationOnly (or empty engine snapshots) needs Desktop restore.
-        if conversation_only {
-            if let Some(snapshots) = file_snapshots_for_dropped_point(&points, undone_preview) {
-                match apply_file_snapshots(Path::new(cwd.as_ref()), &snapshots) {
-                    Ok(count) if count > 0 => {
-                        eprintln!("[grok undo] restored {count} file snapshot(s) after rewind");
-                    }
-                    Ok(_) => {}
-                    Err(error) => {
-                        eprintln!("[grok undo] file snapshot restore failed: {error}");
-                    }
+        // ConversationOnly leaves files untouched in the engine; try ACP
+        // snapshots when present. Primary Desktop restore is still FE shadow-git.
+        if let Some(snapshots) = file_snapshots_for_dropped_point(&points, undone_preview) {
+            match apply_file_snapshots(Path::new(cwd.as_ref()), &snapshots) {
+                Ok(count) if count > 0 => {
+                    eprintln!("[grok undo] restored {count} file snapshot(s) after rewind");
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    eprintln!("[grok undo] file snapshot restore failed: {error}");
                 }
             }
         }
-        // Shadow-git fallback (also covers All with empty snapshots). Idempotent.
-        {
-            let snap_cwd = PathBuf::from(cwd.as_ref());
-            let snap_session = session_id.to_string();
-            let snap_preview = undone_preview.map(str::to_string);
-            let _ = tokio::task::spawn_blocking(move || {
-                super::shadow_git::restore_undone_turn_best_effort(
-                    &snap_cwd,
-                    &snap_session,
-                    snap_preview.as_deref(),
-                );
-            })
-            .await;
-        }
+        // File restore for the Undo-click path is owned by the frontend
+        // `restore_workspace_on_undo` command (redo-stash + single git add).
+        // A second shadow-git pass here raced that helper and doubled the
+        // post-Undo freeze. Local-truncate / rebase fallbacks in lib.rs still
+        // call restore_undone_turn_best_effort when the frontend did not.
         Ok(RewindResult {
             rewound: true,
             kept_prompt_index: Some(target),

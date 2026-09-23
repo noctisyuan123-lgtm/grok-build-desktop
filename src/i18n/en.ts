@@ -326,6 +326,8 @@ export const en = {
   'message.compactFailed': 'Auto-compact failed',
   'message.actions': 'Response actions',
   'message.promptActions': 'Prompt actions',
+  'message.quote': 'Quote',
+  'message.quoteSelection': 'Quote selection',
   'message.copy': 'Copy response',
   'message.copyPrompt': 'Copy prompt',
   'message.editPrompt': 'Edit prompt',

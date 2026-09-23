@@ -382,8 +382,20 @@ fn path_in_tree(cwd: &Path, git: &Path, tree_hash: &str, rel: &str) -> bool {
 }
 
 /// Paths that differ between `tree_hash` and the current worktree index.
+///
+/// Stages the worktree once (`git add -A`). Callers that both stash and
+/// restore must reuse the returned list — a second call would re-scan the
+/// whole tree and freeze Undo on large cwds.
 pub fn changed_paths_since(cwd: &Path, tree_hash: &str) -> Result<Vec<String>, String> {
+    if is_unsafe_snapshot_cwd(cwd) {
+        return Err(format!(
+            "shadow git skipped for unsafe cwd: {}",
+            cwd.display()
+        ));
+    }
     let git = ensure_shadow_repo(cwd)?;
+    // Expensive on large trees / macOS TCC-watched dirs — never call twice
+    // for one Undo. See restore_undone_turn_with_redo_stash.
     run_git(cwd, &git, &["add", "-A", "--", "."])?;
     let out = run_git(
         cwd,
@@ -413,22 +425,30 @@ pub fn restore_tree(cwd: &Path, tree_hash: &str) -> Result<usize, String> {
     if disabled() {
         return Ok(0);
     }
-    let git = ensure_shadow_repo(cwd)?;
     let files = changed_paths_since(cwd, tree_hash)?;
+    restore_tree_paths(cwd, tree_hash, &files)
+}
+
+/// Restore a precomputed path list (avoids a second `git add -A`).
+pub fn restore_tree_paths(cwd: &Path, tree_hash: &str, files: &[String]) -> Result<usize, String> {
+    if disabled() {
+        return Ok(0);
+    }
     if files.is_empty() {
         return Ok(0);
     }
+    let git = ensure_shadow_repo(cwd)?;
     let mut restored = 0usize;
     for rel in files {
-        let target = match resolve_inside_cwd(cwd, &rel) {
+        let target = match resolve_inside_cwd(cwd, rel) {
             Ok(path) => path,
             Err(error) => {
                 eprintln!("[grok shadow-git] skip unsafe path: {error}");
                 continue;
             }
         };
-        if path_in_tree(cwd, &git, tree_hash, &rel) {
-            match run_git(cwd, &git, &["checkout", tree_hash, "--", &rel]) {
+        if path_in_tree(cwd, &git, tree_hash, rel) {
+            match run_git(cwd, &git, &["checkout", tree_hash, "--", rel]) {
                 Ok(_) => restored += 1,
                 Err(error) => {
                     eprintln!("[grok shadow-git] checkout {rel} failed: {error}");
@@ -460,10 +480,15 @@ pub fn restore_tree(cwd: &Path, tree_hash: &str) -> Result<usize, String> {
 /// Capture AFTER contents of paths that would be restored, for toast Redo.
 pub fn stash_paths_for_redo(cwd: &Path, tree_hash: &str) -> Result<Vec<StashedFile>, String> {
     let files = changed_paths_since(cwd, tree_hash)?;
+    stash_paths_for_redo_list(cwd, &files)
+}
+
+/// Stash AFTER bytes for a precomputed path list (no second `git add -A`).
+pub fn stash_paths_for_redo_list(cwd: &Path, files: &[String]) -> Result<Vec<StashedFile>, String> {
     let mut out = Vec::new();
     let mut total = 0usize;
     for rel in files {
-        let target = match resolve_inside_cwd(cwd, &rel) {
+        let target = match resolve_inside_cwd(cwd, rel) {
             Ok(path) => path,
             Err(error) => {
                 eprintln!("[grok shadow-git] stash skip unsafe path: {error}");
@@ -475,7 +500,7 @@ pub fn stash_paths_for_redo(cwd: &Path, tree_hash: &str) -> Result<Vec<StashedFi
         }
         if !target.exists() {
             out.push(StashedFile {
-                path: rel,
+                path: rel.clone(),
                 content: None,
             });
             continue;
@@ -497,7 +522,7 @@ pub fn stash_paths_for_redo(cwd: &Path, tree_hash: &str) -> Result<Vec<StashedFi
                     Ok(content) => {
                         total += content.len();
                         out.push(StashedFile {
-                            path: rel,
+                            path: rel.clone(),
                             content: Some(content),
                         });
                     }
@@ -525,6 +550,11 @@ pub fn restore_undone_turn(
 }
 
 /// Restore the undone turn and return AFTER-state stashes for Redo.
+///
+/// Stages the worktree **once**. Previously stash + restore each called
+/// `changed_paths_since` → two full `git add -A` scans per Undo click, which
+/// freezes the UI for seconds on large project cwds (and can hang for minutes
+/// under macOS TCC if cwd is Home/Documents).
 pub fn restore_undone_turn_with_redo_stash(
     cwd: &Path,
     session_id: &str,
@@ -533,11 +563,15 @@ pub fn restore_undone_turn_with_redo_stash(
     if disabled() {
         return Ok((0, Vec::new()));
     }
+    if is_unsafe_snapshot_cwd(cwd) {
+        return Ok((0, Vec::new()));
+    }
     let Some(snap) = find_turn_snapshot(cwd, session_id, undone_preview) else {
         return Ok((0, Vec::new()));
     };
-    let stash = stash_paths_for_redo(cwd, &snap.tree_hash).unwrap_or_default();
-    let restored = restore_tree(cwd, &snap.tree_hash)?;
+    let files = changed_paths_since(cwd, &snap.tree_hash)?;
+    let stash = stash_paths_for_redo_list(cwd, &files).unwrap_or_default();
+    let restored = restore_tree_paths(cwd, &snap.tree_hash, &files)?;
     Ok((restored, stash))
 }
 

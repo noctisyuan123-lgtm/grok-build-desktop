@@ -4661,7 +4661,10 @@ body[data-completion-popup='true'] {
   }
 }
 .message.message-user {
-  background: linear-gradient(180deg, transparent, rgba(255, 122, 69, 0.04));
+  /* Was a 4% orange wash (May 2026). Disabled: the Codex-style dark UI uses
+     a right-aligned #252525 bubble on a flat canvas; the wash looked like a
+     muddy yellow band once selection-isolation painted an opaque row fill. */
+  background: transparent;
 }
 .message.message-user::before {
   content: 'You';
@@ -4691,8 +4694,13 @@ body[data-completion-popup='true'] {
   line-height: 22px;
   margin: 0;
   white-space: pre-wrap;
-  word-break: break-word;
-  overflow-wrap: anywhere;
+  /* break-word (not anywhere): overflow-wrap:anywhere + CJK makes WebKit
+     LTR drag selection hitch onto earlier line boxes. Tables already scroll
+     via .md-table-shell, so anywhere is no longer needed here. */
+  word-break: normal;
+  overflow-wrap: break-word;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .streaming-raw {
@@ -4993,6 +5001,8 @@ body[data-completion-popup='true'] {
   right: 8px;
   top: 8px;
   transition: opacity 150ms ease;
+  -webkit-user-select: none;
+  user-select: none;
   width: 28px;
 }
 
@@ -8973,7 +8983,6 @@ select:focus-visible {
 
 .message.message-user {
   align-items: flex-start;
-  background: transparent;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -9550,8 +9559,33 @@ select:focus-visible {
 }
 
 .message.message-assistant {
-  background: transparent;
   padding: 12px 28px 10px;
+}
+
+/* Text-selection isolation for Virtuoso rows.
+   Adjacent rows can visually overlap (abs chrome, residual negative margins,
+   measurement lag). Transparent message backgrounds let hit-testing fall
+   through to text from the row above — classic LTR-selects-lines-above /
+   RTL-works asymmetry, because the drag starts on the exposed left edge.
+   Clip overflow and paint an opaque canvas-matching fill so each row owns
+   its hit box without changing the look.
+   Use the full `background` shorthand (not only background-color) so the
+   legacy May 2026 user-row orange wash
+   (linear-gradient … rgba(255, 122, 69, 0.04)) cannot leak back after the
+   theme-dark `background: transparent` override was replaced. Match the
+   conversation canvas (#171717), not --app-bg (#0b0c0d), which is darker. */
+.message.message-user,
+.message.message-assistant {
+  isolation: isolate;
+  overflow: clip;
+  position: relative;
+  background: #171717;
+}
+.app-shell.theme-light .message.message-user,
+.app-shell.theme-light .message.message-assistant,
+.theme-light .message.message-user,
+.theme-light .message.message-assistant {
+  background: var(--app-bg, #f6f6f4);
 }
 
 /* Back-to-back assistant/wakeup bubbles: denser than user↔assistant turns.
@@ -9569,7 +9603,8 @@ select:focus-visible {
   gap: 7px;
   justify-content: flex-start;
   line-height: 1;
-  margin-bottom: 28px;
+  /* Pair with .message-worked-list (no longer -18px): net gap ~10px as before. */
+  margin-bottom: 10px;
   padding-bottom: 14px;
   width: 100%;
 }
@@ -9600,7 +9635,10 @@ button.message-worked:hover {
 }
 
 .message-worked-list {
-  margin: -18px 0 24px 2px;
+  /* Was margin-top:-18px; negative pull let tool-rail text paint into the
+     prior block and steal LTR selection hit-tests on the left edge. Keep the
+     same visual density with a smaller positive gap instead. */
+  margin: 0 0 24px 2px;
 }
 
 @media (max-width: 720px) {
@@ -12075,4 +12113,65 @@ body,
   .task-rail-entry.status-running summary > svg {
     animation: none;
   }
+}
+
+/* ── Selection quote toolbar (Codex-style) ────────────────────────────────── */
+.selection-quote-toolbar {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  -webkit-user-select: none;
+  user-select: none;
+  background: color-mix(in srgb, var(--bg-3) 92%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--bg-0) 35%, transparent),
+    0 10px 28px rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  animation: ctx-menu-in 110ms var(--ease-out);
+  /* CSSOM left/top are written by the component (CSP-safe). */
+}
+
+.selection-quote-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.selection-quote-toolbar-btn:hover {
+  background: var(--accent-soft);
+}
+
+.selection-quote-toolbar-btn:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 1px;
+}
+
+.selection-quote-toolbar-btn svg {
+  flex: none;
+  opacity: 0.85;
+}
+
+.app-shell.theme-light .selection-quote-toolbar {
+  background: color-mix(in srgb, var(--bg-1) 94%, white);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--border) 80%, transparent),
+    0 10px 24px rgba(40, 30, 10, 0.12);
 }

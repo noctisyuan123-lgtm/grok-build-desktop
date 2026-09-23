@@ -5,7 +5,7 @@ use super::parser::parse_line;
 use super::process;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::{broadcast, watch, Mutex, Notify};
@@ -196,6 +196,98 @@ impl RunQueue {
             .entry(lane_id.to_string())
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone()
+    }
+
+    /// Rewind through a parked/idle ACP host that already mounts `session_id`.
+    ///
+    /// Avoids the Undo cold path (evict every host + spawn a fresh grok process
+    /// just to call `_x.ai/rewind/execute`), which is a multi-second UI freeze
+    /// after every Undo click even when a warm host is sitting idle.
+    ///
+    /// Returns `None` when no warm host holds the session (caller falls back).
+    pub async fn try_rewind_with_parked_host(
+        &self,
+        session_id: &str,
+        cwd: &Path,
+        undone_preview: Option<&str>,
+    ) -> Option<Result<core::RewindResult, String>> {
+        let session_id = session_id.trim();
+        if session_id.is_empty() {
+            return None;
+        }
+
+        // 1) Bare parked hosts (no idle watch) — can inspect loaded_sessions.
+        let parked_lane = {
+            let parked = self.acp_hosts.lock().await;
+            parked
+                .iter()
+                .find(|(_, host)| host.has_loaded_session(session_id))
+                .map(|(lane_id, _)| lane_id.clone())
+        };
+
+        // 2) Prewarm map is keyed by lane_id; value.id is the session head.
+        let prewarm_lane = if parked_lane.is_none() {
+            let prewarmed = self.prewarmed_sessions.lock().await;
+            prewarmed
+                .iter()
+                .find(|(_, entry)| entry.id == session_id)
+                .map(|(lane_id, _)| lane_id.clone())
+        } else {
+            None
+        };
+
+        // 3) Common case: a single idle-watched host after the last turn.
+        // We cannot peek loaded_sessions without taking it; verify after take.
+        let idle_lane = if parked_lane.is_none() && prewarm_lane.is_none() {
+            let watches = self.idle_watches.lock().await;
+            if watches.len() == 1 {
+                watches.keys().next().cloned()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let lane_id = parked_lane.or(prewarm_lane).or(idle_lane)?;
+        let (config, parent_run_id) = {
+            let watches = self.idle_watches.lock().await;
+            if let Some(handle) = watches.get(&lane_id) {
+                (handle.config.clone(), handle.run_id.clone())
+            } else {
+                (
+                    CoreConfig {
+                        model: None,
+                        reasoning_effort: None,
+                        always_approve: false,
+                        permission_mode: None,
+                        experimental_memory: false,
+                        web_search_disabled: false,
+                        subagents_disabled: false,
+                        review_only: false,
+                        rules: None,
+                        resume_session_id: Some(session_id.to_string()),
+                        share_session: false,
+                        fork_session: false,
+                        prompt_blocks: None,
+                    },
+                    String::new(),
+                )
+            }
+        };
+
+        let mut host = self.take_lane_host(&lane_id).await?;
+        if !host.has_loaded_session(session_id) {
+            // Wrong host (sole-idle heuristic miss) — put it back and bail.
+            self.park_lane_host(lane_id, host, config, parent_run_id).await;
+            return None;
+        }
+        let result = host
+            .rewind_last_user_turn(cwd, session_id, &config, undone_preview)
+            .await;
+        // Keep the warm host for the next turn (session still loaded, truncated).
+        self.park_lane_host(lane_id, host, config, parent_run_id).await;
+        Some(result)
     }
 
     /// Stop and reap ACP children so `/cli` or rewind can load the same

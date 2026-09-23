@@ -529,6 +529,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 
   return (
     <div
+      data-no-quote
       className={`composer${submitting ? ' composer-submitting' : ''}${dragActive ? ' composer-drag-active' : ''}`}
       onDragEnter={(event) => {
         event.preventDefault();
