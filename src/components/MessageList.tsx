@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, FileText } from 'lucide-react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import { MessageItem, MarkdownSegment } from './MessageItem';
-import { LongTextMessage } from './LongTextMessage';
+import { MessageItem } from './MessageItem';
+import { UserMessageText } from './UserMessageText';
 import { MessageActions } from './MessageActions';
-import { isLongUserText } from '../lib/longText';
 import { useSessionActiveRunProgress } from '../hooks/useActiveRun';
 import { t } from '../i18n';
 import type { TraceEvent } from '../lib/traceParser';
@@ -302,14 +301,10 @@ export function MessageList({
                   </div>
                 ) : null}
                 {msg.userText ? (
-                  isLongUserText(msg.userText) ? (
-                    <LongTextMessage text={msg.userText} />
-                  ) : (
-                    <MarkdownSegment
-                      cacheKey={`user:${msg.id || msg.runId || 'anon'}`}
-                      text={msg.userText}
-                    />
-                  )
+                  <UserMessageText
+                    cacheKey={`user:${msg.id || msg.runId || 'anon'}`}
+                    text={msg.userText}
+                  />
                 ) : null}
                 <MessageActions
                   sourceText={msg.userText ?? ''}

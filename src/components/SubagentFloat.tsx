@@ -8,9 +8,8 @@ import { resolveSubagentPrompt, type TraceEvent, type TraceStatus } from '../lib
 import type { SessionSubagent } from '../lib/sessionSubagents';
 import { useSubagentUi } from './subagentUiContext';
 import { PlanTodoList, resolvePlanEntriesFromTraces } from './PlanTodoList';
-import { LongTextMessage } from './LongTextMessage';
-import { TranscriptMessage, MarkdownSegment } from './MessageItem';
-import { isLongUserText } from '../lib/longText';
+import { UserMessageText } from './UserMessageText';
+import { TranscriptMessage } from './MessageItem';
 import { t } from '../i18n';
 
 /**
@@ -230,11 +229,10 @@ function SubagentDrawerBody({ runId, subagent }: { runId: string; subagent: Trac
     <div className="subagent-drawer-body">
       {prompt ? (
         <div className="message message-user subagent-drawer-prompt">
-          {isLongUserText(prompt) ? (
-            <LongTextMessage text={prompt} />
-          ) : (
-            <MarkdownSegment cacheKey={`subagent-prompt:${transcriptRunId}`} text={prompt} />
-          )}
+          <UserMessageText
+            cacheKey={`subagent-prompt:${transcriptRunId}`}
+            text={prompt}
+          />
         </div>
       ) : null}
       {planEntries?.length ? <PlanTodoList entries={planEntries} /> : null}

@@ -2394,7 +2394,7 @@ function App() {
   ]);
   return (
     <main
-      className={`app-shell theme-${themeMode}${expandedWindow ? ' has-task-rail' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}${sidebarTransitionReady ? ' sidebar-transition-ready' : ''}`}
+      className={`app-shell theme-${themeMode}${expandedWindow && visibleMessages.length > 0 ? ' has-task-rail' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}${sidebarTransitionReady ? ' sidebar-transition-ready' : ''}`}
     >
       <CommandPalette
         open={paletteOpen}
