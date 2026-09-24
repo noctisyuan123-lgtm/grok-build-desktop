@@ -88,11 +88,21 @@ export function QueueDock({ onError }: Props) {
     <div className="queue-dock">
       {resumeBannerVisible ? (
         <div className="queue-banner">
-          <span>
+          <span className="queue-banner-label">
             {t(bannerCount === 1 ? 'queue.bannerOne' : 'queue.bannerMany', { count: bannerCount })}
           </span>
-          <button onClick={handleResume}>{t('queue.resumeAll')}</button>
-          <button onClick={handleCancelAll}>{t('queue.cancelAll')}</button>
+          <div className="queue-banner-actions">
+            <button
+              type="button"
+              className="queue-banner-action queue-banner-action-primary"
+              onClick={handleResume}
+            >
+              {t('queue.resumeAll')}
+            </button>
+            <button type="button" className="queue-banner-action" onClick={handleCancelAll}>
+              {t('queue.cancelAll')}
+            </button>
+          </div>
         </div>
       ) : null}
 

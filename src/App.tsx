@@ -14,6 +14,7 @@ import { openPath, openUrl } from '@tauri-apps/plugin-opener';
 import { Globe2, TerminalSquare } from 'lucide-react';
 import './App.css';
 import { cancelRun, enqueueRun, ensureStreamListenersAttached, prewarmRun } from './lib/grok';
+import { performNetworkRetry } from './lib/networkRetry';
 import { onDocumentLinkClick } from './lib/externalLinks';
 import { hasTauriRuntime } from './lib/runtime';
 import {
@@ -544,19 +545,24 @@ function App() {
     }
   }
 
-  function retryNetworkTurn(_messageId: string, runId: string) {
-    const idx = messages.findIndex((message) => message.runId === runId);
-    let userText = '';
-    for (let i = idx - 1; i >= 0; i -= 1) {
-      if (messages[i]?.role === 'user') {
-        userText = messages[i]!.content;
-        break;
-      }
-    }
-    if (!userText.trim()) return;
-    streamStore.patchRun(runId, { failureDismissed: true });
-    composerRef.current?.setValue(userText);
-    void composerRef.current?.submit();
+  async function retryNetworkTurn(_messageId: string, runId: string) {
+    // Cancel the failed run, collapse its empty turn, then resubmit cleanly so
+    // Retry never leaves a Queued orphan for the pending-task banner.
+    await performNetworkRetry({
+      messages,
+      runId,
+      cancelRun,
+      dismissFailure: (id) => streamStore.patchRun(id, { failureDismissed: true }),
+      clearOpenWork: cancelOpenWork,
+      replaceMessages: (next) => {
+        messagesRef.current = next;
+        setMessages(next);
+      },
+      setComposerValue: (text) => composerRef.current?.setValue(text),
+      submit: () => {
+        void composerRef.current?.submit();
+      },
+    });
   }
 
   async function continueNetworkTurn(_messageId: string, runId: string) {

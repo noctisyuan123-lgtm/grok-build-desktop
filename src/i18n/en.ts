@@ -296,8 +296,8 @@ export const en = {
   'statusBar.tokenRate': '{rate} tok/s',
 
   // ── Queue dock ────────────────────────────────────────────────────────────
-  'queue.bannerOne': '↻ Last session had {count} pending task',
-  'queue.bannerMany': '↻ Last session had {count} pending tasks',
+  'queue.bannerOne': '↻ {count} pending task',
+  'queue.bannerMany': '↻ {count} pending tasks',
   'queue.resumeAll': 'Resume all',
   'queue.cancelAll': 'Cancel all',
   'queue.running': '▶ Running {elapsed}',

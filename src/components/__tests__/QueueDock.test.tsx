@@ -36,12 +36,12 @@ describe('QueueDock', () => {
     const user = userEvent.setup();
     render(<QueueDock />);
 
-    const banner = await screen.findByText(/Last session had 2 pending tasks/);
+    const banner = await screen.findByText(/↻ 2 pending tasks|2 pending tasks/);
     expect(banner).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Resume all' }));
     await waitFor(() => expect(calls).toContain('resume_pending_runs'));
-    expect(screen.queryByText(/Last session had/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/pending task/)).not.toBeInTheDocument();
   });
 
   it('cancels all pending runs from the banner', async () => {
@@ -54,10 +54,10 @@ describe('QueueDock', () => {
     });
     const user = userEvent.setup();
     render(<QueueDock />);
-    await screen.findByText(/Last session had 1 pending task\b/);
+    await screen.findByText(/↻ 1 pending task\b|1 pending task\b/);
     await user.click(screen.getByRole('button', { name: 'Cancel all' }));
     await waitFor(() => expect(calls).toContain('cancel_pending_runs'));
-    expect(screen.queryByText(/Last session had/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/pending task/)).not.toBeInTheDocument();
   });
 
   it('surfaces a resume failure via onError and keeps the banner up', async () => {
@@ -69,12 +69,12 @@ describe('QueueDock', () => {
     const onError = vi.fn();
     const user = userEvent.setup();
     render(<QueueDock onError={onError} />);
-    await screen.findByText(/Last session had 1 pending task\b/);
+    await screen.findByText(/↻ 1 pending task\b|1 pending task\b/);
 
     await user.click(screen.getByRole('button', { name: 'Resume all' }));
     await waitFor(() => expect(onError).toHaveBeenCalledWith('backend gone'));
     // Still visible — the user can retry once the cause is fixed.
-    expect(screen.getByText(/Last session had/)).toBeInTheDocument();
+    expect(screen.getByText(/pending task/)).toBeInTheDocument();
   });
 
   it('surfaces a cancel-all failure via onError and keeps the banner up', async () => {
@@ -86,11 +86,11 @@ describe('QueueDock', () => {
     const onError = vi.fn();
     const user = userEvent.setup();
     render(<QueueDock onError={onError} />);
-    await screen.findByText(/Last session had 1 pending task\b/);
+    await screen.findByText(/↻ 1 pending task\b|1 pending task\b/);
 
     await user.click(screen.getByRole('button', { name: 'Cancel all' }));
     await waitFor(() => expect(onError).toHaveBeenCalledWith('queue locked'));
-    expect(screen.getByText(/Last session had/)).toBeInTheDocument();
+    expect(screen.getByText(/pending task/)).toBeInTheDocument();
   });
 
   it('surfaces a single-item cancel failure via onError', async () => {
