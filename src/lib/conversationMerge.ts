@@ -22,6 +22,9 @@ export function richerMessageList<T extends { id: string }>(local: T[], disk: T[
  */
 export function isReinstallGhostTab(localTab: Tab, diskTabs: Tab[]): boolean {
   if (diskTabs.length === 0) return false;
+  // A fork copies the source message ids on purpose. That subset is not a
+  // reinstall ghost, even while the fork exists only in memory.
+  if (localTab.forkRootId || localTab.forkIndex != null) return false;
   const messages = localTab.messages ?? [];
   // Boot `makeTab()` synthesizes an empty tab with no sessionHead. When disk
   // already has sessions, that local-only empty is the reinstall ghost — drop
@@ -51,9 +54,19 @@ export function isReinstallGhostTab(localTab: Tab, diskTabs: Tab[]): boolean {
  * Also collapses multiple empty untitled local+disk twins so only one empty
  * slate survives the merge.
  */
-export function mergeTabLists(local: Tab[], disk: Tab[]): Tab[] {
+export type MergeTabListsOptions = {
+  /** Local tab ids that must survive ghost-dropping (the live active tab). */
+  preserveIds?: readonly string[];
+};
+
+export function mergeTabLists(
+  local: Tab[],
+  disk: Tab[],
+  options?: MergeTabListsOptions,
+): Tab[] {
   if (disk.length === 0) return local;
   if (local.length === 0) return disk;
+  const preserve = new Set((options?.preserveIds ?? []).filter((id) => id.trim()));
   const diskIds = new Set(disk.map((tab) => tab.id));
   const best = new Map<string, Tab>();
   for (const tab of [...disk, ...local]) {
@@ -70,7 +83,13 @@ export function mergeTabLists(local: Tab[], disk: Tab[]): Tab[] {
     // Fresh tab id from a cleared cache: drop if disk already holds the same
     // conversation (or an empty bootstrap). Persisted forks share disk ids and
     // skip this branch.
-    if (!diskIds.has(tab.id) && isReinstallGhostTab(chosen, disk)) continue;
+    if (
+      !diskIds.has(tab.id) &&
+      !preserve.has(tab.id) &&
+      isReinstallGhostTab(chosen, disk)
+    ) {
+      continue;
+    }
     merged.push(chosen);
     seen.add(tab.id);
   }
@@ -79,17 +98,25 @@ export function mergeTabLists(local: Tab[], disk: Tab[]): Tab[] {
     const chosen = best.get(tab.id);
     if (chosen) merged.push(chosen);
   }
-  return dedupeEmptyUntitledTabs(merged);
+  return dedupeEmptyUntitledTabs(merged, preserve);
+}
+
+function isUntitledEmpty(tab: Tab): boolean {
+  return (tab.messages?.length ?? 0) === 0 && !tab.sessionHead;
 }
 
 /** Keep a single empty untitled session when several empty twins survived. */
-function dedupeEmptyUntitledTabs(tabs: Tab[]): Tab[] {
+function dedupeEmptyUntitledTabs(tabs: Tab[], preserve: ReadonlySet<string>): Tab[] {
+  const preservedEmpty = tabs.find((tab) => preserve.has(tab.id) && isUntitledEmpty(tab));
   let keptEmpty = false;
   const out: Tab[] = [];
   for (const tab of tabs) {
-    const empty = (tab.messages?.length ?? 0) === 0 && !tab.sessionHead;
-    if (!empty) {
+    if (!isUntitledEmpty(tab)) {
       out.push(tab);
+      continue;
+    }
+    if (preservedEmpty) {
+      if (tab.id === preservedEmpty.id) out.push(tab);
       continue;
     }
     if (keptEmpty) continue;

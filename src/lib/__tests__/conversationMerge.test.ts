@@ -87,6 +87,23 @@ describe('mergeTabLists', () => {
     expect(merged.map((item) => item.id)).toEqual(['tab_draft', 'tab_stable']);
   });
 
+  it('keeps a local-only fork that copies message ids from disk', () => {
+    const local = [
+      tab('root', ['m1', 'm2']),
+      tab('fork', ['m1', 'm2'], '', { forkRootId: 'root', forkIndex: 1 }),
+    ];
+    const disk = [tab('root', ['m1', 'm2'])];
+    const merged = mergeTabLists(local, disk);
+    expect(merged.map((item) => item.id)).toEqual(['root', 'fork']);
+  });
+
+  it('keeps the live active tab while it is still an empty local-only row', () => {
+    const local = [tab('tab_real', ['m1']), tab('tab_new', [])];
+    const disk = [tab('tab_real', ['m1'])];
+    const merged = mergeTabLists(local, disk, { preserveIds: ['tab_new'] });
+    expect(merged.map((item) => item.id)).toEqual(['tab_real', 'tab_new']);
+  });
+
   it('does not collapse persisted forks that share message ids', () => {
     // Forks copy message ids but both tab ids live on disk.
     const forkMsgs = ['m1', 'm2'];

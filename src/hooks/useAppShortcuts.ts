@@ -37,6 +37,20 @@ export interface AppShortcutsDeps {
   mode: Mode;
 }
 
+/** Composer is a contenteditable, not a textarea. Shortcuts must not treat it as chrome. */
+export function isTextEntryTarget(event: KeyboardEvent): boolean {
+  const nodes = [event.target, document.activeElement];
+  return nodes.some((node) => {
+    if (!(node instanceof HTMLElement)) return false;
+    const tag = node.tagName.toLowerCase();
+    if (tag === 'textarea' || tag === 'input' || tag === 'select') return true;
+    if (node.isContentEditable) return true;
+    const role = node.getAttribute('role');
+    if (role === 'textbox' || role === 'combobox') return true;
+    return Boolean(node.closest('.composer-editor, .ProseMirror'));
+  });
+}
+
 export function useAppShortcuts(deps: AppShortcutsDeps) {
   const {
     paletteOpen,
@@ -195,10 +209,9 @@ export function useAppShortcuts(deps: AppShortcutsDeps) {
         e.preventDefault();
         setSettingsOpen(true);
       } else if (meta && e.key.toLowerCase() === 'n' && !e.shiftKey) {
-        // Don't steal the system "New Window" shortcut if the user is in a
-        // textarea (composer). Only act when focus is elsewhere.
-        const tag = (document.activeElement?.tagName ?? '').toLowerCase();
-        if (tag !== 'textarea' && tag !== 'input') {
+        // Don't steal the system "New Window" shortcut while typing.
+        // The composer is a contenteditable, not a textarea.
+        if (!isTextEntryTarget(e)) {
           e.preventDefault();
           handleTabCreate();
         }
@@ -207,14 +220,11 @@ export function useAppShortcuts(deps: AppShortcutsDeps) {
         // palette instead of maintaining a second history-only input.
         e.preventDefault();
         setPaletteOpen(true);
-      } else if (e.key === '/' && !meta && !e.altKey) {
+      } else if (e.key === '/' && !meta && !e.altKey && !isTextEntryTarget(e)) {
         // "/" — focus the composer (advertised in the ⌘K palette), but never
-        // while the user is typing in another field.
-        const tag = (document.activeElement?.tagName ?? '').toLowerCase();
-        if (tag !== 'textarea' && tag !== 'input') {
-          e.preventDefault();
-          focusComposer();
-        }
+        // while the user is already typing.
+        e.preventDefault();
+        focusComposer();
       } else if (e.key === 'Escape') {
         // Modal surfaces install a capture-phase Escape handler and take
         // priority here. Otherwise Escape is the model interruption key when

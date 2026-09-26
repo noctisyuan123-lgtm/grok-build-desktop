@@ -10,7 +10,13 @@ import { defaultTabName, makeTab, type Tab, type TabMessage } from '../lib/tabs'
 import type { ChatMessage, Mode } from '../app/types';
 import { defaultDrafts, storageKeys, tabsActiveKey, tabsStorageKey } from '../app/constants';
 import { storedMessages, writeLocalStorageJson } from '../app/storage';
-import { mergeTabLists, richerMessageList, tabMessages } from '../lib/conversationMerge';
+import {
+  isDanglingActiveTabId,
+  mergeTabLists,
+  reconcileActiveTab,
+  richerMessageList,
+  tabMessages,
+} from '../lib/conversationMerge';
 import { loadConversations, saveConversations } from '../lib/grok';
 import { hasTauriRuntime } from '../lib/runtime';
 
@@ -268,6 +274,30 @@ export function useSessionTabs(deps: SessionTabsDeps) {
 
   useEffect(() => {
     if (!hasTauriRuntime() || !conversationsReady || tabs.length === 0) return;
+    const live = sessionStateRef.current;
+    const active = tabs.find((tab) => tab.id === activeTabId);
+    const liveMessages = live.activeTabId === activeTabId ? live.messages : [];
+    const liveRicher = Boolean(active) && liveMessages.length > (active?.messages?.length ?? 0);
+    if (isDanglingActiveTabId(tabs, activeTabId) || liveRicher) {
+      const reconciled = reconcileActiveTab(tabs, activeTabId, {
+        messages: liveMessages,
+        cwd: live.codingCwd,
+        sessionHead: active?.sessionHead ?? null,
+      });
+      const sameShape =
+        reconciled.activeTabId === activeTabId &&
+        reconciled.tabs.length === tabs.length &&
+        reconciled.tabs.every(
+          (tab, index) =>
+            tab.id === tabs[index]?.id &&
+            (tab.messages?.length ?? 0) === (tabs[index]?.messages?.length ?? 0),
+        );
+      if (!sameShape) {
+        setTabs(reconciled.tabs);
+        if (reconciled.activeTabId !== activeTabId) setActiveTabId(reconciled.activeTabId);
+        return;
+      }
+    }
     const timer = window.setTimeout(() => {
       void saveConversations({ activeTabId, tabs }).catch(() => {
         /* disk backup is best-effort; localStorage still holds a cache */
@@ -288,29 +318,35 @@ export function useSessionTabs(deps: SessionTabsDeps) {
             stored.activeTabId && diskTabs.some((tab) => tab.id === stored.activeTabId)
               ? stored.activeTabId
               : undefined;
-          // Merge may drop a reinstall-bootstrap tab (new id, same content as
-          // disk). Re-point activeTabId / messages at a tab that still exists.
-          let merged: Tab[] = [];
+          // Merge inside the updater so it sees the latest tabs. The follow-up
+          // that picks activeTabId is queued from that same updater — reading
+          // a variable assigned inside setTabs before React runs it always
+          // saw an empty list and forced the stale disk tab.
           setTabs((current) => {
-            merged = mergeTabLists(current, diskTabs);
+            const preserveId = sessionStateRef.current.activeTabId;
+            const merged = mergeTabLists(current, diskTabs, {
+              preserveIds: preserveId ? [preserveId] : [],
+            });
+            queueMicrotask(() => {
+              if (cancelled) return;
+              const activeStillPresent = merged.some((tab) => tab.id === preserveId);
+              const nextActive =
+                (activeStillPresent ? preserveId : undefined) ||
+                diskActive ||
+                merged[0]?.id ||
+                '';
+              if (nextActive && nextActive !== preserveId) {
+                setActiveTabId(nextActive);
+                const nextTab = merged.find((tab) => tab.id === nextActive);
+                if (nextTab) setCodingCwd(nextTab.cwd);
+              }
+              const activeTab =
+                merged.find((tab) => tab.id === nextActive) ??
+                diskTabs.find((tab) => tab.id === nextActive);
+              setMessages((msgs) => richerMessageList(msgs, tabMessages(activeTab)));
+            });
             return merged;
           });
-          const previousActive = sessionStateRef.current.activeTabId;
-          const activeStillPresent = merged.some((tab) => tab.id === previousActive);
-          const nextActive =
-            (activeStillPresent ? previousActive : undefined) ||
-            diskActive ||
-            merged[0]?.id ||
-            '';
-          if (nextActive && nextActive !== previousActive) {
-            setActiveTabId(nextActive);
-            const nextTab = merged.find((tab) => tab.id === nextActive);
-            if (nextTab) setCodingCwd(nextTab.cwd);
-          }
-          const activeTab =
-            merged.find((tab) => tab.id === nextActive) ??
-            diskTabs.find((tab) => tab.id === nextActive);
-          setMessages((msgs) => richerMessageList(msgs, tabMessages(activeTab)));
         }
       })
       .catch(() => {
@@ -344,8 +380,7 @@ export function useSessionTabs(deps: SessionTabsDeps) {
           : t,
       ),
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [codingCwd, messages, drafts]);
+  }, [activeTabId, codingCwd, messages, drafts]);
 
   // First user prompt of a conversation (session/tab id) — used for copy /
   // save-to-library actions in the history menu.

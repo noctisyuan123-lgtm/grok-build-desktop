@@ -168,9 +168,8 @@ describe('Sidebar collapse control', () => {
 
 function historyRow(title: RegExp | string) {
   const pattern = new RegExp(typeof title === 'string' ? title : title.source);
-  // Project folders are collapsed by default. Open folders until the requested
-  // row is present so the existing row-action tests exercise the same controls
-  // without coupling every test to a particular project path.
+  // The open session's project starts expanded. Other folders stay collapsed.
+  // Open whatever is still shut so row-action tests can reach every title.
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const row = screen.queryByRole('button', { name: pattern });
     if (row) return row;
@@ -207,15 +206,14 @@ describe('Sidebar conversations list', () => {
     expect(historyRow('write release notes')).toBeInTheDocument();
   });
 
-  it('shows project folders above sessions that share the same cwd', () => {
+  it('shows the open session without an extra click, and keeps other projects collapsed', () => {
     render(<Harness />);
-    fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
+    expect(screen.getByRole('button', { name: 'Projects' })).toHaveAttribute('aria-expanded', 'true');
     const project = screen.getByText('a').closest('.project-history-group');
     expect(project).toBeInTheDocument();
-    expect(
-      within(project as HTMLElement).queryByText('fix the login flake'),
-    ).not.toBeInTheDocument();
-    expect(screen.getByText('b').closest('.project-history-group')).toBeInTheDocument();
+    expect(within(project as HTMLElement).getByText('fix the login flake')).toBeInTheDocument();
+    const other = screen.getByText('b').closest('.project-history-group') as HTMLElement;
+    expect(within(other).queryByText('write release notes')).not.toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Projects' }).querySelector('.project-list-count'),
     ).toHaveTextContent('2');
@@ -228,13 +226,14 @@ describe('Sidebar conversations list', () => {
     const user = userEvent.setup();
     render(<Harness />);
     const toggle = screen.getByRole('button', { name: 'Projects' });
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('a')).toBeInTheDocument();
     await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText('a')).not.toBeInTheDocument();
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('a')).toBeInTheDocument();
   });
 
   it('collapses and reopens the Recent bar like Projects', async () => {
@@ -263,25 +262,26 @@ describe('Sidebar conversations list', () => {
   it('collapses and reopens a project folder without losing its sessions', async () => {
     const user = userEvent.setup();
     render(<Harness />);
-    await user.click(screen.getByRole('button', { name: 'Projects' }));
     const project = screen.getByText('a').closest('.project-history-group') as HTMLElement;
     const toggle = within(project).getByRole('button', { name: 'a' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(within(project).getByText('fix the login flake')).toBeInTheDocument();
+    await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(within(project).queryByText('fix the login flake')).not.toBeInTheDocument();
     await user.click(toggle);
     expect(within(project).getByText('fix the login flake')).toBeInTheDocument();
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    await user.click(toggle);
-    expect(within(project).queryByText('fix the login flake')).not.toBeInTheDocument();
   });
 
   it('marks working sessions, promoting the marker to a collapsed project', async () => {
     const user = userEvent.setup();
     render(<Harness workingSessionIds={new Set(['t1'])} />);
-    await user.click(screen.getByRole('button', { name: 'Projects' }));
     const project = screen.getByText('a').closest('.project-history-group') as HTMLElement;
+    const toggle = within(project).getByRole('button', { name: 'a' });
+    await user.click(toggle);
     expect(project.querySelector('.project-section-head .history-activity-dot')).toBeTruthy();
 
-    await user.click(within(project).getByRole('button', { name: 'a' }));
+    await user.click(toggle);
     const row = within(project).getByRole('button', { name: /fix the login flake/ });
     expect(row.querySelector('.history-activity-dot')).toBeTruthy();
     expect(project.querySelectorAll('.history-activity-dot')).toHaveLength(1);

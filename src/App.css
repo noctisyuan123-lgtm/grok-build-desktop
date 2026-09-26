@@ -10594,8 +10594,21 @@ body,
 .composer-input-field {
   position: relative;
 }
+.composer-editor-shell {
+  position: relative;
+}
 .composer-editor {
   display: block;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.composer-placeholder {
+  color: var(--text-muted, #8a8a8a);
+  left: 14px;
+  pointer-events: none;
+  position: absolute;
+  top: 8px;
+  user-select: none;
 }
 .composer-editor .ProseMirror {
   box-sizing: border-box;
@@ -10603,11 +10616,12 @@ body,
   color: var(--conversation-text, #f5f5f5);
   font-size: 14px;
   line-height: 22px;
-  max-height: 240px;
   min-height: 38px;
   outline: none;
-  overflow-y: auto;
+  overflow-y: visible;
   padding: 8px 14px 4px;
+  -webkit-user-select: text;
+  user-select: text;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -10724,13 +10738,7 @@ body,
 .composer-editor .ProseMirror th {
   font-weight: 600;
 }
-.composer-editor .ProseMirror p.is-editor-empty:first-child::before {
-  color: var(--text-muted, #8a8a8a);
-  content: attr(data-placeholder);
-  float: left;
-  height: 0;
-  pointer-events: none;
-}
+
 .composer-live-md-surface {
   box-sizing: border-box;
   inset: 0;

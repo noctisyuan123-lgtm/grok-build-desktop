@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import { act, renderHook } from '@testing-library/react';
+import { mockIPC } from '@tauri-apps/api/mocks';
 import { useSessionTabs } from '../useSessionTabs';
 import { storageKeys, tabsActiveKey, tabsStorageKey } from '../../app/constants';
 import type { ChatMessage, Mode } from '../../app/types';
@@ -15,9 +16,9 @@ function sessionMessage(id: string, sessionId: string): ChatMessage {
 }
 
 /** Compose the flat session state the way App does, then hang tabs off it. */
-function useHarness(initialMessages: ChatMessage[] = []) {
+function useHarness(initialMessages: ChatMessage[] = [], initialCwd = '') {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
-  const [codingCwd, setCodingCwd] = useState('');
+  const [codingCwd, setCodingCwd] = useState(initialCwd);
   const [mode] = useState<Mode>('coding');
   const [drafts, setDrafts] = useState<Record<Mode, string>>({ standard: 's', coding: 'c' });
   const [lastRun, setLastRun] = useState<ToolRun | null>(null);
@@ -69,6 +70,10 @@ function seedTabs() {
   return tabs;
 }
 
+afterEach(() => {
+  delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+});
+
 describe('useSessionTabs boot', () => {
   it('hydrates stored tabs and the active id', () => {
     seedTabs();
@@ -93,7 +98,7 @@ describe('useSessionTabs boot', () => {
   it('synthesizes a first tab from legacy single-session state', () => {
     window.localStorage.setItem(storageKeys.codingCwd, '/legacy/project');
     window.localStorage.setItem(storageKeys.messages, JSON.stringify([message('legacy')]));
-    const { result } = renderHook(() => useHarness());
+    const { result } = renderHook(() => useHarness([message('legacy')], '/legacy/project'));
     expect(result.current.tabs).toHaveLength(1);
     expect(result.current.tabs[0].cwd).toBe('/legacy/project');
     expect(result.current.tabs[0].messages.map((m) => m.id)).toEqual(['legacy']);
@@ -257,6 +262,45 @@ describe('handleTabCreate', () => {
     const prior = result.current.tabs.find((t) => t.id === 't1')!;
     expect(prior.messages.map((m) => m.id)).toEqual(['a1', 'live']);
     expect(result.current.messages).toEqual([]);
+  });
+
+  it('keeps a new session when conversations.json resolves after New Session', async () => {
+    const diskTabs = seedTabs();
+    let resolveLoad: (value: unknown) => void = () => {};
+    const pending = new Promise((resolve) => {
+      resolveLoad = resolve;
+    });
+    mockIPC((cmd) => {
+      if (cmd === 'load_conversations') return pending;
+      return null;
+    });
+    const { result } = renderHook(() => useHarness([message('a1')]));
+    act(() => {
+      result.current.handleTabCreate();
+    });
+    const newId = result.current.activeTabId;
+    expect(newId).not.toBe('t1');
+
+    await act(async () => {
+      resolveLoad({ activeTabId: 't1', tabs: diskTabs });
+      await pending;
+    });
+
+    expect(result.current.activeTabId).toBe(newId);
+    expect(result.current.tabs.some((tab) => tab.id === newId)).toBe(true);
+    expect(result.current.tabs.find((tab) => tab.id === 't1')?.messages.map((row) => row.id)).toEqual([
+      'a1',
+    ]);
+
+    act(() => {
+      result.current.setMessages([message('fresh', 'hello')]);
+    });
+    expect(result.current.tabs.find((tab) => tab.id === newId)?.messages.map((row) => row.id)).toEqual([
+      'fresh',
+    ]);
+    expect(result.current.tabs.find((tab) => tab.id === 't1')?.messages.map((row) => row.id)).toEqual([
+      'a1',
+    ]);
   });
 
   it('reuses an already-empty active tab instead of stacking new empty rows', () => {

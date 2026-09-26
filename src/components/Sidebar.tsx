@@ -121,16 +121,27 @@ export function Sidebar({
     commitRowEdit,
     savePromptToLibrary,
   } = history;
-  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(
-    () => new Set(historyView.projectGroups.map(([path]) => path)),
-  );
-  const [projectsCollapsed, setProjectsCollapsed] = useState(
-    () => window.localStorage.getItem(PROJECT_LIST_COLLAPSED_KEY) !== 'expanded',
-  );
+  const activeProjectPath =
+    historyView.projectGroups.find(([, rows]) => rows.some((row) => row.active))?.[0] ?? null;
+  const activeProjectRowId =
+    historyView.projectGroups
+      .flatMap(([, rows]) => rows)
+      .find((row) => row.active)?.id ?? null;
+  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(() => {
+    const paths = historyView.projectGroups.map(([path]) => path);
+    return new Set(paths.filter((path) => path !== activeProjectPath));
+  });
+  const [projectsCollapsed, setProjectsCollapsed] = useState(() => {
+    // The open coding session lives under Projects. Start that section open
+    // so the row is on screen without two extra clicks.
+    if (activeProjectPath) return false;
+    return window.localStorage.getItem(PROJECT_LIST_COLLAPSED_KEY) !== 'expanded';
+  });
   const [recentCollapsed, setRecentCollapsed] = useState(
     () => window.localStorage.getItem(RECENT_LIST_COLLAPSED_KEY) === 'collapsed',
   );
   const seenProjectPaths = useRef(new Set(historyView.projectGroups.map(([path]) => path)));
+  const lastAutoOpenedRow = useRef(activeProjectRowId);
   const [sidebarPeek, setSidebarPeek] = useState(false);
   const peekHoverRef = useRef(false);
   const peekLeaveTimerRef = useRef<number | null>(null);
@@ -140,10 +151,29 @@ export function Sidebar({
     const newPaths = historyView.projectGroups
       .map(([path]) => path)
       .filter((path) => !seenProjectPaths.current.has(path));
-    if (newPaths.length === 0) return;
     newPaths.forEach((path) => seenProjectPaths.current.add(path));
-    setCollapsedProjects((current) => new Set([...current, ...newPaths]));
-  }, [historyView.projectGroups]);
+    const rowChanged = activeProjectRowId !== lastAutoOpenedRow.current;
+    if (rowChanged) lastAutoOpenedRow.current = activeProjectRowId;
+    if (newPaths.length === 0 && !rowChanged) return;
+    if (newPaths.length > 0) {
+      setCollapsedProjects((current) => {
+        const next = new Set([
+          ...current,
+          ...newPaths.filter((path) => path !== activeProjectPath),
+        ]);
+        if (rowChanged && activeProjectPath) next.delete(activeProjectPath);
+        return next;
+      });
+    } else if (rowChanged && activeProjectPath) {
+      setCollapsedProjects((current) => {
+        if (!current.has(activeProjectPath)) return current;
+        const next = new Set(current);
+        next.delete(activeProjectPath);
+        return next;
+      });
+    }
+    if (rowChanged && activeProjectPath) setProjectsCollapsed(false);
+  }, [activeProjectPath, activeProjectRowId, historyView.projectGroups]);
 
   function cancelPeekLeave() {
     if (peekLeaveTimerRef.current == null) return;

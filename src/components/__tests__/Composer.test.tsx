@@ -49,7 +49,18 @@ describe('Composer submit', () => {
   it('keeps the editor surface contenteditable', () => {
     const { textarea, container } = renderComposer();
     expect(textarea).toHaveAttribute('contenteditable', 'true');
+    expect(textarea).toHaveAttribute('spellcheck', 'false');
     expect(container.querySelector('.ProseMirror')).toBeTruthy();
+    expect(container.querySelector('.composer-placeholder')).toBeTruthy();
+  });
+
+  it('keeps the caret through a second character without another click', async () => {
+    const user = userEvent.setup();
+    const { textarea } = renderComposer();
+    textarea.focus();
+    await user.type(textarea, 'ab');
+    expect(textarea).toHaveTextContent('ab');
+    expect(document.activeElement).toBe(textarea);
   });
 
   it('replaces the send arrow with a round square stop control while running', async () => {
