@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, FileText } from 'lucide-react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { MessageItem } from './MessageItem';
@@ -148,8 +148,22 @@ export function MessageList({
   // streaming text while this is true, so a user who scrolls up to read
   // history is never yanked back down.
   const atBottomRef = useRef(true);
+  // Opening a transcript (and staying there) should keep the last message in
+  // view. Virtuoso's first scroll uses estimated row heights, so a tall tail
+  // lands a few messages short and atBottom flips false before the real sizes
+  // arrive. Hold this until the user actually leaves the bottom.
+  const pinnedIntentRef = useRef(true);
+  const pointerDownRef = useRef(false);
+  const wheelUpAtRef = useRef(0);
+  // History sidebar jump asks for the jump button even when the whole
+  // transcript still fits, so a later at-bottom signal must not clear it.
+  const historyJumpRef = useRef(false);
   const prevLenRef = useRef(messages.length);
   const scrollFrameRef = useRef<number | null>(null);
+  // Tail rows are often much taller than Virtuoso's first estimate. Keep
+  // re-aligning to the last item through that measurement, then stop forcing
+  // once the user has had a moment to stay or leave.
+  const stickUntilRef = useRef(0);
   // Session-scoped active only. Concurrent runs in other tabs must not drive
   // auto-scroll (or appear to own) this transcript.
   const sessionRunIds = useMemo(
@@ -165,7 +179,27 @@ export function MessageList({
     setScrollParent((current) => (current === el ? current : el));
   }, []);
 
+  const alignToLastItem = useCallback((force = false) => {
+    const el = scrollerElRef.current;
+    const settling = force || (pinnedIntentRef.current && performance.now() < stickUntilRef.current);
+    if (!settling && el && scrollerAtBottom(el)) return;
+    try {
+      // Recomputed after the tail is measured. A one-shot
+      // scrollTop = scrollHeight - clientHeight uses the estimate and stops
+      // a few messages short once those rows turn out taller.
+      ref.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' });
+    } catch {
+      /* virtuoso mock */
+    }
+    if (!el) return;
+    const top = Math.max(0, el.scrollHeight - el.clientHeight);
+    // Only move downward. The index alignment may already be past a stale
+    // scrollHeight, and pulling back up is what leaves the tail short.
+    if (top > el.scrollTop + 1) el.scrollTop = top;
+  }, []);
+
   const pinToBottom = useCallback(() => {
+    alignToLastItem();
     const el = scrollerElRef.current;
     if (!el) return;
     const top = Math.max(0, el.scrollHeight - el.clientHeight);
@@ -175,6 +209,13 @@ export function MessageList({
     } catch {
       /* virtuoso mock */
     }
+  }, [alignToLastItem]);
+
+  const detachFromBottom = useCallback(() => {
+    pinnedIntentRef.current = false;
+    atBottomRef.current = false;
+    wheelUpAtRef.current = 0;
+    setShowJump(true);
   }, []);
 
   const syncJumpFromScroller = useCallback(() => {
@@ -186,6 +227,8 @@ export function MessageList({
   }, []);
 
   const jumpToBottom = useCallback(() => {
+    historyJumpRef.current = false;
+    pinnedIntentRef.current = true;
     atBottomRef.current = true;
     pinToBottom();
     const el = scrollerElRef.current;
@@ -195,21 +238,86 @@ export function MessageList({
   useEffect(() => {
     const el = scrollParent;
     if (!el) return;
-    const onScroll = () => syncJumpFromScroller();
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) wheelUpAtRef.current = performance.now();
+    };
+    let touchY = 0;
+    const onTouchStart = (event: TouchEvent) => {
+      touchY = event.touches[0]?.clientY ?? 0;
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      const y = event.touches[0]?.clientY ?? touchY;
+      if (y > touchY + 2) wheelUpAtRef.current = performance.now();
+      touchY = y;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowUp' || event.key === 'PageUp' || event.key === 'Home') {
+        wheelUpAtRef.current = performance.now();
+      }
+    };
+    const onPointerDown = () => {
+      pointerDownRef.current = true;
+    };
+    const onPointerUp = () => {
+      pointerDownRef.current = false;
+    };
+    let lastTop = el.scrollTop;
+    const onScroll = () => {
+      const top = el.scrollTop;
+      const movedUp = top < lastTop - 1;
+      lastTop = top;
+      const atBottom = scrollerAtBottom(el);
+      const userLeaving = pointerDownRef.current
+        ? movedUp
+        : performance.now() - wheelUpAtRef.current < 250;
+      if (atBottom) {
+        wheelUpAtRef.current = 0;
+        atBottomRef.current = true;
+        if (!historyJumpRef.current) setShowJump(false);
+        return;
+      }
+      // Scrollbar drags and wheel/touch/keys are user intent. Measurement
+      // corrections also move scrollTop, without a pointer or a recent wheel-up.
+      if (pinnedIntentRef.current && userLeaving) {
+        detachFromBottom();
+        return;
+      }
+      if (!pinnedIntentRef.current) syncJumpFromScroller();
+    };
     el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
-  }, [scrollParent, syncJumpFromScroller]);
+    el.addEventListener('wheel', onWheel, { passive: true });
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: true });
+    el.addEventListener('keydown', onKeyDown);
+    el.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('keydown', onKeyDown);
+      el.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+    };
+  }, [detachFromBottom, scrollParent, syncJumpFromScroller]);
 
-  const scheduleScrollToLast = useCallback(
-    (force = false) => {
-      if (scrollFrameRef.current != null) return;
-      scrollFrameRef.current = window.requestAnimationFrame(() => {
-        scrollFrameRef.current = null;
-        if (force || atBottomRef.current) pinToBottom();
-      });
-    },
-    [pinToBottom],
-  );
+  const scheduleScrollToLast = useCallback(() => {
+    if (scrollFrameRef.current != null) return;
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      // Re-read after the frame: a wheel-up in between must not be yanked back.
+      if (pinnedIntentRef.current) alignToLastItem();
+      else if (atBottomRef.current) pinToBottom();
+    });
+  }, [alignToLastItem, pinToBottom]);
+
+  useLayoutEffect(() => {
+    stickUntilRef.current = performance.now() + 800;
+    alignToLastItem(true);
+  }, [alignToLastItem]);
 
   useEffect(
     () => () => {
@@ -224,7 +332,7 @@ export function MessageList({
     if (messages.length > prevLenRef.current) {
       // A new turn follows only when the user was already at the bottom.
       // Never yank someone back while they are reading older messages.
-      scheduleScrollToLast(atBottomRef.current);
+      if (atBottomRef.current || pinnedIntentRef.current) scheduleScrollToLast();
     }
     prevLenRef.current = messages.length;
   }, [messages.length, scheduleScrollToLast]);
@@ -246,6 +354,8 @@ export function MessageList({
     if (!focusId) return;
     const idx = messages.findIndex((m) => m.id === focusId);
     if (idx < 0) return;
+    historyJumpRef.current = true;
+    pinnedIntentRef.current = false;
     atBottomRef.current = false;
     setShowJump(true);
     ref.current?.scrollToIndex({ index: idx, align: 'center', behavior: 'smooth' });
@@ -269,11 +379,22 @@ export function MessageList({
         followOutput={(isAtBottom) => (isAtBottom ? 'auto' : false)}
         atBottomThreshold={AT_BOTTOM_PX}
         atBottomStateChange={(bottom) => {
-          atBottomRef.current = bottom;
-          setShowJump(!bottom);
+          if (bottom) {
+            atBottomRef.current = true;
+            if (!historyJumpRef.current) setShowJump(false);
+            return;
+          }
+          // A false reading while we still mean to sit on the tail is the
+          // estimated-height gap, not the user scrolling away.
+          if (pinnedIntentRef.current) {
+            scheduleScrollToLast();
+            return;
+          }
+          atBottomRef.current = false;
+          setShowJump(true);
         }}
         totalListHeightChanged={() => {
-          if (atBottomRef.current) pinToBottom();
+          if (pinnedIntentRef.current || atBottomRef.current) scheduleScrollToLast();
         }}
         // No inline style prop for height: Virtuoso's scroller defaults already
         // include height 100% (applied via the CSSOM, so it works under the

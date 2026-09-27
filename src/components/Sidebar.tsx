@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { BrandGlyph } from './BrandGlyph';
+import { HoverTip } from './HoverTip';
 import type { ContextMenuItem, ContextMenuState } from './ContextMenu';
 import type { useHistoryOrganization } from '../hooks/useHistoryOrganization';
 import type { HistoryPreview, HistoryRow, Mode, ToolStatus } from '../app/types';
@@ -467,18 +468,21 @@ export function Sidebar({
 
   return (
     <>
-      <button
-        className="sidebar-collapse-button sidebar-titlebar-toggle"
-        type="button"
-        aria-label={
-          sidebarCollapsed ? t('palette.action.expandSidebar') : t('palette.action.collapseSidebar')
-        }
-        title={`${sidebarCollapsed ? t('palette.action.expandSidebar') : t('palette.action.collapseSidebar')} (⌘B)`}
-        aria-pressed={sidebarCollapsed}
-        onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+      <HoverTip
+        label={`${sidebarCollapsed ? t('palette.action.expandSidebar') : t('palette.action.collapseSidebar')} (⌘B)`}
       >
-        {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-      </button>
+        <button
+          className="sidebar-collapse-button sidebar-titlebar-toggle"
+          type="button"
+          aria-label={
+            sidebarCollapsed ? t('palette.action.expandSidebar') : t('palette.action.collapseSidebar')
+          }
+          aria-pressed={sidebarCollapsed}
+          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+        >
+          {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+        </button>
+      </HoverTip>
       {sidebarCollapsed ? (
         <div
           className="sidebar-peek-hotspot"
@@ -499,16 +503,19 @@ export function Sidebar({
             card stays clean. Same state, same ⌘1/⌘2 shortcuts. */}
           <div className="mode-segment" role="group" aria-label={t('sidebar.modeSwitchAria')}>
             {(Object.keys(modeCopy) as Mode[]).map((item) => (
-              <button
-                aria-pressed={mode === item}
-                className={mode === item ? 'active' : ''}
+              <HoverTip
                 key={item}
-                onClick={() => switchMode(item)}
-                title={`${modeSegmentLabels[item]} (${modeCopy[item].shortcut})`}
-                type="button"
+                label={`${modeSegmentLabels[item]} (${modeCopy[item].shortcut})`}
               >
-                {modeSegmentLabels[item]}
-              </button>
+                <button
+                  aria-pressed={mode === item}
+                  className={mode === item ? 'active' : ''}
+                  onClick={() => switchMode(item)}
+                  type="button"
+                >
+                  {modeSegmentLabels[item]}
+                </button>
+              </HoverTip>
             ))}
           </div>
         </div>
@@ -542,9 +549,9 @@ export function Sidebar({
               const isActive =
                 (item.id === 'customize' && customizeOpen) || (item.id === 'search' && paletteOpen);
               return (
+                <HoverTip key={item.id} label={item.label}>
                 <button
                   className={isActive ? 'active' : ''}
-                  key={item.id}
                   type="button"
                   onClick={handle}
                 >
@@ -558,6 +565,7 @@ export function Sidebar({
                   <span>{item.label}</span>
                   <small>{item.meta}</small>
                 </button>
+                </HoverTip>
               );
             })}
           </div>

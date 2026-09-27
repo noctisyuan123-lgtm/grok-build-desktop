@@ -2276,13 +2276,13 @@ select:focus {
 }
 
 .app-sidebar {
-  gap: 10px;
+  gap: 8px;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-  padding: 14px 12px;
+  padding: 6px 12px;
 }
 
 .brand {
-  padding: 2px 4px 6px;
+  padding: 0 0 4px;
 }
 
 .brand-mark,
@@ -2302,12 +2302,13 @@ select:focus {
 .primary-nav .nav-list {
   background: transparent;
   border: 0;
-  gap: 0;
+  gap: 4px;
+  margin-bottom: 8px;
   padding: 0;
 }
 
 .primary-nav .nav-list button {
-  min-height: 30px;
+  min-height: 36px;
 }
 
 .primary-nav .nav-list small {
@@ -3709,14 +3710,87 @@ body[data-completion-popup='true'] {
 }
 
 /* ===== Cursor-class Customize control plane ============================== */
+.primary-nav .nav-list button {
+  border-radius: 12px;
+  color: rgb(249, 250, 251);
+  display: flex;
+  font-weight: 400;
+  gap: 8px;
+  height: 36px;
+  line-height: 22px;
+  margin: 0 2px;
+  min-height: 36px;
+  padding: 7px 8px;
+  transition: none;
+}
+.app-shell.theme-light .primary-nav .nav-list button {
+  color: var(--text);
+}
 .primary-nav .nav-list button span {
   font-size: 14px;
-  font-weight: 540;
-  letter-spacing: -0.01em;
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: 22px;
 }
 .primary-nav .nav-list button svg {
-  height: 17px;
-  width: 17px;
+  flex: none;
+  height: 16px;
+  width: 16px;
+}
+.primary-nav .nav-list button:hover,
+.primary-nav .nav-list button.active {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgb(249, 250, 251);
+}
+.primary-nav .nav-list button:hover svg,
+.primary-nav .nav-list button.active svg {
+  color: rgb(249, 250, 251);
+}
+.app-shell.theme-light .primary-nav .nav-list button:hover,
+.app-shell.theme-light .primary-nav .nav-list button.active,
+.app-shell.theme-light .primary-nav .nav-list button:hover svg,
+.app-shell.theme-light .primary-nav .nav-list button.active svg {
+  background: rgba(38, 49, 72, 0.06);
+  color: var(--text);
+}
+.app-shell.theme-light .primary-nav .nav-list button:hover svg,
+.app-shell.theme-light .primary-nav .nav-list button.active svg {
+  background: transparent;
+}
+.primary-nav .nav-list button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}
+.dsh-hover-tip {
+  animation: dsh-hover-tip-in 150ms ease;
+  background: rgb(67, 69, 74);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 13px;
+  left: 0;
+  line-height: 20px;
+  max-width: 50vw;
+  padding: 3px 7px;
+  pointer-events: none;
+  position: fixed;
+  top: 0;
+  transform: translateY(-50%);
+  white-space: pre-line;
+  width: max-content;
+  z-index: 100;
+}
+.app-shell.theme-light .dsh-hover-tip {
+  background: rgb(44, 44, 46);
+}
+@keyframes dsh-hover-tip-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dsh-hover-tip {
+    animation: none;
+  }
 }
 /* Keep the Conversations label aligned with the smaller Recent/Pinned heads. */
 .history-nav > .nav-head {
@@ -8137,22 +8211,29 @@ button.history-section-head.toggle:hover {
 .sidebar-titlebar-toggle {
   background: transparent !important;
   border: 0 !important;
-  border-radius: 6px;
+  border-radius: 50%;
   color: var(--text-2);
+  height: 28px;
   left: 70px;
   position: fixed;
-  top: 0;
+  top: 10px;
+  width: 28px;
   z-index: 90;
 }
 .sidebar-titlebar-toggle:hover,
 .sidebar-titlebar-toggle:active,
 .sidebar-titlebar-toggle:focus,
 .sidebar-titlebar-toggle:focus-visible {
-  background: transparent !important;
+  background: rgba(255, 255, 255, 0.08) !important;
   border-color: transparent !important;
   box-shadow: none !important;
-  color: var(--text-1);
+  color: rgb(249, 250, 251);
   outline: 0;
+}
+.app-shell.theme-light .sidebar-titlebar-toggle:hover,
+.app-shell.theme-light .sidebar-titlebar-toggle:active {
+  background: rgba(38, 49, 72, 0.06) !important;
+  color: var(--text);
 }
 
 /* Conversation names should read as a compact list, not a stack of cards. */
@@ -8671,12 +8752,10 @@ button.history-section-head.toggle:hover {
   justify-content: flex-start;
   line-height: 1.35;
   min-height: 28px;
-  padding: 3px 6px;
-  margin-left: -6px;
-  border-radius: 6px;
-  transition:
-    background-color 140ms ease,
-    color 140ms ease;
+  padding: 4px 10px;
+  margin-left: 0;
+  border-radius: 12px;
+  transition: color 140ms ease;
   text-align: left;
   max-width: 100%;
   width: fit-content;
@@ -8684,6 +8763,10 @@ button.history-section-head.toggle:hover {
 
 button.activity-summary {
   cursor: pointer;
+}
+
+button.activity-summary:hover {
+  background: color-mix(in srgb, var(--conversation-text) 8%, transparent);
 }
 
 button.activity-summary:hover .activity-label {
@@ -9765,6 +9848,9 @@ select:focus-visible {
 .message.message-assistant {
   isolation: isolate;
   overflow: clip;
+  /* Workflow pills use a small negative margin so the hover sits left of the
+     label. Clip still owns hit-testing, but the margin must remain paintable. */
+  overflow-clip-margin: 10px;
   position: relative;
   background: #171717;
 }
@@ -11668,12 +11754,10 @@ body,
   justify-content: flex-start;
   line-height: 1.35;
   min-height: 28px;
-  padding: 3px 6px;
-  margin-left: -6px;
-  border-radius: 6px;
-  transition:
-    background-color 140ms ease,
-    color 140ms ease;
+  padding: 4px 10px;
+  margin-left: 0;
+  border-radius: 12px;
+  transition: color 140ms ease;
   text-align: left;
   max-width: 100%;
   width: fit-content;
@@ -11682,7 +11766,7 @@ body,
 .transcript-thought > button:hover,
 .transcript-tool-summary:hover,
 .transcript-phase > button:hover {
-  background: color-mix(in srgb, var(--conversation-text) 5%, transparent);
+  background: color-mix(in srgb, var(--conversation-text) 8%, transparent);
   color: var(--conversation-text);
 }
 
@@ -11768,13 +11852,13 @@ body,
 
 .transcript-work .activity-list .activity-row {
   min-height: 28px;
-  gap: 10px;
-  border-radius: 5px;
-  padding: 3px 4px;
+  gap: 8px;
+  border-radius: 12px;
+  padding: 4px 8px;
 }
 
 .transcript-work .activity-list button.activity-row:hover {
-  background: color-mix(in srgb, var(--conversation-text) 4%, transparent);
+  background: color-mix(in srgb, var(--conversation-text) 8%, transparent);
 }
 
 .transcript-work .activity-list .activity-row-mark.status-done {

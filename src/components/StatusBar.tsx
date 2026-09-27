@@ -42,15 +42,18 @@ function liveState(snap: RunSnapshot, appearance: ConnectionAppearance): string 
 }
 
 /**
- * Live run caption: elapsed, token count, token rate, and stream health.
+ * Live run caption. Fullscreen keeps elapsed, token count, and tok/s.
+ * A normal window only keeps the activity word (working, Disconnected, …).
  * Sits on the workspace glass in the bottom-right — not a chrome bar.
  */
 export function RunStatusLine({
   runId,
   variant = 'inline',
+  showTokenMetrics = true,
 }: {
   runId: string;
   variant?: 'inline' | 'titlebar' | 'hud';
+  showTokenMetrics?: boolean;
 }) {
   const snap = useRunSnapshot(runId);
   const online = useAppOnline();
@@ -68,14 +71,17 @@ export function RunStatusLine({
     startedAt: snap.startedAt,
     hasRunningTool: hasRunningTool(snap.traces),
   });
-  const generated = liveGeneratedTokens({
-    usage: snap.usage,
-    thoughtText: thoughtTextFromTranscript(snap.transcript),
-    responseText: snap.text,
-  });
+  const stateLabel = liveState(snap, appearance);
+  const generated = showTokenMetrics
+    ? liveGeneratedTokens({
+        usage: snap.usage,
+        thoughtText: thoughtTextFromTranscript(snap.transcript),
+        responseText: snap.text,
+      })
+    : 0;
   // Denominator is generation-active time only (paused during tools / activity).
   const activeMs = snap.generationActiveMs + (segmentElapsed ?? 0);
-  const rate = formatTokenRate(generated, activeMs);
+  const rate = showTokenMetrics ? formatTokenRate(generated, activeMs) : null;
   return (
     <div
       className={`run-status-line${variant === 'titlebar' ? ' is-titlebar' : ''}${variant === 'hud' ? ' is-hud' : ''}`}
@@ -85,28 +91,39 @@ export function RunStatusLine({
       <span className="run-status-mark" aria-hidden>
         ✦
       </span>
-      <span>{elapsed != null ? formatElapsed(elapsed) : '0.0s'}</span>
-      <span aria-hidden>·</span>
-      <span>{t('statusBar.tokens', { tokens: formatTokenCount(generated) })}</span>
-      {rate ? (
+      {showTokenMetrics ? (
         <>
+          <span>{elapsed != null ? formatElapsed(elapsed) : '0.0s'}</span>
           <span aria-hidden>·</span>
-          <span className="run-status-rate">{rate}</span>
+          <span>{t('statusBar.tokens', { tokens: formatTokenCount(generated) })}</span>
+          {rate ? (
+            <>
+              <span aria-hidden>·</span>
+              <span className="run-status-rate">{rate}</span>
+            </>
+          ) : null}
+          <span aria-hidden>·</span>
         </>
       ) : null}
-      <span aria-hidden>·</span>
-      <span className="run-status-state">{liveState(snap, appearance)}</span>
+      <span className="run-status-state">{stateLabel}</span>
     </div>
   );
 }
 
 /** Bottom-right overlay for the active session run. */
-export function LiveRunHud({ messages }: { messages: readonly ChatMessage[] }) {
+export function LiveRunHud({
+  messages,
+  showTokenMetrics = false,
+}: {
+  messages: readonly ChatMessage[];
+  /** Fullscreen keeps tok/s. A normal window only shows the activity word. */
+  showTokenMetrics?: boolean;
+}) {
   const sessionRunIds = useMemo(
     () => messages.map((message) => message.runId).filter((id): id is string => Boolean(id)),
     [messages],
   );
   const liveRun = useSessionActiveRun(sessionRunIds);
   if (!liveRun) return null;
-  return <RunStatusLine runId={liveRun.id} variant="hud" />;
+  return <RunStatusLine runId={liveRun.id} variant="hud" showTokenMetrics={showTokenMetrics} />;
 }

@@ -1,16 +1,30 @@
 import { useEffect, useState } from 'react';
 import { hasTauriRuntime } from '../lib/runtime';
 
+export interface WindowChrome {
+  /** Native zoom or macOS full screen — both reserve the task rail. */
+  expanded: boolean;
+  /** macOS full screen only. A zoomed window stays false. */
+  fullscreen: boolean;
+}
+
 /** Native zoom and macOS full screen both reserve the task rail. */
 export function useExpandedWindow(): boolean {
-  const [expanded, setExpanded] = useState(false);
+  return useWindowChrome().expanded;
+}
+
+export function useWindowChrome(): WindowChrome {
+  const [chrome, setChrome] = useState<WindowChrome>({ expanded: false, fullscreen: false });
   useEffect(() => {
     let disposed = false;
     let revision = 0;
     let stateTimer: ReturnType<typeof setInterval> | undefined;
     let settleTimer: ReturnType<typeof setTimeout> | undefined;
     let unlisten: (() => void) | undefined;
-    const browserRefresh = () => setExpanded(Boolean(document.fullscreenElement));
+    const browserRefresh = () => {
+      const fullscreen = Boolean(document.fullscreenElement);
+      setChrome({ expanded: fullscreen, fullscreen });
+    };
     if (!hasTauriRuntime()) {
       browserRefresh();
       document.addEventListener('fullscreenchange', browserRefresh);
@@ -26,7 +40,9 @@ export function useExpandedWindow(): boolean {
               win.isMaximized(),
               win.isFullscreen(),
             ]);
-            if (!disposed && current === revision) setExpanded(maximized || fullscreen);
+            if (!disposed && current === revision) {
+              setChrome({ expanded: maximized || fullscreen, fullscreen });
+            }
           } catch {
             /* Keep the last confirmed native state. */
           }
@@ -55,5 +71,5 @@ export function useExpandedWindow(): boolean {
       unlisten?.();
     };
   }, []);
-  return expanded;
+  return chrome;
 }

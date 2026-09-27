@@ -1,4 +1,4 @@
-import { useExpandedWindow } from './hooks/useExpandedWindow';
+import { useWindowChrome } from './hooks/useExpandedWindow';
 import {
   useCallback,
   useEffect,
@@ -162,7 +162,7 @@ function readDevSettingsQuery(): { open: boolean; section: SettingsSection } {
 }
 
 function App() {
-  const expandedWindow = useExpandedWindow();
+  const { expanded: expandedWindow, fullscreen } = useWindowChrome();
   // The textarea lives inside Composer (uncontrolled ref). We hold a
   // ComposerHandle so starter cards / history clicks / drafts can seed it.
   const composerRef = useRef<ComposerHandle | null>(null);
@@ -2485,7 +2485,7 @@ function App() {
           contextUsageOpen={contextUsageOpen}
           onContextUsageOpenChange={setContextUsageOpen}
         />
-        <LiveRunHud messages={visibleMessages} />
+        <LiveRunHud messages={visibleMessages} showTokenMetrics={fullscreen} />
         <SubagentUiProvider messages={visibleMessages}>
           <section className="workbench">
             <div

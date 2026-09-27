@@ -10,6 +10,7 @@ import { installTauriAppMock, type TauriAppMock } from '../test/tauriAppMock';
 
 vi.mock('../hooks/useExpandedWindow', () => ({
   useExpandedWindow: () => true,
+  useWindowChrome: () => ({ expanded: true, fullscreen: false }),
 }));
 
 class ResizeObserverStub {
